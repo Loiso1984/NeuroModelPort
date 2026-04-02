@@ -1,0 +1,706 @@
+"""
+gui/main_window.py — Main Application Window v10.0
+
+Tabs: Parameters | Oscilloscope | Analytics | Topology | Guide
+Run modes: Standard | Monte-Carlo | Sweep | S-D Curve | Excit. Map | Stochastic
+"""
+import csv
+import os
+from pathlib import Path
+
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QTabWidget, QPushButton, QLabel, QComboBox, QStatusBar,
+    QScrollArea, QMessageBox, QApplication, QFileDialog,
+    QGroupBox, QToolBar, QProgressDialog
+)
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QRunnable, QThreadPool
+from PySide6.QtGui import QIcon, QAction
+
+from gui.locales import T
+from core.models import FullModelConfig
+from core.solver import NeuronSolver
+from core.presets import get_preset_names, apply_preset
+from core.advanced_sim import (SWEEP_PARAMS, run_sweep,
+                                 run_sd_curve, run_excitability_map,
+                                 run_euler_maruyama)
+from gui.widgets.form_generator import PydanticFormWidget
+from gui.plots import OscilloscopeWidget
+from gui.analytics import AnalyticsWidget
+from gui.topology import TopologyWidget
+from gui.axon_biophysics import AxonBiophysicsWidget
+from gui.dual_stimulation_widget import DualStimulationWidget
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  WORKER (background thread for long-running analyses)
+# ─────────────────────────────────────────────────────────────────────
+class WorkerSignals(QObject):
+    finished = Signal(object)
+    error    = Signal(str)
+    progress = Signal(int, int, str)
+
+
+class Worker(QRunnable):
+    def __init__(self, fn, *args, progress_fn=None, **kwargs):
+        super().__init__()
+        self.fn      = fn
+        self.args    = args
+        self.kwargs  = kwargs
+        self.signals = WorkerSignals()
+        self.progress_fn = progress_fn  # Callback to report progress
+        
+        # If progress callback requested, inject it into kwargs
+        if progress_fn is not None:
+            self.kwargs['progress_cb'] = self._progress_callback
+
+    def _progress_callback(self, i, n, val):
+        """Report progress to UI layer."""
+        if self.progress_fn:
+            self.progress_fn(i, n, val)
+
+    def run(self):
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+            self.signals.finished.emit(result)
+        except Exception as e:
+            self.signals.error.emit(str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  MAIN WINDOW
+# ─────────────────────────────────────────────────────────────────────
+class MainWindow(QMainWindow):
+
+    _STYLE = """
+        QMainWindow, QWidget { background: #1E1E2E; color: #CDD6F4; }
+        QGroupBox {
+            border: 1px solid #45475A;
+            border-radius: 6px;
+            margin-top: 8px;
+            font-weight: bold; color: #89B4FA;
+        }
+        QGroupBox::title { subcontrol-origin: margin; left: 8px; top: 2px; }
+        QTabWidget::pane  { border: 1px solid #45475A; border-radius: 4px; }
+        QTabBar::tab {
+            background: #313244; color: #CDD6F4;
+            padding: 6px 14px; border-radius: 4px 4px 0 0;
+            margin-right: 2px;
+        }
+        QTabBar::tab:selected { background: #89B4FA; color: #1E1E2E; font-weight: bold; }
+        QTabBar::tab:hover    { background: #585B70; }
+        QComboBox, QSpinBox, QDoubleSpinBox {
+            background: #313244; color: #CDD6F4;
+            border: 1px solid #585B70; border-radius: 4px; padding: 2px 6px;
+        }
+        QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border-color: #89B4FA; }
+        QCheckBox { color: #CDD6F4; spacing: 6px; }
+        QCheckBox::indicator { width: 16px; height: 16px; }
+        QScrollBar:vertical {
+            background: #313244; width: 10px; border-radius: 5px;
+        }
+        QScrollBar::handle:vertical { background: #585B70; border-radius: 5px; }
+        QLabel { color: #BAC2DE; }
+        QStatusBar { background: #181825; color: #A6ADC8; }
+        QTextEdit { background: #0D1117; color: #C9D1D9; }
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.resize(1400, 900)
+        self.setStyleSheet(self._STYLE)
+        self.config = FullModelConfig()
+        self._thread_pool = QThreadPool()
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        self._main_layout = QVBoxLayout(central)
+        self._main_layout.setContentsMargins(6, 6, 6, 6)
+        self._main_layout.setSpacing(6)
+
+        self._setup_top_bar()
+        self._setup_tabs()
+        self._setup_status_bar()
+        self.retranslate_ui()
+        self.load_preset("A: Squid Giant Axon (HH 1952)")
+
+    # ─────────────────────────────────────────────────────────────────
+    #  TOP BAR
+    # ─────────────────────────────────────────────────────────────────
+    def _setup_top_bar(self):
+        bar = QHBoxLayout()
+        bar.setSpacing(8)
+
+        # ── Run button ──────────────────────────────────────────────
+        self.btn_run = QPushButton("▶ RUN SIMULATION")
+        self.btn_run.setMinimumHeight(46)
+        self.btn_run.setStyleSheet("""
+            QPushButton {
+                font-weight: bold; font-size: 15px;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #40A060, stop:1 #2E7D32);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #4CAF70; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_run.clicked.connect(self.run_simulation)
+
+        # ── Stochastic button ────────────────────────────────────────
+        self.btn_stoch = QPushButton("🎲 STOCHASTIC")
+        self.btn_stoch.setMinimumHeight(46)
+        self.btn_stoch.setStyleSheet("""
+            QPushButton {
+                font-weight: bold; font-size: 13px;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #6050A0, stop:1 #40306A);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #7060B0; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_stoch.setToolTip("Run Euler-Maruyama stochastic simulation (Langevin gate noise)")
+        self.btn_stoch.clicked.connect(self.run_stochastic)
+
+        # ── Sweep button ─────────────────────────────────────────────
+        self.btn_sweep = QPushButton("↔ SWEEP")
+        self.btn_sweep.setMinimumHeight(46)
+        self.btn_sweep.setStyleSheet("""
+            QPushButton {
+                font-weight: bold; font-size: 13px;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #0070A0, stop:1 #004E70);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #0080B0; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_sweep.setToolTip("Run parametric sweep (configured in Analysis tab)")
+        self.btn_sweep.clicked.connect(self.run_sweep)
+
+        # ── SD / ExcMap buttons ───────────────────────────────────────
+        self.btn_sd = QPushButton("⏱ S-D")
+        self.btn_sd.setMinimumHeight(46)
+        self.btn_sd.setStyleSheet("""
+            QPushButton {
+                font-weight: bold;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #906030, stop:1 #603010);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #A07040; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_sd.setToolTip("Compute Strength-Duration curve (binary search)")
+        self.btn_sd.clicked.connect(self.run_sd_curve)
+
+        self.btn_excmap = QPushButton("🗺 EXCIT. MAP")
+        self.btn_excmap.setMinimumHeight(46)
+        self.btn_excmap.setStyleSheet("""
+            QPushButton {
+                font-weight: bold;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #208080, stop:1 #106060);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #30A0A0; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_excmap.setToolTip("Compute 2-D excitability map (I × duration)")
+        self.btn_excmap.clicked.connect(self.run_excmap)
+
+        # ── Export button ─────────────────────────────────────────────
+        self.btn_export = QPushButton("💾 Export CSV")
+        self.btn_export.setMinimumHeight(46)
+        self.btn_export.setEnabled(False)
+        self.btn_export.setStyleSheet("""
+            QPushButton {
+                background: #313244; color: #89DCEB; border-radius: 6px;
+                border: 1px solid #45475A;
+            }
+            QPushButton:hover  { background: #3E3F5E; }
+            QPushButton:disabled { color: #555568; }
+        """)
+        self.btn_export.clicked.connect(self.export_csv)
+
+        # ── Preset selector ───────────────────────────────────────────
+        self.lbl_preset = QLabel("Preset:")
+        self.combo_presets = QComboBox()
+        self.combo_presets.setMinimumWidth(260)
+        self.combo_presets.addItems(["— Select preset —"] + get_preset_names())
+        self.combo_presets.currentTextChanged.connect(self.load_preset)
+
+        # ── Language selector ─────────────────────────────────────────
+        self.lbl_lang = QLabel("Lang:")
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItems(["EN", "RU"])
+        self.combo_lang.setCurrentText("EN")
+        self.combo_lang.currentTextChanged.connect(self.change_language)
+
+        bar.addWidget(self.btn_run,    4)
+        bar.addWidget(self.btn_stoch,  2)
+        bar.addWidget(self.btn_sweep,  2)
+        bar.addWidget(self.btn_sd,     2)
+        bar.addWidget(self.btn_excmap, 2)
+        bar.addWidget(self.btn_export, 2)
+        bar.addStretch(1)
+        bar.addWidget(self.lbl_preset)
+        bar.addWidget(self.combo_presets, 3)
+        bar.addWidget(self.lbl_lang)
+        bar.addWidget(self.combo_lang)
+        self._main_layout.addLayout(bar)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  TABS
+    # ─────────────────────────────────────────────────────────────────
+    def _setup_tabs(self):
+        self.tabs = QTabWidget()
+
+        # ── Tab 0: Parameters ─────────────────────────────────────────
+        self.tab_params = QWidget()
+        self._build_params_tab()
+        self.tabs.addTab(self.tab_params,   "⚙ Parameters")
+
+        # ── Tab 1: Oscilloscope ───────────────────────────────────────
+        self.oscilloscope = OscilloscopeWidget()
+        self.tabs.addTab(self.oscilloscope, "📡 Oscilloscope")
+
+        # ── Tab 2: Analytics ──────────────────────────────────────────
+        self.analytics = AnalyticsWidget()
+        self.tabs.addTab(self.analytics,    "🔬 Analytics")
+
+        # ── Tab 3: Topology ───────────────────────────────────────────
+        self.topology = TopologyWidget()
+        self.tabs.addTab(self.topology,     "🧠 Topology")
+
+        # ── Tab 4: Axon Biophysics ───────────────────────────────────
+        self.axon_biophysics = AxonBiophysicsWidget()
+        self.tabs.addTab(self.axon_biophysics, "⚡ Axon Biophysics")
+
+        # ── Tab 5: Dual Stimulation ──────────────────────────────────
+        self.dual_stim_widget = DualStimulationWidget()
+        # Connect dual stim widget signals to sync with main config
+        self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
+        self.tabs.addTab(self.dual_stim_widget, "⚡⚡ Dual Stim")
+
+        # ── Tab 6: Guide ──────────────────────────────────────────────
+        from PySide6.QtWidgets import QTextBrowser
+        self.guide_browser = QTextBrowser()
+        self.guide_browser.setOpenExternalLinks(True)
+        self.guide_browser.setStyleSheet(
+            "background:#0D1117; color:#C9D1D9; font-size:13px; border:none;"
+        )
+        self.tabs.addTab(self.guide_browser, "📖 Guide")
+
+        self._main_layout.addWidget(self.tabs, stretch=1)
+
+    def _build_params_tab(self):
+        layout  = QVBoxLayout(self.tab_params)
+        scroll  = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+
+        content  = QWidget()
+        c_layout = QHBoxLayout(content)
+        c_layout.setSpacing(10)
+
+        # Left column
+        l_col = QVBoxLayout()
+        self.form_morph   = PydanticFormWidget(self.config.morphology,  "Morphology")
+        self.form_env     = PydanticFormWidget(self.config.env,          "Environment")
+        self.form_ana     = PydanticFormWidget(self.config.analysis,     "Analysis / Sweep / Map")
+        l_col.addWidget(self.form_morph)
+        l_col.addWidget(self.form_env)
+        l_col.addWidget(self.form_ana)
+        l_col.addStretch()
+
+        # Right column
+        r_col = QVBoxLayout()
+        self.form_chan    = PydanticFormWidget(self.config.channels,     "Ion Channels")
+        self.form_calcium = PydanticFormWidget(self.config.calcium,      "Calcium Dynamics")
+        self.form_stim    = PydanticFormWidget(self.config.stim,         "Stimulation")
+        self.form_stim_loc = PydanticFormWidget(self.config.stim_location, "Stimulus Location")
+        self.form_dfilter = PydanticFormWidget(self.config.dendritic_filter, "Dendritic Filter")
+        r_col.addWidget(self.form_chan)
+        r_col.addWidget(self.form_calcium)
+        r_col.addWidget(self.form_stim)
+        r_col.addWidget(self.form_stim_loc)
+        r_col.addWidget(self.form_dfilter)
+        r_col.addStretch()
+
+        c_layout.addLayout(l_col)
+        c_layout.addLayout(r_col)
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  STATUS BAR
+    # ─────────────────────────────────────────────────────────────────
+    def _setup_status_bar(self):
+        self._sb = QStatusBar()
+        self.setStatusBar(self._sb)
+
+    def _status(self, msg: str):
+        self._sb.showMessage(msg)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  PRESET & LANGUAGE
+    # ─────────────────────────────────────────────────────────────────
+    def load_preset(self, name: str):
+        if "—" in name or "Select" in name:
+            return
+        apply_preset(self.config, name)
+        self._refresh_all_forms()
+        # Reset dual stim when loading new preset
+        self.dual_stim_widget.load_default_preset()
+        self.topology.draw_neuron(self.config)
+        self._status(f"Preset applied: {name}")
+
+    def _refresh_all_forms(self):
+        for form in (self.form_morph, self.form_env, self.form_chan,
+                     self.form_calcium, self.form_stim, self.form_stim_loc,
+                     self.form_dfilter, self.form_ana):
+            form.refresh()
+
+    def change_language(self, lang: str):
+        T.set_language(lang)
+        self.retranslate_ui()
+
+    def retranslate_ui(self):
+        self.setWindowTitle(T.tr('app_title'))
+        self.btn_run.setText(T.tr('btn_run'))
+        self.lbl_preset.setText(T.tr('preset_label'))
+        self.lbl_lang.setText(T.tr('lbl_language'))
+        self._status(T.tr('status_ready'))
+        # Update guide text
+        self.guide_browser.setHtml(_GUIDE_HTML)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  SIMULATION HELPERS
+    # ─────────────────────────────────────────────────────────────────
+    def _lock_ui(self, busy: bool):
+        for btn in (self.btn_run, self.btn_stoch, self.btn_sweep,
+                    self.btn_sd, self.btn_excmap):
+            btn.setEnabled(not busy)
+
+    def _on_sim_error(self, msg: str):
+        self._lock_ui(False)
+        QMessageBox.critical(self, "Simulation Error", msg)
+        self._status("Error.")
+
+    def _report_progress(self, i: int, n: int, val):
+        """Update status bar with progress from long operations."""
+        pct = int(100 * i / max(1, n))
+        self._status(f"Progress: {pct}% ({i}/{n}) — Value: {val:.3g}")
+        QApplication.processEvents()
+
+    # ─────────────────────────────────────────────────────────────────
+    #  1. STANDARD RUN
+    # ─────────────────────────────────────────────────────────────────
+    def run_simulation(self):
+        self._lock_ui(True)
+        self._status(T.tr('status_computing'))
+        QApplication.processEvents()
+
+        try:
+            # Sync dual stim config from widget to main config
+            if self.dual_stim_widget.config.enabled:
+                self.config.dual_stimulation = self.dual_stim_widget.get_config()
+            else:
+                self.config.dual_stimulation = None
+            
+            solver = NeuronSolver(self.config)
+
+            if self.config.analysis.run_mc:
+                self._status(f"Monte-Carlo ({self.config.analysis.mc_trials} trials)…")
+                QApplication.processEvents()
+                results = solver.run_monte_carlo()
+                self.oscilloscope.update_plots_mc(results)
+                self._status(f"MC done — {len(results)} trials.")
+            else:
+                res = solver.run_single()
+
+                self._last_result = res
+                self.oscilloscope.update_plots(res)
+                self.analytics.update_analytics(res)
+                dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
+                self.topology.draw_neuron(self.config, dual_config=dual_cfg)
+                self.axon_biophysics.plot_axon_data(res, self.config)
+                self.btn_export.setEnabled(True)
+                spike_n = len(res.t)
+                self._status(
+                    f"Done — {res.n_comp} compartments, "
+                    f"ATP ≈ {res.atp_estimate:.3e} nmol/cm²"
+                )
+
+            if self.config.analysis.run_bifurcation:
+                bif = solver.run_bifurcation()
+                self.analytics.update_bifurcation(bif, self.config.analysis.bif_param)
+
+            self.tabs.setCurrentIndex(1)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Simulation Error", str(e))
+            self._status("Error — check parameters.")
+        finally:
+            self._lock_ui(False)
+
+    def _on_dual_stim_config_changed(self):
+        """Handle dual stimulation config changes from widget."""
+        # Config will be synced in run_simulation() when user clicks Run button
+        # For now just update status
+        if self.dual_stim_widget.config.enabled:
+            self._status(f"Dual stim: {self.dual_stim_widget.config.primary_location} + {self.dual_stim_widget.config.secondary_location}")
+        else:
+            self._status("Dual stimulation disabled")
+
+    # ─────────────────────────────────────────────────────────────────
+    #  2. STOCHASTIC (Euler-Maruyama)
+    # ─────────────────────────────────────────────────────────────────
+    def run_stochastic(self):
+        self._lock_ui(True)
+        self._status("Stochastic simulation (Euler-Maruyama)…")
+        QApplication.processEvents()
+
+        # Sync dual stim config from widget to main config
+        if self.dual_stim_widget.config.enabled:
+            self.config.dual_stimulation = self.dual_stim_widget.get_config()
+        else:
+            self.config.dual_stimulation = None
+
+        def _do():
+            return run_euler_maruyama(self.config)
+
+        w = Worker(_do)
+        w.signals.finished.connect(self._on_stoch_done)
+        w.signals.error.connect(self._on_sim_error)
+        self._thread_pool.start(w)
+
+    def _on_stoch_done(self, res):
+        self._last_result = res
+        self.oscilloscope.update_plots(res)
+        self.analytics.update_analytics(res)
+        dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
+        self.topology.draw_neuron(self.config, dual_config=dual_cfg)
+        self.axon_biophysics.plot_axon_data(res, self.config)
+        self.btn_export.setEnabled(True)
+        self._lock_ui(False)
+        self._status("Stochastic run complete.")
+        self.tabs.setCurrentIndex(1)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  3. SWEEP
+    # ─────────────────────────────────────────────────────────────────
+    def run_sweep(self):
+        ana = self.config.analysis
+        if not hasattr(ana, 'sweep_param') or not ana.sweep_param:
+            QMessageBox.warning(self, "Sweep",
+                                "Set sweep_param in the Analysis section first.")
+            return
+
+        import numpy as np
+        param_vals = np.linspace(ana.sweep_min, ana.sweep_max, ana.sweep_steps)
+
+        self._lock_ui(True)
+        self._status(f"Sweep: {ana.sweep_param}  [{ana.sweep_min}…{ana.sweep_max}]  "
+                     f"{ana.sweep_steps} steps…")
+        QApplication.processEvents()
+
+        def _do():
+            return run_sweep(self.config, ana.sweep_param, param_vals)
+
+        w = Worker(_do)
+        w.signals.finished.connect(
+            lambda res: self._on_sweep_done(res, ana.sweep_param)
+        )
+        w.signals.error.connect(self._on_sim_error)
+        self._thread_pool.start(w)
+
+    def _on_sweep_done(self, results, param_name):
+        self.analytics.update_sweep(results, param_name)
+        self._lock_ui(False)
+        self._status(f"Sweep complete — {len(results)} steps.")
+        self.tabs.setCurrentIndex(2)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  4. S-D CURVE
+    # ─────────────────────────────────────────────────────────────────
+    def run_sd_curve(self):
+        self._lock_ui(True)
+        self._status("Computing Strength-Duration curve (binary search)…")
+        QApplication.processEvents()
+
+        def _do():
+            return run_sd_curve(self.config)
+
+        w = Worker(_do, progress_fn=self._report_progress)
+        w.signals.finished.connect(self._on_sd_done)
+        w.signals.error.connect(self._on_sim_error)
+        self._thread_pool.start(w)
+
+    def _on_sd_done(self, sd):
+        rh = sd['rheobase']
+        tc = sd['chronaxie']
+        self.analytics.update_sd_curve(sd)
+        self._lock_ui(False)
+        self._status(
+            f"S-D done — Rheobase={rh:.2f} µA/cm²  "
+            f"Chronaxie={'—' if tc != tc else f'{tc:.2f} ms'}"
+        )
+        self.tabs.setCurrentIndex(2)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  5. EXCITABILITY MAP
+    # ─────────────────────────────────────────────────────────────────
+    def run_excmap(self):
+        ana = self.config.analysis
+        total = ana.excmap_NI * ana.excmap_ND
+        self._lock_ui(True)
+        self._status(f"Excitability map {ana.excmap_NI}×{ana.excmap_ND} = {total} runs…")
+        QApplication.processEvents()
+
+        def _do():
+            return run_excitability_map(self.config)
+
+        w = Worker(_do, progress_fn=self._report_progress)
+        w.signals.finished.connect(self._on_excmap_done)
+        w.signals.error.connect(self._on_sim_error)
+        self._thread_pool.start(w)
+
+    def _on_excmap_done(self, exc):
+        self.analytics.update_excmap(exc)
+        self._lock_ui(False)
+        self._status("Excitability map complete.")
+        self.tabs.setCurrentIndex(2)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  EXPORT CSV
+    # ─────────────────────────────────────────────────────────────────
+    def export_csv(self):
+        if not hasattr(self, '_last_result'):
+            return
+        res = self._last_result
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export CSV", "neuro_result.csv",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if not path:
+            return
+
+        try:
+            import csv as _csv
+            with open(path, 'w', newline='') as f:
+                writer = _csv.writer(f)
+                # Header
+                header = ['t_ms', 'V_soma_mV']
+                if res.n_comp > 1:
+                    header += ['V_AIS_mV', 'V_terminal_mV']
+                header += [f'I_{k}_uA_cm2' for k in res.currents]
+                if res.ca_i is not None:
+                    header.append('Ca_i_mM')
+
+                # Gate names
+                from core.analysis import extract_gate_traces
+                gates = extract_gate_traces(res)
+                header += [f'gate_{k}' for k in gates]
+                writer.writerow(header)
+
+                for i, t in enumerate(res.t):
+                    row = [f"{t:.4f}", f"{res.v_soma[i]:.4f}"]
+                    if res.n_comp > 1:
+                        row.append(f"{res.v_all[1, i]:.4f}")
+                        row.append(f"{res.v_all[-1, i]:.4f}")
+                    for curr in res.currents.values():
+                        row.append(f"{curr[i]:.6f}")
+                    if res.ca_i is not None:
+                        row.append(f"{res.ca_i[0, i]:.8f}")
+                    for gv in gates.values():
+                        row.append(f"{gv[i]:.6f}")
+                    writer.writerow(row)
+
+            self._status(f"Exported: {path}")
+            QMessageBox.information(self, "Export", f"Saved to:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  GUIDE HTML
+# ─────────────────────────────────────────────────────────────────────
+_GUIDE_HTML = """
+<html><body style="background:#0D1117; color:#C9D1D9; font-family:Segoe UI,sans-serif; padding:20px;">
+
+<h1 style="color:#89B4FA;">🧠 Hodgkin-Huxley Neuron Simulator v10.0</h1>
+<p>A research-grade biophysical simulator based on the Hodgkin-Huxley (1952) formalism,
+extended with multi-compartment morphology, optional ion channels, and advanced analysis tools.</p>
+
+<h2 style="color:#A6E3A1;">▶ Quick Start</h2>
+<ol>
+  <li>Select a <b>Preset</b> from the dropdown (e.g. <i>Squid Giant Axon</i>).</li>
+  <li>Adjust parameters in the <b>Parameters</b> tab if needed.</li>
+  <li>Click <b>▶ RUN SIMULATION</b> — results appear in Oscilloscope and Analytics.</li>
+  <li>Explore the Analytics tabs (Passport, Gates, Equilibrium, Phase Plane, Kymograph, Energy…)</li>
+</ol>
+
+<h2 style="color:#A6E3A1;">🔬 Run Modes</h2>
+<table style="border-collapse:collapse; width:100%;">
+<tr style="background:#1E3A5F;">
+  <th style="padding:6px; text-align:left;">Button</th>
+  <th style="padding:6px; text-align:left;">What it does</th>
+</tr>
+<tr><td style="padding:4px;"><b>▶ RUN</b></td>
+    <td>Standard deterministic simulation (BDF stiff ODE solver)</td></tr>
+<tr style="background:#1A1A2E;"><td style="padding:4px;"><b>🎲 STOCHASTIC</b></td>
+    <td>Euler-Maruyama integrator with Langevin gate noise (Fox &amp; Lu 1994).
+        Enable via <i>stoch_gating</i> flag or use <i>noise_sigma</i>.</td></tr>
+<tr><td style="padding:4px;"><b>↔ SWEEP</b></td>
+    <td>Parametric sweep. Set <i>sweep_param</i>, <i>sweep_min/max/steps</i>
+        in Analysis section. Produces f-I curves and voltage traces.</td></tr>
+<tr style="background:#1A1A2E;"><td style="padding:4px;"><b>⏱ S-D</b></td>
+    <td>Strength-Duration curve. Binary search for threshold at 13 durations.
+        Reports Rheobase (I at infinite duration) and Chronaxie (t at 2×I_rh).</td></tr>
+<tr><td style="padding:4px;"><b>🗺 EXCIT. MAP</b></td>
+    <td>2-D excitability map: spike count as function of (I_ext × pulse_dur).
+        Set <i>excmap_*</i> parameters in Analysis section.</td></tr>
+</table>
+
+<h2 style="color:#A6E3A1;">⚙ Ion Channels</h2>
+<ul>
+  <li><b>Na / K / Leak</b> — classic Hodgkin-Huxley (1952) channels, always active.</li>
+  <li><b>Ih</b> — HCN pacemaker current (Destexhe 1993). Causes rhythmic firing.</li>
+  <li><b>ICa</b> — L-type calcium (Huguenard 1992). Enables plateau potentials.</li>
+  <li><b>IA</b> — A-current, transient K⁺ (Connor-Stevens 1971). Delays first spike.</li>
+  <li><b>SK</b> — Ca²⁺-activated K⁺ (NEW). Causes spike-frequency adaptation.</li>
+</ul>
+
+<h2 style="color:#A6E3A1;">🧬 Neuron Passport (Analytics → Passport)</h2>
+<p>After each simulation, the Passport tab shows:</p>
+<ul>
+  <li>Passive: τ_m, R_in, λ (space constant)</li>
+  <li>Spike: threshold, peak, AHP, halfwidth, dV/dt rate</li>
+  <li>Firing: f_initial, f_steady, Adaptation Index, cell type classification (FS/RS/IB/LTS)</li>
+  <li>Conduction velocity (multi-compartment mode)</li>
+  <li>Energy: cumulative charge Q per channel, ATP estimate</li>
+</ul>
+
+<h2 style="color:#A6E3A1;">🔄 Phase Plane</h2>
+<p>Shows the AP trajectory in V–n space plus nullclines (dV/dt=0 and dn/dt=0).
+Fixed points are where both nullclines intersect. Limit cycles = sustained firing.</p>
+
+<h2 style="color:#A6E3A1;">📐 Morphology</h2>
+<p>Multi-compartment cable model: Soma → AIS (high gNa density) → Trunk → Bifurcation → Branch 1/2.
+The Laplacian matrix couples adjacent compartments via axial conductance g_ax = d/(4·Ra·dx).</p>
+
+<h2 style="color:#A6E3A1;">💾 Export</h2>
+<p>After a run, click <b>💾 Export CSV</b> to save all traces (V, currents, gates, Ca) as a CSV file
+compatible with Excel, MATLAB, Python/pandas, etc.</p>
+
+<hr style="border-color:#45475A;">
+<p style="color:#585B70; font-size:11px;">
+HH Simulator v10.0 — Python/PySide6 port of Scilab HH v9.0 |
+Numba JIT kinetics | scipy.sparse Laplacian | BDF + Euler-Maruyama solvers
+</p>
+</body></html>
+"""

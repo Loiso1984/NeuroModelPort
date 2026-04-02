@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-04-01T18:13:33.939029",
+  "feature": "main",
+  "tests": {
+    "syntax": {
+      "status": "failed",
+      "files_checked": 119,
+      "syntax_errors": [
+        "c:\\NeuroModelPort\\_backups\\backup_20260401_181333\\tests\\utils\\validate_stimulus_location_routes.py: unterminated triple-quoted string literal (detected at line 406) (<unknown>, line 285)",
+        "c:\\NeuroModelPort\\tests\\utils\\validate_stimulus_location_routes.py: unterminated triple-quoted string literal (detected at line 406) (<unknown>, line 285)"
+      ]
+    },
+    "unit": {
+      "status": "failed",
+      "output": "",
+      "errors": "C:\\Python314\\python.exe: No module named pytest\n",
+      "returncode": 1
+    },
+    "presets": {
+      "status": "failed",
+      "presets_tested": 0,
+      "metrics": {},
+      "output": ""
+    },
+    "calcium": {
+      "status": "passed",
+      "tests": {
+        "test_calcium_nernst_stability": {
+          "status": "passed",
+          "message": "test_calcium_nernst_stability - not implemented yet"
+        },
+        "test_calcium_concentration_ranges": {
+          "status": "passed",
+          "message": "test_calcium_concentration_ranges - not implemented yet"
+        },
+        "test_calcium_current_balance": {
+          "status": "passed",
+          "message": "test_calcium_current_balance - not implemented yet"
+        },
+        "test_calcium_temperature_scaling": {
+          "status": "passed",
+          "message": "test_calcium_temperature_scaling - not implemented yet"
+        }
+      },
+      "message": "Calcium channel tests need implementation"
+    },
+    "ih_channels": {
+      "status": "passed",
+      "tests": {
+        "test_ih_activation_curve": {
+          "status": "passed",
+          "message": "test_ih_activation_curve - not implemented yet"
+        },
+        "test_ih_sag_potential": {
+          "status": "passed",
+          "message": "test_ih_sag_potential - not implemented yet"
+        },
+        "test_ih_temperature_sensitivity": {
+          "status": "passed",
+          "message": "test_ih_temperature_sensitivity - not implemented yet"
+        },
+        "test_ih_resting_stability": {
+          "status": "passed",
+          "message": "test_ih_resting_stability - not implemented yet"
+        }
+      },
+      "message": "HCN channel tests need implementation"
+    },
+    "ia_channels": {
+      "status": "passed",
+      "tests": {
+        "test_ia_inactivation_kinetics": {
+          "status": "passed",
+          "message": "test_ia_inactivation_kinetics - not implemented yet"
+        },
+        "test_ia_spike_delay_effect": {
+          "status": "passed",
+          "message": "test_ia_spike_delay_effect - not implemented yet"
+        },
+        "test_ia_adaptation_properties": {
+          "status": "passed",
+          "message": "test_ia_adaptation_properties - not implemented yet"
+        },
+        "test_ia_frequency_dependence": {
+          "status": "passed",
+          "message": "test_ia_frequency_dependence - not implemented yet"
+        }
+      },
+      "message": "A-channel tests need implementation"
+    },
+    "multichannel": {
+      "status": "passed",
+      "scenarios": {
+        "all_channels_enabled_stability": {
+          "status": "passed",
+          "message": "all_channels_enabled_stability - not implemented yet"
+        },
+        "calcium_ia_interaction": {
+          "status": "passed",
+          "message": "calcium_ia_interaction - not implemented yet"
+        },
+        "ih_calcium_resonance": {
+          "status": "passed",
+          "message": "ih_calcium_resonance - not implemented yet"
+        },
+        "temperature_extreme_conditions": {
+          "status": "passed",
+          "message": "temperature_extreme_conditions - not implemented yet"
+        }
+      },
+      "message": "Multi-channel stress tests need implementation"
+    },
+    "performance": {
+      "status": "passed",
+      "simulation_time_ms": 150.0,
+      "output": "============================================================\nTesting: Pyramidal L5 (Mainen 1996)\n============================================================\nSoma diameter: 20.00 um\ngNa_max: 56.0 mS/cm2\ngK_max: 6.0 mS/cm2\ngL: 0.02 mS/cm2\nIext: 6.0 uA/cm2\nStim type: const\n\nN_comp: 47\nSoma area: 1.26e-05 cm2\ngNa[0] (density): 56.00 mS/cm2\ngK[0] (density): 6.00 mS/cm2\ngL[0] (density): 0.020000 mS/cm2\nCm[0] (density): 0.750000 uF/cm2\n\nSimulation completed: 3000 timepoints (150.0 ms)\nV range: [-85.1, 46.1] mV\nV[soma, 0]: -65.00 mV\nV[soma, -1]: -47.67 mV\n\n[OK] SUCCESS: Generated 119 spike peaks above -20 mV\n"
+    },
+    "gui": {
+      "status": "passed",
+      "tests": {
+        "main_window_initialization": {
+          "status": "passed",
+          "message": "main_window_initialization - not implemented yet"
+        },
+        "parameter_validation": {
+          "status": "passed",
+          "message": "parameter_validation - not implemented yet"
+        },
+        "plot_rendering": {
+          "status": "passed",
+          "message": "plot_rendering - not implemented yet"
+        },
+        "language_switching": {
+          "status": "passed",
+          "message": "language_switching - not implemented yet"
+        }
+      },
+      "message": "GUI tests need implementation"
+    },
+    "analytics": {
+      "status": "passed",
+      "tests": {
+        "spike_detection_accuracy": {
+          "status": "passed",
+          "message": "spike_detection_accuracy - not implemented yet"
+        },
+        "neuron_passport_classification": {
+          "status": "passed",
+          "message": "neuron_passport_classification - not implemented yet"
+        },
+        "plot_data_integrity": {
+          "status": "passed",
+          "message": "plot_data_integrity - not implemented yet"
+        },
+        "export_functionality": {
+          "status": "passed",
+          "message": "export_functionality - not implemented yet"
+        }
+      },
+      "message": "Analytics tests need implementation"
+    }
+  },
+  "overall_status": "PARTIAL"
+}
