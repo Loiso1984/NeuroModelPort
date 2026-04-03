@@ -9,10 +9,16 @@ Test scenarios:
 """
 
 import numpy as np
+import sys
 from core.solver import NeuronSolver
 from core.models import FullModelConfig
 from core.dual_stimulation import DualStimulationConfig
 from core.presets import apply_preset
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def get_soma_frequency(t, v_soma, v_threshold=-30.0):

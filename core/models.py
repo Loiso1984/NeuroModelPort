@@ -56,7 +56,7 @@ class ChannelParams(BaseModel):
     E_Ca:       float = Field(default=120.0, description="Ca reversal potential (mV) [overridden by Nernst if dynamic Ca]")
 
     enable_IA: bool  = Field(default=False, description="Enable A-current (transient K⁺, Connor-Stevens)")
-    gA_max:    float = Field(default=10.0, description="Max A-current conductance (mS/cm²)")
+    gA_max:    float = Field(default=0.4, description="Max A-current conductance (mS/cm²)")  # Default 0.4, NOT 10.0 (was unphysiologically high)
     E_A:       float = Field(default=-77.0, description="A-current reversal potential (mV)")
 
     enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated K⁺, spike adaptation)")
@@ -220,6 +220,22 @@ class AnalysisParams(BaseModel):
     excmap_ND:    int   = Field(default=15,   ge=2, description="Excitability map: duration resolution")
 
 
+class PresetModeParams(BaseModel):
+    """Switchable physiology modes for selected presets."""
+    k_mode: Literal['activated', 'baseline'] = Field(
+        default='activated',
+        description="Thalamic relay mode: activated (high drive) or baseline (low drive)"
+    )
+    alzheimer_mode: Literal['progressive', 'terminal'] = Field(
+        default='progressive',
+        description="Alzheimer preset stage: progressive (early spikes then decay) or terminal"
+    )
+    hypoxia_mode: Literal['progressive', 'terminal'] = Field(
+        default='progressive',
+        description="Hypoxia preset stage: progressive (early spikes then decay) or terminal"
+    )
+
+
 class FullModelConfig(BaseModel):
     """Master configuration container v10.1 - with dendritic filtering support."""
     morphology: MorphologyParams = MorphologyParams()
@@ -231,6 +247,7 @@ class FullModelConfig(BaseModel):
     dendritic_filter: DendriticFilterParams = DendriticFilterParams()
     dual_stimulation: Optional[Any] = None  # Optional dual stimulation config (DualStimulationConfig or None)
     analysis:   AnalysisParams    = AnalysisParams()
+    preset_modes: PresetModeParams = PresetModeParams()
 
 
 # Rebuild FullModelConfig after importing DualStimulationConfig (optional)

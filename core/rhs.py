@@ -145,8 +145,14 @@ def rhs_multicompartment(
         i_ion += gih_v * r * (v - eih)
         
     if en_ica:
-        # Реверсия Ca: либо Нернст, либо константа
-        eca_eff = nernst_ca_ion(ca_i[0], ca_ext, t_kelvin) if dyn_ca else 120.0
+        # Реверсия Ca: по-компартментный Нернст при динамическом Ca,
+        # иначе фиксированный E_Ca.
+        if dyn_ca:
+            eca_eff = np.empty(n_comp)
+            for i in range(n_comp):
+                eca_eff[i] = nernst_ca_ion(ca_i[i], ca_ext, t_kelvin)
+        else:
+            eca_eff = np.full(n_comp, 120.0)
         i_ca_current = gca_v * (s**2) * u * (v - eca_eff)
         i_ion += i_ca_current
         # Для кальциевой динамики: кальций входит когда I_Ca < 0 (входящий ток)
@@ -264,13 +270,13 @@ def rhs_multicompartment(
         
     # Динамика концентрации кальция
     if dyn_ca:
-        # d[Ca]/dt = -B*I_Ca - ([Ca]-Ca_rest)/tau_Ca
+        # d[Ca]/dt = +B*I_Ca,influx - ([Ca]-Ca_rest)/tau_Ca
         # Упрощенная Numba-совместимая версия
         if i_ca_total.size == n_comp:
-            dca = -b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
+            dca = b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
         else:
             # Если i_ca_total скаляр, используем broadcasting
-            dca = -b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
+            dca = b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
         
         # Защита от отрицательной концентрации (Hard clamp)
         for i in range(n_comp):

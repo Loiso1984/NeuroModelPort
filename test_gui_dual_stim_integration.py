@@ -9,6 +9,11 @@ from core.solver import NeuronSolver
 from gui.dual_stimulation_widget import DualStimulationWidget
 from core.dual_stimulation import DualStimulationConfig
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 # Create QApplication required by PySide6
 app = QApplication(sys.argv)

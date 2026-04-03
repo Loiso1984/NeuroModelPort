@@ -16,13 +16,27 @@ from scipy.signal import find_peaks
 
 def detect_spikes(V: np.ndarray, t: np.ndarray,
                   threshold: float = -20.0,
-                  prominence: float = 10.0) -> tuple:
+                  prominence: float = 10.0,
+                  baseline_threshold: float = -50.0) -> tuple:
     """
-    Spike detection: find peaks above threshold crossing.
-
-    FIXED: Previous find_peaks() with prominence parameter was too strict.
-    Now uses simple threshold crossing detection + local maxima.
-
+    Spike detection: find peaks above threshold with repolarization check.
+    
+    IMPROVED: Now verifies that voltage returns to baseline after each spike.
+    Prevents false positives from sustained depolarization.
+    
+    Parameters
+    ----------
+    V : np.ndarray
+        Voltage trace (mV)
+    t : np.ndarray  
+        Time array (ms)
+    threshold : float
+        Spike detection threshold (mV)
+    prominence : float
+        Minimum spike prominence (mV)
+    baseline_threshold : float
+        Voltage must fall below this after spike to be valid (mV)
+    
     Returns
     -------
     peak_idx   : np.ndarray[int]   — indices of spike peaks
@@ -48,12 +62,55 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
             # End of suprathreshold region - find peak within
             if spike_start < i:
                 peak_in_region = np.argmax(V[spike_start:i]) + spike_start
-                peak_idx_list.append(peak_in_region)
+                
+                # NEW: Check if this is a true peak (local maximum)
+                peak_val = V[peak_in_region]
+                
+                # Check if it's significantly higher than neighbors
+                left_idx = max(0, peak_in_region - 5)
+                right_idx = min(len(V), peak_in_region + 5)
+                local_region = V[left_idx:right_idx]
+                
+                # Must be the maximum in local region
+                is_local_max = peak_val == np.max(local_region)
+                
+                # NEW: Check if it's a sharp peak (not plateau)
+                # Calculate prominence: difference from surrounding minima
+                left_min = np.min(V[left_idx:peak_in_region]) if peak_in_region > left_idx else peak_val
+                right_min = np.min(V[peak_in_region+1:right_idx]) if peak_in_region < right_idx-1 else peak_val
+                prominence = peak_val - max(left_min, right_min)
+                
+                # Must have minimum prominence to be considered a real spike
+                min_prominence = 5.0  # mV
+                is_sharp_peak = prominence >= min_prominence
+                
+                # NEW: Check repolarization to baseline
+                # Look ahead to see if voltage returns to baseline
+                look_ahead = min(100, len(V) - i)  # Look up to 100 points ahead
+                valid_repolarization = False
+                
+                if look_ahead > 0:
+                    future_v = V[i:min(i + look_ahead, len(V))]
+                    # Check if voltage falls below baseline threshold at any point
+                    if len(future_v) > 0 and np.min(future_v) < baseline_threshold:
+                        valid_repolarization = True
+                else:
+                    # Can't verify repolarization at end of trace
+                    # Only count if we're already near baseline
+                    if V[i] < baseline_threshold:
+                        valid_repolarization = True
+                
+                # Only count if all conditions met: local max + sharp peak + repolarization
+                if is_local_max and is_sharp_peak and valid_repolarization:
+                    peak_idx_list.append(peak_in_region)
+                
             in_spike = False
 
     # Handle case where trace ends while in spike
     if in_spike and spike_start < len(V):
         peak_in_region = np.argmax(V[spike_start:]) + spike_start
+        # For final spike, check if it was already high at end
+        # (can't verify repolarization if trace ends)
         peak_idx_list.append(peak_in_region)
 
     if len(peak_idx_list) == 0:

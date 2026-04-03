@@ -82,25 +82,26 @@ def bu_Ca(V):
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def aa_IA(V):
-    dV = 13.1 - V
+    """IA activation alpha - Connor-Stevens 1971"""
+    dV = V - 20.0  # Shift for V_½ ~ -40 mV
     if abs(dV) < 1e-7:
         return 0.2
-    return 0.02 * dV / (np.exp(dV / 10.0) - 1.0)
+    return 0.02 * dV / (1.0 - np.exp(-dV / 10.0))
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def ba_IA(V):
-    dV = V - 40.1
-    if abs(dV) < 1e-7:
-        return 0.175
-    return 0.0175 * dV / (np.exp(dV / 10.0) - 1.0)
+    """IA activation beta - Connor-Stevens 1971 kinetics"""
+    return 0.0175 * np.exp(-(V + 65.0) / 20.0)
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def ab_IA(V):
-    return 0.0016 * np.exp(-(V + 1.1) / 18.0)
+    """IA inactivation alpha - Connor-Stevens 1971"""
+    return 0.0016 * np.exp(-(V + 50.0) / 18.0)  # V_½ ~ -60 mV
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def bb_IA(V):
-    return 0.05 / (1.0 + np.exp((10.1 - V) / 5.0))
+    """IA inactivation beta - Connor-Stevens 1971"""
+    return 0.05 / (1.0 + np.exp(-(V + 50.0) / 5.0))  # V_½ ~ -60 mV
 
 # =====================================================================
 # НОВЫЙ КАНАЛ: ISK - Ca2+-зависимый K+ ток (Спайковая адаптация) | NEW CHANNEL: ISK - Ca2+-dependent K+ current (Spike adaptation)

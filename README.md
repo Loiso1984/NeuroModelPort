@@ -37,6 +37,7 @@ NeuroModelPort is a scientifically accurate single-neuron simulation framework b
 - **[📚 Bilingual Documentation](DOCUMENTATION_BILINGUAL.md)** - Complete guide (RU/EN)
 - **[📋 Documentation Index](DOCUMENTATION_INDEX.md)** - Project structure and guides
 - **[🛠️ Bilingual Development Guide](BILINGUAL_DEVELOPMENT_GUIDE.md)** - For developers
+- **[⚡ Ion Channels Reference](ION_CHANNELS_REFERENCE.md)** - Channel physiology & parameters
 
 ### **Validated Neuron Models (4 Core Types)**
 

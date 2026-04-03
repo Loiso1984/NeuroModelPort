@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
         self.setStyleSheet(self._STYLE)
         self.config = FullModelConfig()
+        self._current_preset_name = ""
         self._thread_pool = QThreadPool()
 
         central = QWidget()
@@ -309,9 +310,15 @@ class MainWindow(QMainWindow):
         l_col = QVBoxLayout()
         self.form_morph   = PydanticFormWidget(self.config.morphology,  "Morphology")
         self.form_env     = PydanticFormWidget(self.config.env,          "Environment")
+        self.form_preset_modes = PydanticFormWidget(
+            self.config.preset_modes,
+            "Preset Modes",
+            on_change=self._on_preset_mode_changed
+        )
         self.form_ana     = PydanticFormWidget(self.config.analysis,     "Analysis / Sweep / Map")
         l_col.addWidget(self.form_morph)
         l_col.addWidget(self.form_env)
+        l_col.addWidget(self.form_preset_modes)
         l_col.addWidget(self.form_ana)
         l_col.addStretch()
 
@@ -350,6 +357,7 @@ class MainWindow(QMainWindow):
     def load_preset(self, name: str):
         if "—" in name or "Select" in name:
             return
+        self._current_preset_name = name
         apply_preset(self.config, name)
         self._refresh_all_forms()
         # Reset dual stim when loading new preset
@@ -360,8 +368,17 @@ class MainWindow(QMainWindow):
     def _refresh_all_forms(self):
         for form in (self.form_morph, self.form_env, self.form_chan,
                      self.form_calcium, self.form_stim, self.form_stim_loc,
-                     self.form_dfilter, self.form_ana):
+                     self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
+
+    def _on_preset_mode_changed(self, _field_name: str, _value):
+        """Reapply active preset when user changes a mode selector."""
+        if not self._current_preset_name:
+            return
+        apply_preset(self.config, self._current_preset_name)
+        self._refresh_all_forms()
+        self.topology.draw_neuron(self.config)
+        self._status(f"Preset mode updated: {self._current_preset_name}")
 
     def change_language(self, lang: str):
         T.set_language(lang)

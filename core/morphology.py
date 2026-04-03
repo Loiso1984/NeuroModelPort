@@ -57,15 +57,26 @@ class MorphologyBuilder:
                 areas[k] = np.pi * mc.d_b2 * mc.dx
 
         # 2. Векторы проводимостей (с AIS-множителями) в плотности [мСм/см²] | 2. Conductance vectors (with AIS multipliers) in density [mS/cm²]
-        gNa_v = np.full(N_comp, cc.gNa_max)
-        gK_v  = np.full(N_comp, cc.gK_max)
-        gL_v  = np.full(N_comp, cc.gL)
-        Cm_v  = np.full(N_comp, cc.Cm)
+        gNa_v = np.full(N_comp, cc.gNa_max, dtype=np.float64)
+        gK_v  = np.full(N_comp, cc.gK_max, dtype=np.float64)
+        gL_v  = np.full(N_comp, cc.gL, dtype=np.float64)
         
-        gIh_v = np.full(N_comp, cc.gIh_max if cc.enable_Ih else 0.0)
-        gCa_v = np.full(N_comp, cc.gCa_max if cc.enable_ICa else 0.0)
-        gA_v  = np.full(N_comp, cc.gA_max if cc.enable_IA else 0.0)
-        gSK_v = np.full(N_comp, cc.gSK_max if cc.enable_SK else 0.0)
+        gIh_v = np.zeros(N_comp, dtype=np.float64)
+        gCa_v = np.zeros(N_comp, dtype=np.float64)
+        gA_v  = np.zeros(N_comp, dtype=np.float64)
+        gSK_v = np.zeros(N_comp, dtype=np.float64)
+        
+        if cc.enable_Ih:
+            gIh_v.fill(cc.gIh_max)
+        if cc.enable_ICa:
+            gCa_v.fill(cc.gCa_max)
+        if cc.enable_IA:
+            gA_v.fill(cc.gA_max)
+        if cc.enable_SK:
+            gSK_v.fill(cc.gSK_max)
+        
+        # Membrane capacitance [µF/cm²]
+        Cm_v = np.full(N_comp, cc.Cm, dtype=np.float64)
         
         # Apply AIS multipliers for all channels (matches Scilab v9.0 behaviour)
         if not mc.single_comp and mc.N_ais > 0:

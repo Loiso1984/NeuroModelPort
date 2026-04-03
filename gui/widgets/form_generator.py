@@ -8,9 +8,10 @@ from pydantic import BaseModel
 
 
 class PydanticFormWidget(QWidget):
-    def __init__(self, pydantic_instance: BaseModel, title: str = "", parent=None):
+    def __init__(self, pydantic_instance: BaseModel, title: str = "", parent=None, on_change=None):
         super().__init__(parent)
         self.instance = pydantic_instance
+        self.on_change = on_change
         self.widgets_map = {}
 
         layout = QVBoxLayout(self)
@@ -29,12 +30,12 @@ class PydanticFormWidget(QWidget):
             if field_type is bool:
                 w = QCheckBox()
                 w.setChecked(val)
-                w.toggled.connect(lambda v, n=field_name: setattr(self.instance, n, v))
+                w.toggled.connect(lambda v, n=field_name: self._set_field(n, v))
             elif origin is Literal:
                 w = QComboBox()
                 w.addItems([str(c) for c in get_args(field_type)])
                 w.setCurrentText(str(val))
-                w.currentTextChanged.connect(lambda v, n=field_name: setattr(self.instance, n, v))
+                w.currentTextChanged.connect(lambda v, n=field_name: self._set_field(n, v))
             elif field_type in (int, float):
                 if field_type is int:
                     w = QSpinBox()
@@ -47,13 +48,18 @@ class PydanticFormWidget(QWidget):
                 w.setValue(val)
                 w.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
                 w.setKeyboardTracking(True)
-                w.valueChanged.connect(lambda v, n=field_name: setattr(self.instance, n, v))
+                w.valueChanged.connect(lambda v, n=field_name: self._set_field(n, v))
             else:
                 continue
 
             w.setToolTip(field_info.description or field_name)
             self.form_layout.addRow(field_name, w)
             self.widgets_map[field_name] = w
+
+    def _set_field(self, field_name, value):
+        setattr(self.instance, field_name, value)
+        if self.on_change is not None:
+            self.on_change(field_name, value)
 
     def refresh(self):
         """Sync widgets from model (needed after preset load)."""

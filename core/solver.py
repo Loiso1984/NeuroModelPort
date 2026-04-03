@@ -6,7 +6,7 @@ from concurrent.futures import ProcessPoolExecutor
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
-from core.rhs import rhs_multicompartment
+from core.rhs import rhs_multicompartment, F_CONST, R_GAS
 from core.kinetics import z_inf_SK
 
 
@@ -56,6 +56,39 @@ class NeuronSolver:
     def run_single(self, custom_config: FullModelConfig = None) -> SimulationResult:
         """Run a single deterministic simulation (BDF integrator)."""
         cfg = custom_config or self.config
+        
+        # ── Simulation complexity estimation ──
+        t_sim = cfg.stim.t_sim
+        dt_eval = cfg.stim.dt_eval
+        n_channels = sum([
+            1,  # Na
+            1,  # K
+            1,  # Leak
+            cfg.channels.enable_Ih,
+            cfg.channels.enable_ICa * 2,  # Ca has 2 gates
+            cfg.channels.enable_IA * 2,   # IA has 2 gates
+            cfg.channels.enable_SK
+        ])
+        n_comp = 1 if cfg.morphology.single_comp else (cfg.morphology.N_ais + cfg.morphology.N_trunk + cfg.morphology.N_b1 + cfg.morphology.N_b2 + 1)
+        
+        # Estimate time steps and complexity
+        n_steps = int(t_sim / dt_eval)
+        complexity = n_steps * n_comp * n_channels
+        
+        # Estimate simulation time (rough approximation based on typical performance)
+        # ~1000 steps/sec for simple models, ~100 steps/sec for complex multi-channel
+        est_time_sec = n_steps / (1000 if n_channels <= 3 else 100)
+        
+        # Warning for heavy simulations
+        if est_time_sec > 30:
+            print("WARNING: Heavy simulation detected:")
+            print(f"   Duration: {t_sim}ms, Steps: {n_steps:,}, Compartments: {n_comp}")
+            print(f"   Active channels: {n_channels} (Na+K+Leak{'+Ih' if cfg.channels.enable_Ih else ''}{'+ICa' if cfg.channels.enable_ICa else ''}{'+IA' if cfg.channels.enable_IA else ''}{'+SK' if cfg.channels.enable_SK else ''})")
+            print(f"   Estimated time: {est_time_sec:.1f}s")
+            print(f"   Starting simulation...")
+        
+        import time
+        t_start = time.time()
 
         morph  = MorphologyBuilder.build(cfg)
         n_comp = morph['N_comp']
@@ -137,6 +170,12 @@ class NeuronSolver:
         )
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
+        
+        # ── Optimization settings ──
+        # max_step prevents integrator from taking too large steps
+        # which can cause instability in stiff systems
+        max_step = min(cfg.stim.dt_eval * 5, 1.0)  # Max 1ms or 5x evaluation step
+        
         sol = solve_ivp(
             rhs_multicompartment,
             (0.0, cfg.stim.t_sim),
@@ -146,7 +185,14 @@ class NeuronSolver:
             t_eval=t_eval,
             rtol=1e-5,
             atol=1e-7,
+            max_step=max_step,
+            dense_output=False,  # Save memory
         )
+        
+        # Report actual simulation time
+        t_elapsed = time.time() - t_start
+        if est_time_sec > 30 or t_elapsed > 10:
+            print(f"   Completed in {t_elapsed:.1f}s")
 
         if not sol.success:
             raise RuntimeError(f"Integrator failed: {sol.message}")
@@ -179,7 +225,13 @@ class NeuronSolver:
         if cfg.channels.enable_ICa:
             s = y[cursor:cursor + n, :]
             u = y[cursor + n:cursor + 2*n, :]
-            res.currents['ICa'] = morph['gCa_v'][0] * (s[0, :] ** 2) * u[0, :] * (v[0, :] - 120.0)
+            if cfg.calcium.dynamic_Ca and res.ca_i is not None:
+                t_kelvin = cfg.env.T_celsius + 273.15
+                ca_soma = np.maximum(res.ca_i[0, :], 1e-9)
+                e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_soma) * 1000.0
+            else:
+                e_ca = 120.0
+            res.currents['ICa'] = morph['gCa_v'][0] * (s[0, :] ** 2) * u[0, :] * (v[0, :] - e_ca)
             cursor += 2 * n
 
         if cfg.channels.enable_IA:
