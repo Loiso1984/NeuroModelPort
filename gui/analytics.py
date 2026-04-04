@@ -595,9 +595,10 @@ class AnalyticsWidget(QTabWidget):
         self.fig_spike_mech.clear()
         self.fig_spike_mech.set_tight_layout({'pad': 2.5})
 
-        ax1 = self.fig_spike_mech.add_subplot(3, 1, 1)
-        ax2 = self.fig_spike_mech.add_subplot(3, 1, 2)
-        ax3 = self.fig_spike_mech.add_subplot(3, 1, 3)
+        ax1 = self.fig_spike_mech.add_subplot(4, 1, 1)
+        ax2 = self.fig_spike_mech.add_subplot(4, 1, 2)
+        ax3 = self.fig_spike_mech.add_subplot(4, 1, 3)
+        ax4 = self.fig_spike_mech.add_subplot(4, 1, 4)
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
@@ -633,6 +634,7 @@ class AnalyticsWidget(QTabWidget):
             )
             ax2.set_axis_off()
             ax3.set_axis_off()
+            ax4.set_axis_off()
             self.cvs_spike_mech.draw()
             return
 
@@ -669,6 +671,64 @@ class AnalyticsWidget(QTabWidget):
             ylabel="I_channel (uA/cm2)",
             show_legend=True,
         )
+
+        # Time-resolved channel/Ca activity to explain attenuation causes.
+        dt = float(np.mean(np.diff(t))) if len(t) > 1 else 0.1
+        smooth_pts = max(3, int(round(2.0 / max(dt, 1e-6))))
+        if smooth_pts % 2 == 0:
+            smooth_pts += 1
+
+        def _smooth(x: np.ndarray, n: int) -> np.ndarray:
+            if n <= 1:
+                return x
+            kernel = np.ones(n, dtype=float) / float(n)
+            return np.convolve(x, kernel, mode="same")
+
+        plotted = 0
+        for name in ("Na", "K", "ICa", "IA", "SK", "Ih", "Leak"):
+            if name not in traces:
+                continue
+            y_abs = np.abs(_smooth(traces[name], smooth_pts))
+            ymax = float(np.max(y_abs))
+            if ymax <= 1e-12:
+                continue
+            ax4.plot(
+                t,
+                y_abs / ymax,
+                lw=1.3,
+                alpha=0.9,
+                label=f"|I_{name}| norm",
+                color=CHAN_COLORS.get(name, "#666666"),
+            )
+            plotted += 1
+
+        if result.ca_i is not None and len(result.ca_i) > 0:
+            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
+            ca_s = _smooth(ca_nM, smooth_pts)
+            ca_rng = float(np.max(ca_s) - np.min(ca_s))
+            if ca_rng > 1e-12:
+                ca_norm = (ca_s - np.min(ca_s)) / ca_rng
+                ax4.plot(t, ca_norm, "--", lw=1.4, color="#D62728", label="Ca_i norm")
+                plotted += 1
+
+        if plotted == 0:
+            ax4.text(
+                0.02,
+                0.55,
+                "No channel activity traces available for time-resolved causality view.",
+                transform=ax4.transAxes,
+                fontsize=9.5,
+                color="#444444",
+            )
+            ax4.set_axis_off()
+        else:
+            _configure_ax_interactive(
+                ax4,
+                title="Time-Resolved Channel/Ca Activity (normalized, smoothed)",
+                xlabel="Time (ms)",
+                ylabel="Norm activity",
+                show_legend=True,
+            )
 
         # Heuristic explanation block
         peak_drop = float(peak_v[-1] - peak_v[0])

@@ -218,6 +218,16 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
      `unexpected keyword argument 'progress_cb'`,
    - dual-stim default reset policy tightened: preset loading now resets Dual Stim to disabled state,
    - added explicit dual-stim precedence behavior in UI/validation (Dual tab overrides primary stimulation fields when enabled),
+53. Analytics detail expansion for attenuation causality:
+   - `Spike Mechanism` tab upgraded with a time-resolved normalized activity panel for enabled ionic currents + `Ca_i`,
+   - per-spike diagnostics retained and now complemented by full-trace trend context for attenuation interpretation.
+54. Demyelination (`F`) sanity check rerun (quick deterministic pass):
+   - current branch still shows mostly preserved terminal propagation (`term/soma ~0.975`) with delayed conduction,
+   - interpreted as mild conduction impairment, not strong terminal block; stronger severity calibration remains open.
+55. Legacy Scilab (`C:\NeruroModelV9`) transfer candidates reaffirmed:
+   - explicit per-compartment spike report (soma/AIS/fork/terminal),
+   - dedicated Ca/E_Ca dynamics plots and current-balance overlays,
+   - topology readability annotations that can be reused in Python GUI evolution.
    - S-D and Excitability Map analyses now run with dual-stim disabled by design to avoid metric contamination,
    - preset-mode controls are now context-sensitive (`K/N/O` only for relevant presets).
 53. GUI structure/clarity pass (workflow-oriented):

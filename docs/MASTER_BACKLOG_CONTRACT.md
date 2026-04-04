@@ -91,6 +91,13 @@ Working interpretation:
 2. expose an interpretable explanation for spike attenuation/block tendency (e.g., Ca accumulation, SK/K increase, Na drive reduction),
 3. keep this as analysis-layer diagnostics (default non-invasive for core solver behavior).
 
+## Additional Exploratory Item 19
+
+19. Extended ion/channel dynamics on spike analytics graph:
+1. add a richer time-resolved panel (not only per-spike points) for each enabled ion current/channel activity,
+2. emphasize causality of spike attenuation and conduction weakening (e.g., Ca accumulation -> SK growth -> spike shrinkage/block),
+3. keep it behind analysis-layer controls and default-safe behavior.
+
 ## Integration Note for Item 16 (Lyapunov / LLE-FTLE)
 
 Use a practical Lyapunov-based stability module (not symbolic Lyapunov function search):

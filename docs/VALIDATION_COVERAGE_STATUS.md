@@ -40,6 +40,7 @@ Current status snapshot after latest branch-contour runs.
   - progress update: passport now includes Lyapunov/modulation blocks, channel-engagement/delay summaries,
     and a first hybrid rule+ML classifier baseline (prototype ML + confidence + source tag).
   - progress update: new Spike Mechanism analytics tab provides per-spike ion/Ca dynamics and attenuation-driver hypotheses.
+  - progress update: Spike Mechanism now also includes time-resolved normalized channel/Ca trends to explain attenuation causality.
 - `9` Topology/axon propagation visualization upgrades.
   - progress update: topology now includes compartment-index labeling and compact index map in info bar for better axonal targeting,
   - topology delay focus is now linked to oscilloscope delay-target selection (shared cross-tab context),
