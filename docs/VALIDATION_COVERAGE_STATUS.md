@@ -18,7 +18,8 @@ Current status snapshot after latest branch-contour runs.
 - GUI clarity hardening in progress:
   - fixed SD/Excitability worker callback crash path,
   - dual-stim now resets to disabled default on preset load and explicitly overrides primary stimulation fields only when enabled,
-  - preset mode selectors are context-scoped to relevant K/N/O presets.
+  - preset mode selectors are context-scoped to relevant K/N/O presets,
+  - setup/dual-stim/analysis tab order and setup grouping were reworked for clearer workflow.
 - `5` Error handling/logging/warnings: core layer implemented and tested; can be expanded with richer user-facing diagnostics.
 - K/N/O pathology UX/documentation guidance: mode switches + guide + preflight/status-mode warnings integrated; final bilingual polish still needed.
 

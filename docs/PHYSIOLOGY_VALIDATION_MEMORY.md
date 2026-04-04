@@ -113,3 +113,7 @@ Canonical verbatim backlog/rules source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - non-relevant mode flags must be explicitly shown as ignored for current preset.
 35. SD/Excitability methodological policy:
    - S-D curve and excitability map analyses should run with dual stimulation disabled to preserve interpretation of single-input excitability metrics.
+36. GUI workflow clarity policy:
+   - tabs should follow practical workflow order (setup first, then dual-stim controls, then run outputs/analysis),
+   - setup screen should continuously show parameter-priority hints (which control set currently has precedence),
+   - non-relevant pathology mode controls should be hidden to prevent accidental misuse.

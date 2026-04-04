@@ -220,6 +220,16 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - added explicit dual-stim precedence behavior in UI/validation (Dual tab overrides primary stimulation fields when enabled),
    - S-D and Excitability Map analyses now run with dual-stim disabled by design to avoid metric contamination,
    - preset-mode controls are now context-sensitive (`K/N/O` only for relevant presets).
+53. GUI structure/clarity pass (workflow-oriented):
+   - tab order relabeled by workflow steps:
+     `1) Setup -> 2) Dual Stim -> 3) Oscilloscope -> 4) Analytics -> 5) Topology -> 6) Axon Biophysics -> 7) Guide`,
+   - Parameters page regrouped into:
+     `Run Setup (Edit First)`, `Model Biophysics`, `Advanced Analysis Tools`,
+   - added persistent priority hint panel:
+     Dual Stim precedence + active mode interpretation in setup area,
+   - non-relevant `K/N/O` mode controls are hidden for non-target presets (not just disabled),
+   - Guide updated with explicit notes:
+     `F` is single-stage and Dual Stim overrides primary stimulation fields when enabled.
 
 ## Preset Mode Requirements
 
