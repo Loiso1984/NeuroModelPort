@@ -217,6 +217,23 @@ class MainWindow(QMainWindow):
         self.btn_excmap.setToolTip("Compute 2-D excitability map (I × duration)")
         self.btn_excmap.clicked.connect(self.run_excmap)
 
+        # ── Cancel button (hidden until computation starts) ──────────
+        self.btn_cancel = QPushButton("⛔ CANCEL")
+        self.btn_cancel.setMinimumHeight(46)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                font-weight: bold;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #CC3030, stop:1 #991818);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #FF4040; }
+        """)
+        self.btn_cancel.setToolTip("Cancel the running computation")
+        self.btn_cancel.clicked.connect(self._request_cancel)
+        self.btn_cancel.setVisible(False)
+        self._cancel_requested = False
+
         # ── Export button ─────────────────────────────────────────────
         self.btn_export = QPushButton("💾 Export CSV")
         self.btn_export_plot = QPushButton("Export Plot")
@@ -259,6 +276,7 @@ class MainWindow(QMainWindow):
         self.combo_lang.currentTextChanged.connect(self.change_language)
 
         bar.addWidget(self.btn_run,    4)
+        bar.addWidget(self.btn_cancel, 2)
         bar.addWidget(self.btn_stoch,  2)
         bar.addWidget(self.btn_sweep,  2)
         bar.addWidget(self.btn_sd,     2)
@@ -806,6 +824,15 @@ class MainWindow(QMainWindow):
         for btn in (self.btn_run, self.btn_stoch, self.btn_sweep,
                     self.btn_sd, self.btn_excmap):
             btn.setEnabled(not busy)
+        self.btn_cancel.setVisible(busy)
+        if not busy:
+            self._cancel_requested = False
+
+    def _request_cancel(self):
+        """User clicked Cancel — set flag for running workers to check."""
+        self._cancel_requested = True
+        self._status("Cancellation requested…")
+        self.btn_cancel.setEnabled(False)
 
     def _on_sim_error(self, msg: str):
         self._lock_ui(False)
@@ -849,24 +876,49 @@ class MainWindow(QMainWindow):
         self._status(T.tr('status_computing'))
         QApplication.processEvents()
 
-        try:
-            if not self._preflight_validate():
-                return
+        if not self._preflight_validate():
+            self._lock_ui(False)
+            return
 
-            # Sync dual stim config from widget to main config.
-            self._sync_dual_stim_into_config()
-            
+        # Sync dual stim config from widget to main config.
+        self._sync_dual_stim_into_config()
+
+        # Capture config snapshot and flags for the worker thread
+        run_mc = self.config.analysis.run_mc
+        run_bif = self.config.analysis.run_bifurcation
+        bif_param = self.config.analysis.bif_param
+        mc_trials = self.config.analysis.mc_trials
+
+        if run_mc:
+            self._status(f"Monte-Carlo ({mc_trials} trials)…")
+        QApplication.processEvents()
+
+        def _compute():
+            """Run solver in background thread (scipy/numba release GIL)."""
             solver = NeuronSolver(self.config)
-
-            if self.config.analysis.run_mc:
-                self._status(f"Monte-Carlo ({self.config.analysis.mc_trials} trials)…")
-                QApplication.processEvents()
-                results = solver.run_monte_carlo()
-                self.oscilloscope.update_plots_mc(results)
-                self._status(f"MC done — {len(results)} trials.")
+            result = {}
+            if run_mc:
+                result['mc_results'] = solver.run_monte_carlo()
             else:
-                res = solver.run_single()
+                result['single'] = solver.run_single()
+            if run_bif:
+                result['bif'] = solver.run_bifurcation()
+                result['bif_param'] = bif_param
+            return result
 
+        w = Worker(_compute)
+        w.signals.finished.connect(self._on_simulation_done)
+        w.signals.error.connect(self._on_sim_error)
+        self._thread_pool.start(w)
+
+    def _on_simulation_done(self, result: dict):
+        """Handle simulation results on the main thread (UI updates)."""
+        try:
+            if 'mc_results' in result:
+                self.oscilloscope.update_plots_mc(result['mc_results'])
+                self._status(f"MC done — {len(result['mc_results'])} trials.")
+            elif 'single' in result:
+                res = result['single']
                 self._last_result = res
                 self.oscilloscope.update_plots(res)
                 self.analytics.update_analytics(res)
@@ -880,18 +932,15 @@ class MainWindow(QMainWindow):
                 self.axon_biophysics.plot_axon_data(res, self.config)
                 self.btn_export_plot.setEnabled(True)
                 self.btn_export.setEnabled(True)
-                spike_n = len(res.t)
                 self._status(
                     f"Done — {res.n_comp} compartments, "
                     f"ATP ≈ {res.atp_estimate:.3e} nmol/cm²"
                 )
 
-            if self.config.analysis.run_bifurcation:
-                bif = solver.run_bifurcation()
-                self.analytics.update_bifurcation(bif, self.config.analysis.bif_param)
+            if 'bif' in result:
+                self.analytics.update_bifurcation(result['bif'], result['bif_param'])
 
             self.tabs.setCurrentWidget(self.oscilloscope)
-
         except Exception as e:
             QMessageBox.critical(self, "Simulation Error", str(e))
             self._status("Error — check parameters.")
