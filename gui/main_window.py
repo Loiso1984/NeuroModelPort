@@ -507,7 +507,15 @@ class MainWindow(QMainWindow):
 
     def _sync_stim_type_controls(self):
         """Show only stimulation parameters relevant for current stim_type."""
-        stype = str(getattr(self.config.stim, "stim_type", "const"))
+        dual_enabled = bool(
+            hasattr(self, "dual_stim_widget")
+            and bool(self.dual_stim_widget.config.enabled)
+        )
+        stype = (
+            str(getattr(self.dual_stim_widget.config, "primary_stim_type", "const"))
+            if dual_enabled
+            else str(getattr(self.config.stim, "stim_type", "const"))
+        )
         stim_fields = self.form_stim.widgets_map
         labels = self.form_stim.labels_map
 
@@ -517,7 +525,7 @@ class MainWindow(QMainWindow):
 
         show_pulse_start = stype in (alpha_like | synaptic_like | pulse_like)
         show_pulse_dur = stype in pulse_like
-        show_alpha_tau = stype in alpha_like
+        show_alpha_tau = stype in (alpha_like | synaptic_like)
 
         visibility = {
             "pulse_start": show_pulse_start,
@@ -537,6 +545,42 @@ class MainWindow(QMainWindow):
         d = float(self.config.morphology.d_soma)
         area = np.pi * d * d
         self.config.stim.Iext_absolute_nA = float(self.config.stim.Iext) * area * 1000.0
+
+    def _set_stim_form_value(self, field_name: str, value):
+        """Set stim-form widget value without emitting change callbacks."""
+        w = self.form_stim.widgets_map.get(field_name)
+        if w is None:
+            return
+        w.blockSignals(True)
+        try:
+            if isinstance(w, QComboBox):
+                w.setCurrentText(str(value))
+            else:
+                w.setValue(value)
+        finally:
+            w.blockSignals(False)
+
+    def _sync_primary_stim_preview_from_dual(self):
+        """
+        Mirror active dual-primary stimulus into disabled main stim controls.
+        This removes ambiguity about which parameters actually drive the solver.
+        """
+        if not hasattr(self, "dual_stim_widget"):
+            return
+        dc = self.dual_stim_widget.config
+        if not bool(getattr(dc, "enabled", False)):
+            return
+
+        self._set_stim_form_value("stim_type", dc.primary_stim_type)
+        self._set_stim_form_value("Iext", float(dc.primary_Iext))
+        self._set_stim_form_value("pulse_start", float(dc.primary_start))
+        self._set_stim_form_value("pulse_dur", float(dc.primary_duration))
+        self._set_stim_form_value("alpha_tau", float(dc.primary_alpha_tau))
+
+        d = float(self.config.morphology.d_soma)
+        area = np.pi * d * d
+        i_abs = float(dc.primary_Iext) * area * 1000.0
+        self._set_stim_form_value("Iext_absolute_nA", i_abs)
 
     def _on_morph_field_changed(self, field_name: str, _value):
         self.oscilloscope.sync_delay_controls_for_config(self.config)
@@ -621,6 +665,11 @@ class MainWindow(QMainWindow):
     def _sync_stim_controls_with_dual_mode(self):
         """Disable conflicting primary-stim controls when dual stimulation is enabled."""
         dual_enabled = bool(self.dual_stim_widget.config.enabled)
+        if dual_enabled:
+            self._sync_primary_stim_preview_from_dual()
+        else:
+            # Restore canonical values from config when dual mode is off.
+            self.form_stim.refresh()
         overridden_stim_fields = (
             "stim_type",
             "Iext",

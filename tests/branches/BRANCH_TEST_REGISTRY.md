@@ -18,6 +18,7 @@ This registry separates **active validation tests** from **legacy exploratory sc
 - `tests/branches/test_spike_mechanism_analytics_branch.py`
 - `tests/branches/test_delay_target_sync_branch.py`
 - `tests/branches/test_gui_jacobian_autoselect_branch.py`
+- `tests/branches/test_gui_stim_sync_branch.py`
 - `tests/branches/test_passport_ml_classification_branch.py`
 - `tests/branches/test_pathology_mode_sweep_branch.py`
 - `tests/branches/test_solver_validation_branch.py`

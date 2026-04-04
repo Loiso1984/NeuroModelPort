@@ -228,6 +228,14 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - explicit per-compartment spike report (soma/AIS/fork/terminal),
    - dedicated Ca/E_Ca dynamics plots and current-balance overlays,
    - topology readability annotations that can be reused in Python GUI evolution.
+56. GUI stimulation sync hardening (user-reported confusion lane):
+   - stimulation-parameter visibility now follows active stimulation source (main or Dual-primary),
+   - `alpha_tau` is now shown for synaptic stimulus types (`AMPA/NMDA/GABAA/GABAB/Kainate/Nicotinic`) to expose kinetics clearly,
+   - when Dual Stim is enabled, main Stimulation panel mirrors active Dual-primary parameters in disabled preview mode.
+57. Added dedicated GUI branch guard:
+   - new `tests/branches/test_gui_stim_sync_branch.py`,
+   - verifies `const/pulse/alpha/synaptic` visibility contract and Dual-primary preview sync,
+   - relevant branch checks rerun green (`gui_stim_sync`, `dual_stim`, progress-callback tests).
    - S-D and Excitability Map analyses now run with dual-stim disabled by design to avoid metric contamination,
    - preset-mode controls are now context-sensitive (`K/N/O` only for relevant presets).
 53. GUI structure/clarity pass (workflow-oriented):
