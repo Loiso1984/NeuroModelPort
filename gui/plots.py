@@ -90,6 +90,7 @@ class OscilloscopeWidget(QWidget):
         self._line_width_scale = 1.0
         self._grid_alpha = 0.2
         self._title_font_px = 13
+        self._presentation_mode = False
         self._delay_target_name = "Terminal"
         self._delay_custom_index = 1
         self._last_result = None
@@ -260,6 +261,12 @@ class OscilloscopeWidget(QWidget):
         vl2.addWidget(lbl_grid)
         vl2.addWidget(self._spin_grid_alpha)
 
+        self._cb_presentation = QCheckBox("Presentation Mode")
+        self._cb_presentation.setChecked(False)
+        self._cb_presentation.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        self._cb_presentation.stateChanged.connect(self._on_view_settings_changed)
+        vl2.addWidget(self._cb_presentation)
+
         self._cb_show_spike_markers = QCheckBox("Show spike markers")
         self._cb_show_spike_markers.setChecked(True)
         self._cb_show_spike_markers.setStyleSheet("color:#CDD6F4; font-size:11px;")
@@ -360,9 +367,18 @@ class OscilloscopeWidget(QWidget):
 
     def _on_view_settings_changed(self, *_):
         self._theme_name = self._combo_theme.currentText()
-        self._line_width_scale = float(self._spin_line_width.value())
-        self._title_font_px = int(self._spin_title_px.value())
-        self._grid_alpha = float(self._spin_grid_alpha.value())
+        line_scale_base = float(self._spin_line_width.value())
+        title_px_base = int(self._spin_title_px.value())
+        grid_alpha_base = float(self._spin_grid_alpha.value())
+        self._presentation_mode = bool(self._cb_presentation.isChecked())
+        if self._presentation_mode:
+            self._line_width_scale = line_scale_base * 1.35
+            self._title_font_px = title_px_base + 2
+            self._grid_alpha = min(0.6, grid_alpha_base + 0.08)
+        else:
+            self._line_width_scale = line_scale_base
+            self._title_font_px = title_px_base
+            self._grid_alpha = grid_alpha_base
         self._delay_target_name = self._combo_delay_target.currentText()
         self._delay_custom_index = int(self._spin_delay_comp.value())
         self._spin_delay_comp.setEnabled(

@@ -244,6 +244,19 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - Analytics now has a `Full Screen` action in tab corner,
    - opens a maximized analytics clone with replay of latest analysis data and preserved active tab index,
    - covered by new branch test `tests/branches/test_gui_fullscreen_analytics_branch.py`.
+60. Topology full-screen expansion implemented:
+   - Topology tab now has `Full Screen` action,
+   - opens a maximized topology clone with preserved delay-focus target and latest rendered morphology state,
+   - covered by new branch test `tests/branches/test_gui_fullscreen_topology_branch.py`.
+61. Topology readability overhaul completed (GUI-only lane):
+   - added topology view controls: `Labels`, `Indices`, `High Contrast`, `Line×`, `Font×`, `Reset View`,
+   - improved text readability via background-backed label rendering and scalable line/font presentation,
+   - fullscreen topology now preserves these readability settings in cloned window.
+62. Oscilloscope readability upgrade:
+   - added `Presentation Mode` that boosts line thickness/title size/grid visibility for demos and detailed review.
+63. Added GUI-only readability regression guard:
+   - new branch test `tests/branches/test_gui_readability_controls_branch.py`,
+   - validates topology readability controls and oscilloscope presentation-mode scaling behavior.
    - S-D and Excitability Map analyses now run with dual-stim disabled by design to avoid metric contamination,
    - preset-mode controls are now context-sensitive (`K/N/O` only for relevant presets).
 53. GUI structure/clarity pass (workflow-oriented):

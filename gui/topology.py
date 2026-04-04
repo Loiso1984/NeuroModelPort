@@ -14,7 +14,16 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QPushButton, QMainWindow
+from PySide6.QtWidgets import (
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QWidget,
+    QPushButton,
+    QMainWindow,
+    QCheckBox,
+    QDoubleSpinBox,
+)
 
 
 class TopologyWidget(QWidget):
@@ -24,10 +33,11 @@ class TopologyWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
 
         self._win = pg.GraphicsLayoutWidget()
         self._win.setBackground("#0D1117")
-        layout.addWidget(self._win)
+        layout.addWidget(self._win, stretch=1)
 
         self._plot = self._win.addPlot()
         self._plot.setAspectLocked(False)
@@ -38,7 +48,11 @@ class TopologyWidget(QWidget):
 
         self._info = QLabel("")
         self._info.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self._info.setStyleSheet("color:#A6E3A1; font-size:11px; padding:4px;")
+        self._info.setWordWrap(True)
+        self._info.setStyleSheet(
+            "color:#D9F99D; font-size:11px; padding:6px;"
+            "background:#0F1520; border:1px solid #334155; border-radius:6px;"
+        )
         layout.addWidget(self._info)
 
         self._delay_target_name = "Terminal"
@@ -46,11 +60,81 @@ class TopologyWidget(QWidget):
         self._last_config = None
         self._last_dual_config = None
         self._fullscreen_windows = []
+        self._show_labels = True
+        self._show_indices = True
+        self._high_contrast = False
+        self._line_scale = 1.0
+        self._font_scale = 1.0
+
+        controls = QHBoxLayout()
+        controls.setSpacing(6)
+
+        self._cb_labels = QCheckBox("Labels")
+        self._cb_labels.setChecked(True)
+        self._cb_labels.toggled.connect(self._on_view_controls_changed)
+        controls.addWidget(self._cb_labels)
+
+        self._cb_indices = QCheckBox("Indices")
+        self._cb_indices.setChecked(True)
+        self._cb_indices.toggled.connect(self._on_view_controls_changed)
+        controls.addWidget(self._cb_indices)
+
+        self._cb_contrast = QCheckBox("High Contrast")
+        self._cb_contrast.setChecked(False)
+        self._cb_contrast.toggled.connect(self._on_view_controls_changed)
+        controls.addWidget(self._cb_contrast)
+
+        self._spin_line = QDoubleSpinBox()
+        self._spin_line.setRange(0.8, 2.4)
+        self._spin_line.setSingleStep(0.1)
+        self._spin_line.setDecimals(1)
+        self._spin_line.setValue(1.0)
+        self._spin_line.setPrefix("Line×")
+        self._spin_line.valueChanged.connect(self._on_view_controls_changed)
+        controls.addWidget(self._spin_line)
+
+        self._spin_font = QDoubleSpinBox()
+        self._spin_font.setRange(0.8, 2.0)
+        self._spin_font.setSingleStep(0.1)
+        self._spin_font.setDecimals(1)
+        self._spin_font.setValue(1.0)
+        self._spin_font.setPrefix("Font×")
+        self._spin_font.valueChanged.connect(self._on_view_controls_changed)
+        controls.addWidget(self._spin_font)
+
+        self._btn_reset_view = QPushButton("Reset View")
+        self._btn_reset_view.clicked.connect(self._on_reset_view)
+        controls.addWidget(self._btn_reset_view)
 
         self._btn_fullscreen = QPushButton("Full Screen")
         self._btn_fullscreen.setToolTip("Open topology view in a maximized window")
         self._btn_fullscreen.clicked.connect(self.open_fullscreen)
-        layout.addWidget(self._btn_fullscreen)
+        controls.addWidget(self._btn_fullscreen)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+    def _on_reset_view(self):
+        self._plot.autoRange()
+
+    def _on_view_controls_changed(self, *_):
+        self._show_labels = bool(self._cb_labels.isChecked())
+        self._show_indices = bool(self._cb_indices.isChecked())
+        self._high_contrast = bool(self._cb_contrast.isChecked())
+        self._line_scale = float(self._spin_line.value())
+        self._font_scale = float(self._spin_font.value())
+        self._win.setBackground("#070B12" if self._high_contrast else "#0D1117")
+        if self._high_contrast:
+            self._info.setStyleSheet(
+                "color:#ECFCCB; font-size:12px; padding:6px;"
+                "background:#0B1220; border:1px solid #475569; border-radius:6px;"
+            )
+        else:
+            self._info.setStyleSheet(
+                "color:#D9F99D; font-size:11px; padding:6px;"
+                "background:#0F1520; border:1px solid #334155; border-radius:6px;"
+            )
+        if self._last_config is not None:
+            self.draw_neuron(self._last_config, dual_config=self._last_dual_config)
 
     def open_fullscreen(self):
         """Open topology clone in a maximized window preserving last rendered state."""
@@ -58,6 +142,11 @@ class TopologyWidget(QWidget):
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         win.setWindowTitle("NeuroModelPort — Topology (Full Screen)")
         full = TopologyWidget()
+        full._cb_labels.setChecked(self._cb_labels.isChecked())
+        full._cb_indices.setChecked(self._cb_indices.isChecked())
+        full._cb_contrast.setChecked(self._cb_contrast.isChecked())
+        full._spin_line.setValue(self._spin_line.value())
+        full._spin_font.setValue(self._spin_font.value())
         full.set_delay_focus(self._delay_target_name, self._delay_custom_index)
         if self._last_config is not None:
             full.draw_neuron(
@@ -158,9 +247,32 @@ class TopologyWidget(QWidget):
 
         soma_r = max(4.0, mc.d_soma * 1e4 * 0.4)
 
+        def _scaled_font(px: int) -> int:
+            return max(6, int(round(px * self._font_scale)))
+
+        def _scaled_width(w: float) -> float:
+            return max(0.8, float(w) * self._line_scale)
+
+        def _map_color(col):
+            q = QColor(col)
+            if self._high_contrast:
+                q = q.lighter(135)
+                q.setAlpha(min(255, int(q.alpha() * 1.1)))
+            return q
+
         def _txt(text, x, y, color="#CDD6F4", anchor=(0.5, 0.5), size=8):
-            t = pg.TextItem(text, color=color, anchor=anchor)
-            t.setFont(pg.Qt.QtGui.QFont("Segoe UI", size))
+            if (not self._show_labels) and (not str(text).startswith("idx ")):
+                return
+            if str(text).startswith("idx ") and not self._show_indices:
+                return
+            q_col = _map_color(color)
+            text_html = (
+                f"<div style='background-color:rgba(13,17,23,180);"
+                f"padding:1px 3px;border-radius:3px;color:{q_col.name()};'>"
+                f"{text}</div>"
+            )
+            t = pg.TextItem(text_html, anchor=anchor)
+            t.setFont(pg.Qt.QtGui.QFont("Segoe UI", _scaled_font(size)))
             t.setPos(x, y)
             self._plot.addItem(t)
 
@@ -169,18 +281,18 @@ class TopologyWidget(QWidget):
                 pg.PlotCurveItem(
                     [x0, x1],
                     [y0, y1],
-                    pen=pg.mkPen(QColor(color), width=width, style=style),
+                    pen=pg.mkPen(_map_color(color), width=_scaled_width(width), style=style),
                 )
             )
 
         def _glow(x0, y0, x1, y1, color, gw=12, alpha=60):
-            rgba = QColor(color)
+            rgba = _map_color(color)
             rgba.setAlpha(alpha)
             self._plot.addItem(
                 pg.PlotCurveItem(
                     [x0, x1],
                     [y0, y1],
-                    pen=pg.mkPen(rgba, width=gw),
+                    pen=pg.mkPen(rgba, width=_scaled_width(gw)),
                 )
             )
 
@@ -198,9 +310,9 @@ class TopologyWidget(QWidget):
                 pg.ScatterPlotItem(
                     x=[x],
                     y=[y],
-                    size=size,
-                    brush=pg.mkBrush(color),
-                    pen=pg.mkPen("#11111B", width=1.5),
+                    size=max(5.0, size * self._line_scale),
+                    brush=pg.mkBrush(_map_color(color)),
+                    pen=pg.mkPen("#11111B", width=_scaled_width(1.5)),
                     symbol=symbol,
                 )
             )
@@ -219,9 +331,9 @@ class TopologyWidget(QWidget):
             pg.ScatterPlotItem(
                 x=[0],
                 y=[0],
-                size=soma_r * 2,
-                brush=pg.mkBrush(QColor("#FA8C3C")),
-                pen=pg.mkPen(QColor("#DC5A10"), width=2),
+                size=max(8.0, soma_r * 2 * self._line_scale),
+                brush=pg.mkBrush(_map_color("#FA8C3C")),
+                pen=pg.mkPen(_map_color("#DC5A10"), width=_scaled_width(2)),
                 symbol="o",
                 name=f"Soma {mc.d_soma * 1e4:.0f}um",
             )
@@ -327,9 +439,9 @@ class TopologyWidget(QWidget):
             pg.ScatterPlotItem(
                 x=[bif_x],
                 y=[0],
-                size=8,
-                brush=pg.mkBrush("#FAF060"),
-                pen=pg.mkPen("#C0A020", width=1.5),
+                size=max(6.0, 8 * self._line_scale),
+                brush=pg.mkBrush(_map_color("#FAF060")),
+                pen=pg.mkPen(_map_color("#C0A020"), width=_scaled_width(1.5)),
                 symbol="d",
                 name="Fork",
             )
@@ -353,9 +465,9 @@ class TopologyWidget(QWidget):
                 pg.ScatterPlotItem(
                     x=[b1_x],
                     y=[b1_y],
-                    size=7,
-                    brush=pg.mkBrush("#40CC60"),
-                    pen=pg.mkPen("#208040", width=2),
+                    size=max(6.0, 7 * self._line_scale),
+                    brush=pg.mkBrush(_map_color("#40CC60")),
+                    pen=pg.mkPen(_map_color("#208040"), width=_scaled_width(2)),
                     symbol="o",
                 )
             )
@@ -385,9 +497,9 @@ class TopologyWidget(QWidget):
                 pg.ScatterPlotItem(
                     x=[b2_x],
                     y=[b2_y],
-                    size=7,
-                    brush=pg.mkBrush("#B040DC"),
-                    pen=pg.mkPen("#702090", width=2),
+                    size=max(6.0, 7 * self._line_scale),
+                    brush=pg.mkBrush(_map_color("#B040DC")),
+                    pen=pg.mkPen(_map_color("#702090"), width=_scaled_width(2)),
                     symbol="o",
                 )
             )
@@ -505,9 +617,9 @@ class TopologyWidget(QWidget):
                 pg.ScatterPlotItem(
                     x=[tx],
                     y=[ty],
-                    size=18,
+                    size=max(10.0, 18 * self._line_scale),
                     brush=pg.mkBrush(0, 0, 0, 0),
-                    pen=pg.mkPen("#F9E2AF", width=2.2),
+                    pen=pg.mkPen(_map_color("#F9E2AF"), width=_scaled_width(2.2)),
                     symbol="o",
                 )
             )
