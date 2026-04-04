@@ -76,12 +76,27 @@ class EnvironmentParams(BaseModel):
     """Thermodynamics and temperature scaling."""
     T_celsius: float = Field(default=6.3,  ge=0, le=45.0, description="Experiment temperature (°C)")
     T_ref:     float = Field(default=6.3,              description="Reference temperature for kinetics (°C)")
-    Q10:       float = Field(default=3.0,              description="Q10 temperature coefficient")
+    Q10:       float = Field(default=3.0,              description="Global Q10 (legacy, used as fallback)")
+    # Channel-specific Q10 values (literature-based defaults)
+    # Na: Hodgkin & Huxley 1952, J Physiol 117:500-544 (Q10 ~ 2.2-3.0 for m/h)
+    Q10_Na:    float = Field(default=2.2,              description="Q10 for Na channels (m,h gates)")
+    # K: Hodgkin & Huxley 1952 (Q10 ~ 3.0 for n gate)
+    Q10_K:     float = Field(default=3.0,              description="Q10 for K channels (n gate)")
+    # Ih: Magee 1998, J Neurosci 18:7613; Destexhe 1993 (Q10 ~ 4.0-4.5)
+    Q10_Ih:    float = Field(default=4.0,              description="Q10 for HCN/Ih channel (r gate)")
+    # Ca L-type: Coulter et al 1989, J Physiol 414:587 (Q10 ~ 2.3-3.0)
+    Q10_Ca:    float = Field(default=2.5,              description="Q10 for Ca channels (s,u gates)")
+    # IA: Huguenard et al 1991, J Neurophysiol 65:1271 (Q10 ~ 2.8-3.5)
+    Q10_IA:    float = Field(default=3.0,              description="Q10 for A-type K channel (a,b gates)")
 
     @property
     def phi(self) -> float:
-        """Temperature scaling factor φ = Q10^((T - T_ref)/10)."""
+        """Legacy global phi (backward compatibility)."""
         return self.Q10 ** ((self.T_celsius - self.T_ref) / 10.0)
+
+    def phi_channel(self, q10: float) -> float:
+        """Per-channel temperature scaling: q10^((T - T_ref)/10)."""
+        return q10 ** ((self.T_celsius - self.T_ref) / 10.0)
 
 
 class DendriticFilterParams(BaseModel):

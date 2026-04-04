@@ -94,7 +94,8 @@ def rhs_multicompartment(
     ena, ek, el, eih, ea,
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
-    phi, t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
+    phi_na, phi_k, phi_ih, phi_ca, phi_ia,
+    t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, stim_comp, stim_mode,
     use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
@@ -232,27 +233,27 @@ def rhs_multicompartment(
         # dV/dt
         dydt[off_v + i] = (i_stim[i] - i_ion + i_ax) / cm_v[i]
 
-        # Gate derivatives (HH core)
-        dydt[off_m + i] = phi * (am(vi) * (1.0 - mi) - bm(vi) * mi)
-        dydt[off_h + i] = phi * (ah(vi) * (1.0 - hi) - bh(vi) * hi)
-        dydt[off_n + i] = phi * (an(vi) * (1.0 - ni) - bn(vi) * ni)
+        # Gate derivatives (HH core) — channel-specific Q10
+        dydt[off_m + i] = phi_na * (am(vi) * (1.0 - mi) - bm(vi) * mi)
+        dydt[off_h + i] = phi_na * (ah(vi) * (1.0 - hi) - bh(vi) * hi)
+        dydt[off_n + i] = phi_k * (an(vi) * (1.0 - ni) - bn(vi) * ni)
 
         # Optional gate derivatives
         if en_ih:
             ri = y[off_r + i]
-            dydt[off_r + i] = phi * (ar_Ih(vi) * (1.0 - ri) - br_Ih(vi) * ri)
+            dydt[off_r + i] = phi_ih * (ar_Ih(vi) * (1.0 - ri) - br_Ih(vi) * ri)
 
         if en_ica:
             si = y[off_s + i]
             ui = y[off_u + i]
-            dydt[off_s + i] = phi * (as_Ca(vi) * (1.0 - si) - bs_Ca(vi) * si)
-            dydt[off_u + i] = phi * (au_Ca(vi) * (1.0 - ui) - bu_Ca(vi) * ui)
+            dydt[off_s + i] = phi_ca * (as_Ca(vi) * (1.0 - si) - bs_Ca(vi) * si)
+            dydt[off_u + i] = phi_ca * (au_Ca(vi) * (1.0 - ui) - bu_Ca(vi) * ui)
 
         if en_ia:
             ai = y[off_a + i]
             bi = y[off_b + i]
-            dydt[off_a + i] = phi * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
-            dydt[off_b + i] = phi * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
+            dydt[off_a + i] = phi_ia * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
+            dydt[off_b + i] = phi_ia * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
 
         # Calcium dynamics
         if dyn_ca:

@@ -226,7 +226,8 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v,
         ena, ek, el, eih, ea,
         cm_v, l_data, l_indices, l_indptr,
-        phi, t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
+        phi_na, phi_k, phi_ih, phi_ca, phi_ia,
+        t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
         stype, iext, t0, td, atau, stim_comp, stim_mode,
         use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
         dual_stim_enabled,
@@ -345,33 +346,33 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             m_row = idx["m"].start + i
             h_row = idx["h"].start + i
             n_row = idx["n"].start + i
-            _set(m_row, v_col, phi * (dam_v[i] * (1.0 - m[i]) - dbm_v[i] * m[i]))
-            _set(m_row, m_row, -phi * (am_v[i] + bm_v[i]))
-            _set(h_row, v_col, phi * (dah_v[i] * (1.0 - h[i]) - dbh_v[i] * h[i]))
-            _set(h_row, h_row, -phi * (ah_v[i] + bh_v[i]))
-            _set(n_row, v_col, phi * (dan_v[i] * (1.0 - n[i]) - dbn_v[i] * n[i]))
-            _set(n_row, n_row, -phi * (an_v[i] + bn_v[i]))
+            _set(m_row, v_col, phi_na * (dam_v[i] * (1.0 - m[i]) - dbm_v[i] * m[i]))
+            _set(m_row, m_row, -phi_na * (am_v[i] + bm_v[i]))
+            _set(h_row, v_col, phi_na * (dah_v[i] * (1.0 - h[i]) - dbh_v[i] * h[i]))
+            _set(h_row, h_row, -phi_na * (ah_v[i] + bh_v[i]))
+            _set(n_row, v_col, phi_k * (dan_v[i] * (1.0 - n[i]) - dbn_v[i] * n[i]))
+            _set(n_row, n_row, -phi_k * (an_v[i] + bn_v[i]))
 
             if en_ih and idx["r"] is not None:
                 r_row = idx["r"].start + i
-                _set(r_row, v_col, phi * (dar_v[i] * (1.0 - r[i]) - dbr_v[i] * r[i]))
-                _set(r_row, r_row, -phi * (ar_v[i] + br_v[i]))
+                _set(r_row, v_col, phi_ih * (dar_v[i] * (1.0 - r[i]) - dbr_v[i] * r[i]))
+                _set(r_row, r_row, -phi_ih * (ar_v[i] + br_v[i]))
 
             if en_ica and idx["s"] is not None:
                 s_row = idx["s"].start + i
                 u_row = idx["u"].start + i
-                _set(s_row, v_col, phi * (das_v[i] * (1.0 - s[i]) - dbs_v[i] * s[i]))
-                _set(s_row, s_row, -phi * (as_v[i] + bs_v[i]))
-                _set(u_row, v_col, phi * (dau_v[i] * (1.0 - u[i]) - dbu_v[i] * u[i]))
-                _set(u_row, u_row, -phi * (au_v[i] + bu_v[i]))
+                _set(s_row, v_col, phi_ca * (das_v[i] * (1.0 - s[i]) - dbs_v[i] * s[i]))
+                _set(s_row, s_row, -phi_ca * (as_v[i] + bs_v[i]))
+                _set(u_row, v_col, phi_ca * (dau_v[i] * (1.0 - u[i]) - dbu_v[i] * u[i]))
+                _set(u_row, u_row, -phi_ca * (au_v[i] + bu_v[i]))
 
             if en_ia and idx["a"] is not None:
                 a_row = idx["a"].start + i
                 b_row = idx["b"].start + i
-                _set(a_row, v_col, phi * (daa_v[i] * (1.0 - a[i]) - dba_v[i] * a[i]))
-                _set(a_row, a_row, -phi * (aa_v[i] + ba_v[i]))
-                _set(b_row, v_col, phi * (dab_v[i] * (1.0 - b[i]) - dbb_v[i] * b[i]))
-                _set(b_row, b_row, -phi * (ab_v[i] + bb_v[i]))
+                _set(a_row, v_col, phi_ia * (daa_v[i] * (1.0 - a[i]) - dba_v[i] * a[i]))
+                _set(a_row, a_row, -phi_ia * (aa_v[i] + ba_v[i]))
+                _set(b_row, v_col, phi_ia * (dab_v[i] * (1.0 - b[i]) - dbb_v[i] * b[i]))
+                _set(b_row, b_row, -phi_ia * (ab_v[i] + bb_v[i]))
 
             if dyn_ca and idx["ca"] is not None:
                 ca_row = idx["ca"].start + i

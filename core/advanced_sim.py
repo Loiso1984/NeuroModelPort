@@ -252,7 +252,7 @@ def run_euler_maruyama(config: FullModelConfig,
     L      = csr_matrix((morph['L_data'], morph['L_indices'], morph['L_indptr']),
                         shape=(n_comp, n_comp))
 
-    phi      = cfg.env.phi
+    phi      = cfg.env.phi  # legacy global phi for stochastic sim (TODO: per-channel Q10)
     t_kelvin = cfg.env.T_celsius + 273.15
 
     # Effective channel counts (proportional to conductance density)
