@@ -14,6 +14,7 @@ from core.models import FullModelConfig
 from core.presets import apply_preset
 from core.solver import NeuronSolver
 from core.validation import validate_simulation_config, build_preset_mode_warnings
+from core.dual_stimulation import DualStimulationConfig
 
 
 def test_invalid_dt_eval_vs_t_sim_raises_custom_error():
@@ -81,6 +82,18 @@ def test_validation_warns_on_heavy_runtime_estimate():
     )
 
 
+def test_validation_warns_that_dual_stim_overrides_primary_fields():
+    cfg = FullModelConfig()
+    apply_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
+    dual = DualStimulationConfig()
+    dual.enabled = True
+    cfg.dual_stimulation = dual
+    warnings = validate_simulation_config(cfg)
+    assert any("Dual stimulation is enabled" in w for w in warnings), (
+        "Expected warning about dual-stim overriding primary stimulation fields"
+    )
+
+
 def test_validation_warns_on_terminal_pathology_modes():
     cfg_n = FullModelConfig()
     cfg_n.preset_modes.alzheimer_mode = "terminal"
@@ -93,6 +106,17 @@ def test_validation_warns_on_terminal_pathology_modes():
     apply_preset(cfg_o, "O: Hypoxia (v10 ATP-pump failure)")
     wo = build_preset_mode_warnings(cfg_o, "O: Hypoxia (v10 ATP-pump failure)")
     assert any("O mode=terminal" in w for w in wo), "Expected terminal-stage warning for O terminal mode"
+
+
+def test_validation_warns_modes_ignored_for_non_kno_presets():
+    cfg = FullModelConfig()
+    cfg.preset_modes.alzheimer_mode = "terminal"
+    apply_preset(cfg, "F: Multiple Sclerosis (Demyelination)")
+    w = build_preset_mode_warnings(cfg, "F: Multiple Sclerosis (Demyelination)")
+    assert any("single-stage" in s for s in w), "Expected explicit single-stage note for F preset"
+    assert any("ignored for this preset" in s for s in w), (
+        "Expected warning that K/N/O mode flags are ignored for non-K/N/O preset"
+    )
 
 
 def test_validation_reports_thalamic_mode_note():
@@ -111,7 +135,9 @@ def _run_as_script() -> int:
         test_valid_config_still_runs_after_validation_layer,
         test_validation_warns_on_nonphysiological_iext,
         test_validation_warns_on_heavy_runtime_estimate,
+        test_validation_warns_that_dual_stim_overrides_primary_fields,
         test_validation_warns_on_terminal_pathology_modes,
+        test_validation_warns_modes_ignored_for_non_kno_presets,
         test_validation_reports_thalamic_mode_note,
     ]
     passed = 0

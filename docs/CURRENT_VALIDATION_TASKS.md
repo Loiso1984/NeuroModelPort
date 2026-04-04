@@ -202,6 +202,24 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - moved non-active root `test_*` and `validate_*` scripts into `tests/archive/root_legacy_tools/`,
    - active validation entry points remain `tests/branches/*` + `tests/utils/*`,
    - reran active branch suite after move; green.
+49. Master backlog contract encoding integrity fixed:
+   - repaired `docs/MASTER_BACKLOG_CONTRACT.md` from mojibake to clean UTF-8,
+   - restored canonical Russian verbatim source block and preserved added items (`17`, Jacobian GUI requirement, Lyapunov note).
+50. Post-directive regression check:
+   - reran `python tests/utils/run_active_branch_suite.py --workers 2`,
+   - all active branch scripts passed (`11/11`), artifact refreshed:
+     `_test_results/active_branch_suite.json`.
+51. Analytics productization progress for backlog `16` / `17`:
+   - GUI Passport now surfaces Lyapunov output (`class`, `LLE`, valid-pair count) when enabled,
+   - GUI Passport now surfaces non-FFT modulation decomposition summary (source, band, PLV, preferred phase, depth/index, surrogate stats),
+   - both analyses remain default-OFF and display explicit disabled/insufficient-data notes.
+52. Manual GUI QA issues captured (user report):
+   - fixed `run_sd_curve` / `run_excmap` background worker crash:
+     `unexpected keyword argument 'progress_cb'`,
+   - dual-stim default reset policy tightened: preset loading now resets Dual Stim to disabled state,
+   - added explicit dual-stim precedence behavior in UI/validation (Dual tab overrides primary stimulation fields when enabled),
+   - S-D and Excitability Map analyses now run with dual-stim disabled by design to avoid metric contamination,
+   - preset-mode controls are now context-sensitive (`K/N/O` only for relevant presets).
 
 ## Preset Mode Requirements
 
@@ -216,6 +234,22 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
   - terminal: near-silent / depolarization-block-like endpoint,
 - GUI-switchable,
 - final documentation must explain terminal-stage interpretation for users.
+
+## GUI Clarification Backlog (Detailed)
+
+1. Dual-stim UX simplification:
+   - make override priority explicit everywhere (status, warnings, guide text),
+   - keep dual-stim disabled by default after every preset load,
+   - eliminate ambiguous duplicated primary-stim editing paths where possible.
+2. Preset-mode UX scoping:
+   - only relevant mode controls should be active for selected preset,
+   - show explicit “ignored for current preset” hints for non-relevant mode flags.
+3. Tab information architecture:
+   - reduce cognitive load in Parameters by regrouping forms and adding section-level guidance,
+   - review tab naming/order to match user workflow (setup → run → inspect).
+4. Pathology semantics clarity:
+   - explain clearly that `F` (demyelination) is currently single-stage (no progressive/terminal switch),
+   - ensure this is visible both in preflight warnings and user-facing documentation.
 
 ## Current Test-Contour Findings
 
@@ -258,6 +292,12 @@ Highest-leverage optimization directions:
 3. use single-compartment proxy for coarse screening,
 4. run full multi-compartment validation only for finalists,
 5. investigate sparse/analytic Jacobian or compiled solver backend (future core optimization step).
+
+## Post-Physiology Execution Directive
+
+After explicit closure of full physiology validation, non-physiology tasks
+(analytics, plots, GUI, documentation) may be implemented directly in the main contour.
+Branch-first transfer flow remains mandatory for preset/channel/core-physiology logic changes.
 
 ## New Mandatory UI Follow-up
 

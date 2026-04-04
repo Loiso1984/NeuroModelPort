@@ -272,6 +272,20 @@ class AnalyticsWidget(QTabWidget):
         lat_1st  = stats.get('first_spike_latency_ms', np.nan)
         refr_per = stats.get('refractory_period_ms', np.nan)
         firing_rel = stats.get('firing_reliability', np.nan)
+        lyap_class = stats.get('lyapunov_class', 'disabled')
+        lyap_lle_s = stats.get('lle_per_s', np.nan)
+        lyap_pairs = int(stats.get('lyapunov_valid_pairs', 0) or 0)
+        modulation_valid = bool(stats.get('modulation_valid', False))
+        modulation_source = stats.get('modulation_source', '—')
+        modulation_plv = stats.get('modulation_plv', np.nan)
+        modulation_phase_deg = stats.get('modulation_preferred_phase_deg', np.nan)
+        modulation_depth = stats.get('modulation_depth', np.nan)
+        modulation_index = stats.get('modulation_index', np.nan)
+        modulation_p = stats.get('modulation_p_value', np.nan)
+        modulation_z = stats.get('modulation_z_score', np.nan)
+        modulation_spikes_used = int(stats.get('modulation_spikes_used', 0) or 0)
+        modulation_low_hz = stats.get('modulation_band_low_hz', np.nan)
+        modulation_high_hz = stats.get('modulation_band_high_hz', np.nan)
 
         def _fmt(v, fmt='.2f', unit=''):
             if v is None or (isinstance(v, float) and np.isnan(v)):
@@ -333,6 +347,31 @@ class AnalyticsWidget(QTabWidget):
                 f"║    ISI range: [{_fmt(isi_min, '.3f', 'ms'):<8}, "
                 f"{_fmt(isi_max, '.3f', 'ms'):<8}]   "
                 f"Reliability = {_fmt(firing_rel, '.3f')}  ║",
+            ]
+
+        lines += [
+            "╠══════════════════════════════════════════════════════════════════╣",
+            "║  DYNAMICAL STABILITY (LLE/FTLE)                                 ║",
+        ]
+        if lyap_class == 'disabled':
+            lines.append("║    Analysis disabled (enable_lyapunov=False)                    ║")
+        else:
+            lines += [
+                f"║    Class = {lyap_class:<21}  LLE = {_fmt(lyap_lle_s, '+.4f', '1/s'):<14}  ║",
+                f"║    Valid trajectory pairs = {lyap_pairs:<5}                              ║",
+            ]
+
+        lines += [
+            "╠══════════════════════════════════════════════════════════════════╣",
+            "║  MODULATION DECOMPOSITION (NON-FFT)                             ║",
+        ]
+        if not modulation_valid:
+            lines.append("║    Disabled or insufficient spikes for robust estimate           ║")
+        else:
+            lines += [
+                f"║    Source={modulation_source:<9} Band={_fmt(modulation_low_hz, '.1f', 'Hz')}..{_fmt(modulation_high_hz, '.1f', 'Hz'):<10}  ║",
+                f"║    PLV={_fmt(modulation_plv, '.3f'):<10} Phase={_fmt(modulation_phase_deg, '.1f', 'deg'):<14} Nsp={modulation_spikes_used:<5}  ║",
+                f"║    Depth={_fmt(modulation_depth, '.3f'):<10} MI={_fmt(modulation_index, '.3f'):<10} p={_fmt(modulation_p, '.3f'):<9} z={_fmt(modulation_z, '.2f')}  ║",
             ]
 
         lines += [

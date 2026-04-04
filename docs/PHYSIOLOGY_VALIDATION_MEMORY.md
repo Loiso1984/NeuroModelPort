@@ -102,3 +102,14 @@ Canonical verbatim backlog/rules source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - preflight warnings must surface stage context for terminal pathology modes (`N terminal`, `O terminal`),
    - thalamic `K activated` should surface an explicit high-throughput mode note before run,
    - mode context should be visible in status updates when presets/modes change.
+32. Post-physiology execution policy (user directive):
+   - after full physiology validation is explicitly closed, analytics/plots/GUI/documentation tasks may be implemented directly in the main contour without separate branch-transfer workflow,
+   - strict branch-first promotion remains mandatory for changes that affect presets, channel parameters, or core physiological calculation logic.
+33. Dual-stimulation GUI safety policy:
+   - loading/changing a neuronal preset must reset Dual Stim to disabled default state,
+   - when dual stimulation is enabled, primary stimulation controls in the main Parameters panel are treated as overridden and should be visually marked/disabled to avoid ambiguity.
+34. Mode-scope UX policy:
+   - `preset_modes` controls are context-dependent (`k_mode` only for K, `alzheimer_mode` only for N, `hypoxia_mode` only for O),
+   - non-relevant mode flags must be explicitly shown as ignored for current preset.
+35. SD/Excitability methodological policy:
+   - S-D curve and excitability map analyses should run with dual stimulation disabled to preserve interpretation of single-input excitability metrics.

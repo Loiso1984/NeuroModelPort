@@ -15,6 +15,10 @@ Current status snapshot after latest branch-contour runs.
 
 - `0` Test grouping and cleanup: active contour grouped/cleaned; root ad-hoc + legacy `test_*`/`validate_*` helpers archived under `tests/archive/root_legacy_tools`; only final optional pruning remains.
 - `3` Configurable spike detection in GUI: integrated and branch-tested; iterative GUI UX improvements still possible.
+- GUI clarity hardening in progress:
+  - fixed SD/Excitability worker callback crash path,
+  - dual-stim now resets to disabled default on preset load and explicitly overrides primary stimulation fields only when enabled,
+  - preset mode selectors are context-scoped to relevant K/N/O presets.
 - `5` Error handling/logging/warnings: core layer implemented and tested; can be expanded with richer user-facing diagnostics.
 - K/N/O pathology UX/documentation guidance: mode switches + guide + preflight/status-mode warnings integrated; final bilingual polish still needed.
 
@@ -29,7 +33,7 @@ Current status snapshot after latest branch-contour runs.
 - `13` Further compute optimization beyond current Jacobian speedup path.
 - `14` Full cleanup + bilingual polish final pass.
 - `15` Additional future improvements (ongoing bucket).
-- `16` Lyapunov practical integration and UX polishing (core feature added, final productization pending).
+- `16` Lyapunov practical integration and UX polishing (core feature + Passport summary integration added; final full UX polishing still pending).
 
 ## Current gating principle
 
@@ -37,3 +41,5 @@ Preset/core-calculation changes continue to follow:
 1. branch contour first,
 2. deterministic utility artifacts,
 3. only then promotion to primary program defaults.
+
+After full physiology validation is explicitly closed, analytics/plots/GUI/documentation tasks may proceed directly in the main contour; this exception does not apply to preset/channel/core-physiology logic.

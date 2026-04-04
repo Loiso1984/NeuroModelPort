@@ -258,13 +258,16 @@ class DualStimulationWidget(QWidget):
         self._refresh_ui()          # block signals, then emit once
 
     def load_default_preset(self):
-        """Load default demonstration preset."""
-        from core.dual_stimulation_presets import create_demo_preset
-        self.config = create_demo_preset()
-        # Block the combo signal so it doesn't trigger on_preset_changed → description
+        """Reset to safe default: dual-stim disabled until user explicitly enables it."""
+        self.config = DualStimulationConfig()
+        # Block the combo signal so it doesn't trigger on_preset_changed -> description
         self.combo_presets.blockSignals(True)
-        self.combo_presets.setCurrentText("Soma Excitation + Dendritic GABA")
+        self.combo_presets.setCurrentText("— Select preset —")
         self.combo_presets.blockSignals(False)
+        self.txt_description.setPlainText(
+            "Dual stimulation is disabled by default.\n"
+            "Select a dual preset and click Load, then enable the checkbox if needed."
+        )
         self._refresh_ui()
 
     def _refresh_ui(self):

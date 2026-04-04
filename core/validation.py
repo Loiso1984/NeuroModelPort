@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 from .errors import SimulationParameterError
-from .models import FullModelConfig
+from .models import FullModelConfig, PresetModeParams
 
 
 def estimate_simulation_runtime(cfg: FullModelConfig) -> Dict[str, float]:
@@ -105,6 +105,9 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
 
     dual = getattr(cfg, "dual_stimulation", None)
     if dual is not None and getattr(dual, "enabled", False):
+        warnings.append(
+            "Dual stimulation is enabled: primary fields in Parameters -> Stimulation/Stimulus Location are overridden by Dual Stim."
+        )
         if getattr(dual, "primary_duration", 0.0) < 0.0:
             raise SimulationParameterError("dual_stimulation.primary_duration must be >= 0.")
         if getattr(dual, "secondary_duration", 0.0) < 0.0:
@@ -146,6 +149,7 @@ def build_preset_mode_warnings(cfg: FullModelConfig, preset_name: str) -> List[s
 
     p = preset_name.lower()
     pm = cfg.preset_modes
+    pm_default = PresetModeParams()
 
     if "thalamic" in p:
         if pm.k_mode == "activated":
@@ -166,5 +170,20 @@ def build_preset_mode_warnings(cfg: FullModelConfig, preset_name: str) -> List[s
         warnings.append(
             "O mode=terminal: severe failure profile selected; depolarization-block-like behavior is expected."
         )
+
+    if "multiple sclerosis" in p:
+        warnings.append(
+            "F preset is currently single-stage; progressive/terminal pathology mode flags do not apply."
+        )
+
+    if ("thalamic" not in p) and ("alzheimer" not in p) and ("hypoxia" not in p):
+        if (
+            pm.k_mode != pm_default.k_mode
+            or pm.alzheimer_mode != pm_default.alzheimer_mode
+            or pm.hypoxia_mode != pm_default.hypoxia_mode
+        ):
+            warnings.append(
+                "K/N/O mode flags are ignored for this preset."
+            )
 
     return warnings

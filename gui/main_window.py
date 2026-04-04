@@ -5,6 +5,7 @@ Tabs: Parameters | Oscilloscope | Analytics | Topology | Guide
 Run modes: Standard | Monte-Carlo | Sweep | S-D Curve | Excit. Map | Stochastic
 """
 import csv
+import copy
 import os
 from pathlib import Path
 
@@ -328,7 +329,7 @@ class MainWindow(QMainWindow):
         self.form_env     = PydanticFormWidget(self.config.env,          "Environment")
         self.form_preset_modes = PydanticFormWidget(
             self.config.preset_modes,
-            "Preset Modes",
+            "Preset Modes (K/N/O)",
             on_change=self._on_preset_mode_changed
         )
         self.form_ana     = PydanticFormWidget(self.config.analysis,     "Analysis / Sweep / Map")
@@ -367,6 +368,65 @@ class MainWindow(QMainWindow):
     def _status(self, msg: str):
         self._sb.showMessage(msg)
 
+    def _sync_dual_stim_into_config(self) -> bool:
+        """
+        Sync dual-stimulation GUI config into main model config.
+
+        Returns
+        -------
+        bool
+            True if dual stimulation is enabled.
+        """
+        dual_enabled = bool(self.dual_stim_widget.config.enabled)
+        if dual_enabled:
+            self.config.dual_stimulation = self.dual_stim_widget.get_config()
+        else:
+            self.config.dual_stimulation = None
+        return dual_enabled
+
+    def _sync_stim_controls_with_dual_mode(self):
+        """Disable conflicting primary-stim controls when dual stimulation is enabled."""
+        dual_enabled = bool(self.dual_stim_widget.config.enabled)
+        overridden_stim_fields = (
+            "stim_type",
+            "Iext",
+            "Iext_absolute_nA",
+            "pulse_start",
+            "pulse_dur",
+            "alpha_tau",
+            "stim_comp",
+        )
+        for field_name in overridden_stim_fields:
+            w = self.form_stim.widgets_map.get(field_name)
+            if w is not None:
+                w.setEnabled(not dual_enabled)
+        w_loc = self.form_stim_loc.widgets_map.get("location")
+        if w_loc is not None:
+            w_loc.setEnabled(not dual_enabled)
+
+        if dual_enabled:
+            self.form_stim.group_box.setTitle("Stimulation (Primary Overridden by Dual Stim)")
+            self.form_stim_loc.group_box.setTitle("Stimulus Location (Overridden by Dual Stim)")
+        else:
+            self.form_stim.group_box.setTitle("Stimulation")
+            self.form_stim_loc.group_box.setTitle("Stimulus Location")
+
+    def _sync_preset_mode_controls(self):
+        """Enable only the mode selector that applies to the active preset."""
+        p = (self._current_preset_name or "").lower()
+        active = {
+            "k_mode": "thalamic" in p,
+            "alzheimer_mode": "alzheimer" in p,
+            "hypoxia_mode": "hypoxia" in p,
+        }
+        for field_name, widget in self.form_preset_modes.widgets_map.items():
+            is_active = bool(active.get(field_name, False))
+            widget.setEnabled(is_active)
+            if is_active:
+                widget.setToolTip("Active for current preset.")
+            else:
+                widget.setToolTip("Ignored for current preset.")
+
     def _active_mode_suffix(self) -> str:
         """Compact status suffix for active preset mode selector state."""
         if not self._current_preset_name:
@@ -392,6 +452,8 @@ class MainWindow(QMainWindow):
         self._refresh_all_forms()
         # Reset dual stim when loading new preset
         self.dual_stim_widget.load_default_preset()
+        self._sync_stim_controls_with_dual_mode()
+        self._sync_preset_mode_controls()
         self.topology.draw_neuron(self.config)
         self._status(f"Preset applied: {name}{self._active_mode_suffix()}")
 
@@ -400,6 +462,8 @@ class MainWindow(QMainWindow):
                      self.form_calcium, self.form_stim, self.form_stim_loc,
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
+        self._sync_stim_controls_with_dual_mode()
+        self._sync_preset_mode_controls()
 
     def _on_preset_mode_changed(self, _field_name: str, _value):
         """Reapply active preset when user changes a mode selector."""
@@ -479,11 +543,8 @@ class MainWindow(QMainWindow):
             if not self._preflight_validate():
                 return
 
-            # Sync dual stim config from widget to main config
-            if self.dual_stim_widget.config.enabled:
-                self.config.dual_stimulation = self.dual_stim_widget.get_config()
-            else:
-                self.config.dual_stimulation = None
+            # Sync dual stim config from widget to main config.
+            self._sync_dual_stim_into_config()
             
             solver = NeuronSolver(self.config)
 
@@ -524,10 +585,15 @@ class MainWindow(QMainWindow):
 
     def _on_dual_stim_config_changed(self):
         """Handle dual stimulation config changes from widget."""
-        # Config will be synced in run_simulation() when user clicks Run button
-        # For now just update status
+        dual_enabled = self._sync_dual_stim_into_config()
+        self._sync_stim_controls_with_dual_mode()
         if self.dual_stim_widget.config.enabled:
-            self._status(f"Dual stim: {self.dual_stim_widget.config.primary_location} + {self.dual_stim_widget.config.secondary_location}")
+            self._status(
+                "Dual stim enabled: "
+                f"{self.dual_stim_widget.config.primary_location} + "
+                f"{self.dual_stim_widget.config.secondary_location} "
+                "(Dual tab parameters override primary stimulation fields)"
+            )
         else:
             self._status("Dual stimulation disabled")
 
@@ -543,11 +609,7 @@ class MainWindow(QMainWindow):
             self._lock_ui(False)
             return
 
-        # Sync dual stim config from widget to main config
-        if self.dual_stim_widget.config.enabled:
-            self.config.dual_stimulation = self.dual_stim_widget.get_config()
-        else:
-            self.config.dual_stimulation = None
+        self._sync_dual_stim_into_config()
 
         def _do():
             return run_euler_maruyama(self.config)
@@ -581,6 +643,7 @@ class MainWindow(QMainWindow):
             return
         if not self._preflight_validate():
             return
+        self._sync_dual_stim_into_config()
 
         import numpy as np
         param_vals = np.linspace(ana.sweep_min, ana.sweep_max, ana.sweep_steps)
@@ -612,15 +675,19 @@ class MainWindow(QMainWindow):
     def run_sd_curve(self):
         if not self._preflight_validate():
             return
+        dual_enabled = self._sync_dual_stim_into_config()
+        cfg_for_sd = self.config
+        if dual_enabled:
+            cfg_for_sd = copy.deepcopy(self.config)
+            cfg_for_sd.dual_stimulation = None
 
         self._lock_ui(True)
-        self._status("Computing Strength-Duration curve (binary search)…")
+        if dual_enabled:
+            self._status("Computing Strength-Duration curve (dual-stim disabled for S-D analysis)…")
+        else:
+            self._status("Computing Strength-Duration curve (binary search)…")
         QApplication.processEvents()
-
-        def _do():
-            return run_sd_curve(self.config)
-
-        w = Worker(_do, progress_fn=self._report_progress)
+        w = Worker(run_sd_curve, cfg_for_sd, progress_fn=self._report_progress)
         w.signals.finished.connect(self._on_sd_done)
         w.signals.error.connect(self._on_sim_error)
         self._thread_pool.start(w)
@@ -642,17 +709,24 @@ class MainWindow(QMainWindow):
     def run_excmap(self):
         if not self._preflight_validate():
             return
+        dual_enabled = self._sync_dual_stim_into_config()
+        cfg_for_excmap = self.config
+        if dual_enabled:
+            cfg_for_excmap = copy.deepcopy(self.config)
+            cfg_for_excmap.dual_stimulation = None
 
         ana = self.config.analysis
         total = ana.excmap_NI * ana.excmap_ND
         self._lock_ui(True)
-        self._status(f"Excitability map {ana.excmap_NI}×{ana.excmap_ND} = {total} runs…")
+        if dual_enabled:
+            self._status(
+                f"Excitability map {ana.excmap_NI}×{ana.excmap_ND} = {total} runs "
+                "(dual-stim disabled for map analysis)…"
+            )
+        else:
+            self._status(f"Excitability map {ana.excmap_NI}×{ana.excmap_ND} = {total} runs…")
         QApplication.processEvents()
-
-        def _do():
-            return run_excitability_map(self.config)
-
-        w = Worker(_do, progress_fn=self._report_progress)
+        w = Worker(run_excitability_map, cfg_for_excmap, progress_fn=self._report_progress)
         w.signals.finished.connect(self._on_excmap_done)
         w.signals.error.connect(self._on_sim_error)
         self._thread_pool.start(w)

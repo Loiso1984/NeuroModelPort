@@ -93,3 +93,7 @@ Use a practical Lyapunov-based stability module (not symbolic Lyapunov function 
    - stable (`<0`), limit-cycle-like (`~0`), unstable/chaotic (`>0`),
 4. use only as stability descriptor together with physiological metrics (not as standalone realism criterion),
 5. include dedicated synthetic tests where expected FTLE sign is known.
+
+## Additional Process Directive (Newest)
+
+After full physiology validation is explicitly closed, tasks focused on analytics/plots/GUI/documentation may be implemented directly in the main contour without tedious transfer flow; branch-first remains mandatory for any change to presets, channel parameters, or core physiological calculation logic.
