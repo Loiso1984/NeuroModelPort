@@ -66,7 +66,6 @@ def get_stim_current(t, stype, iext, t0, td, atau):
         if t < t0:
             return 0.0
         dt = t - t0
-        # Typical: rise 1–2 ms, decay 10–15 ms
         tau_rise = 1.5
         tau_decay = 12.0
         t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
@@ -76,7 +75,6 @@ def get_stim_current(t, stype, iext, t0, td, atau):
         if t < t0:
             return 0.0
         dt = t - t0
-        # Representative central nAChR: rise ~3–5 ms, decay 20–50 ms
         tau_rise = 3.0
         tau_decay = 25.0
         t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
@@ -106,174 +104,169 @@ def rhs_multicompartment(
     use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2
 ):
     """
-    Высокопроизводительное ядро ОДУ v10.0.
-    Рассчитывает производные для всех гейтов и мембранного потенциала.
+    Высокопроизводительное ядро ОДУ v10.1 (C-style scalar loop).
+    Все токи рассчитываются как скаляры, без промежуточных аллокаций.
     """
-    
-    # --- 1. Распаковка вектора состояния y ---
-    # Индексация жестко фиксирована: [V, m, h, n, [r], [s, u], [a, b], [Ca]]
-    cursor = 0
-    v = y[cursor : cursor + n_comp]; cursor += n_comp
-    m = y[cursor : cursor + n_comp]; cursor += n_comp
-    h = y[cursor : cursor + n_comp]; cursor += n_comp
-    n = y[cursor : cursor + n_comp]; cursor += n_comp
-    
-    # Опциональные гейты (распаковываем только если включены)
-    r = np.zeros(n_comp)
-    s = np.zeros(n_comp)
-    u = np.zeros(n_comp)
-    a = np.zeros(n_comp)
-    b = np.zeros(n_comp)
+
+    # --- Compute variable offsets in state vector y ---
+    off_v = 0
+    off_m = n_comp
+    off_h = 2 * n_comp
+    off_n = 3 * n_comp
+    cursor = 4 * n_comp
+
+    off_r = cursor
     if en_ih:
-        r = y[cursor : cursor + n_comp]; cursor += n_comp
+        cursor += n_comp
+    off_s = cursor
+    off_u = cursor
     if en_ica:
-        s = y[cursor : cursor + n_comp]; cursor += n_comp
-        u = y[cursor : cursor + n_comp]; cursor += n_comp
+        off_s = cursor
+        cursor += n_comp
+        off_u = cursor
+        cursor += n_comp
+    off_a = cursor
+    off_b = cursor
     if en_ia:
-        a = y[cursor : cursor + n_comp]; cursor += n_comp
-        b = y[cursor : cursor + n_comp]; cursor += n_comp
-    
-    # Кальций
-    ca_i = np.full(n_comp, ca_rest)
+        off_a = cursor
+        cursor += n_comp
+        off_b = cursor
+        cursor += n_comp
+    off_ca = cursor
     if dyn_ca:
-        ca_i = y[cursor : cursor + n_comp]; cursor += n_comp
+        cursor += n_comp
 
-    # --- 2. Расчет ионных токов ---
-    i_ion = gl_v * (v - el) # Ток утечки
-    i_ion += gna_v * (m**3) * h * (v - ena) # Натрий
-    i_ion += gk_v * (n**4) * (v - ek)  # Калий
-    
-    i_ca_total = np.zeros(n_comp)
-    
-    if en_ih:
-        i_ion += gih_v * r * (v - eih)
-        
-    if en_ica:
-        # Реверсия Ca: по-компартментный Нернст при динамическом Ca,
-        # иначе фиксированный E_Ca.
-        if dyn_ca:
-            eca_eff = np.empty(n_comp)
-            for i in range(n_comp):
-                eca_eff[i] = nernst_ca_ion(ca_i[i], ca_ext, t_kelvin)
-        else:
-            eca_eff = np.full(n_comp, 120.0)
-        i_ca_current = gca_v * (s**2) * u * (v - eca_eff)
-        i_ion += i_ca_current
-        # Для кальциевой динамики: кальций входит когда I_Ca < 0 (входящий ток)
-        # Отрицательный ток = входящий кальций = положительный influx
-        i_ca_total = -np.minimum(i_ca_current, 0)  # Только входящий ток
-        
-    if en_ia:
-        i_ion += ga_v * a * b * (v - ea)
-        
-    if en_sk:
-        # Адаптация: SK-канал активируется кальцием (z_inf_SK из kinetics)
-        # Мы предполагаем мгновенную активацию относительно динамики V
-        for i in range(n_comp):
-            z_act = z_inf_SK(ca_i[i])
-            i_ion[i] += gsk_v[i] * z_act * (v[i] - ek)
-
-    # --- 3. Аксиальные связи (Лапласиан) ---
-    i_ax = np.zeros(n_comp)
-    for i in range(n_comp):
-        for j_idx in range(l_indptr[i], l_indptr[i+1]):
-            col = l_indices[j_idx]
-            i_ax[i] += l_data[j_idx] * v[col]
-
-    # Optional dendritic-filter dynamic states as extra ODE variables
-    v_filtered_primary = 0.0
-    v_filtered_secondary = 0.0
+    # Dendritic filter state offsets
+    off_vfilt_primary = cursor
     if use_dfilter_primary == 1:
-        v_filtered_primary = y[cursor]
         cursor += 1
+    off_vfilt_secondary = cursor
     if use_dfilter_secondary == 1:
-        v_filtered_secondary = y[cursor]
         cursor += 1
 
-    # --- 4. External stimulation (primary + optional secondary) ---
+    # --- Stimulus: compute once, apply to target compartments ---
+    # We use i_stim array because stimulus targets specific compartments
     i_stim = np.zeros(n_comp)
     base_current = get_stim_current(t, stype, iext, t0, td, atau)
+
+    v_filtered_primary = 0.0
+    if use_dfilter_primary == 1:
+        v_filtered_primary = y[off_vfilt_primary]
+
+    v_filtered_secondary = 0.0
+    if use_dfilter_secondary == 1:
+        v_filtered_secondary = y[off_vfilt_secondary]
+
     d_vfiltered_dt_primary = apply_primary_stimulus_current(
-        i_stim,
-        n_comp,
-        base_current,
-        stim_comp,
-        stim_mode,
-        use_dfilter_primary,
-        dfilter_attenuation,
-        dfilter_tau_ms,
+        i_stim, n_comp, base_current,
+        stim_comp, stim_mode,
+        use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
         v_filtered_primary,
     )
     d_vfiltered_dt_secondary = 0.0
-
-    # --- 4b. Dual stimulation (secondary stimulus) ---
-    # Apply secondary stimulus ONLY if dual_stim_enabled == 1
     if dual_stim_enabled == 1:
         base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2)
         d_vfiltered_dt_secondary = apply_secondary_stimulus_current(
-            i_stim,
-            n_comp,
-            base_current_2,
-            stim_comp_2,
-            stim_mode_2,
-            use_dfilter_secondary,
-            dfilter_attenuation_2,
-            dfilter_tau_ms_2,
+            i_stim, n_comp, base_current_2,
+            stim_comp_2, stim_mode_2,
+            use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
             v_filtered_secondary,
         )
 
-    # --- 5. Сборка производных dy/dt ---
+    # --- Output array ---
     dydt = np.zeros_like(y)
-    cursor = 0
-    
-    # dV/dt = (I_ext - I_ion + I_axial) / Cm
-    dydt[cursor : cursor + n_comp] = (i_stim - i_ion + i_ax) / cm_v
-    cursor += n_comp
-    
-    # Производные гейтов (HH)
-    dydt[cursor : cursor + n_comp] = phi * (am(v) * (1.0 - m) - bm(v) * m)
-    cursor += n_comp
-    dydt[cursor : cursor + n_comp] = phi * (ah(v) * (1.0 - h) - bh(v) * h)
-    cursor += n_comp
-    dydt[cursor : cursor + n_comp] = phi * (an(v) * (1.0 - n) - bn(v) * n)
-    cursor += n_comp
-    
-    # Производные опциональных гейтов
-    if en_ih:
-        dydt[cursor : cursor + n_comp] = phi * (ar_Ih(v) * (1.0 - r) - br_Ih(v) * r)
-        cursor += n_comp
-    if en_ica:
-        dydt[cursor : cursor + n_comp] = phi * (as_Ca(v) * (1.0 - s) - bs_Ca(v) * s)
-        cursor += n_comp
-        dydt[cursor : cursor + n_comp] = phi * (au_Ca(v) * (1.0 - u) - bu_Ca(v) * u)
-        cursor += n_comp
-    if en_ia:
-        dydt[cursor : cursor + n_comp] = phi * (aa_IA(v) * (1.0 - a) - ba_IA(v) * a)
-        cursor += n_comp
-        dydt[cursor : cursor + n_comp] = phi * (ab_IA(v) * (1.0 - b) - bb_IA(v) * b)
-        cursor += n_comp
-        
-    # Динамика концентрации кальция
-    if dyn_ca:
-        # d[Ca]/dt = +B*I_Ca,influx - ([Ca]-Ca_rest)/tau_Ca
-        # Упрощенная Numba-совместимая версия
-        if i_ca_total.size == n_comp:
-            dca = b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
-        else:
-            # Если i_ca_total скаляр, используем broadcasting
-            dca = b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
-        
-        # Защита от отрицательной концентрации (Hard clamp)
-        for i in range(n_comp):
-            if ca_i[i] < 1e-9 and dca[i] < 0:
-                dca[i] = 0.0
-        dydt[cursor : cursor + n_comp] = dca
-        cursor += n_comp
 
+    # --- Main C-style loop: all currents as scalars ---
+    for i in range(n_comp):
+        vi = y[off_v + i]
+        mi = y[off_m + i]
+        hi = y[off_h + i]
+        ni = y[off_n + i]
+
+        # Ionic currents (scalar accumulation)
+        i_ion = gl_v[i] * (vi - el)
+        i_ion += gna_v[i] * (mi * mi * mi) * hi * (vi - ena)
+        i_ion += gk_v[i] * (ni * ni * ni * ni) * (vi - ek)
+
+        i_ca_influx = 0.0  # only inward Ca for calcium dynamics
+
+        if en_ih:
+            ri = y[off_r + i]
+            i_ion += gih_v[i] * ri * (vi - eih)
+
+        if en_ica:
+            si = y[off_s + i]
+            ui = y[off_u + i]
+            # Nernst for Ca: per-compartment when dynamic, else fixed
+            if dyn_ca:
+                ca_i_val = y[off_ca + i]
+                eca_i = nernst_ca_ion(ca_i_val, ca_ext, t_kelvin)
+            else:
+                ca_i_val = ca_rest
+                eca_i = 120.0
+            i_ca_current = gca_v[i] * (si * si) * ui * (vi - eca_i)
+            i_ion += i_ca_current
+            # Only inward (negative) Ca current contributes to Ca accumulation
+            if i_ca_current < 0.0:
+                i_ca_influx = -i_ca_current
+
+        if en_ia:
+            ai = y[off_a + i]
+            bi = y[off_b + i]
+            i_ion += ga_v[i] * ai * bi * (vi - ea)
+
+        if en_sk:
+            if dyn_ca:
+                ca_sk = y[off_ca + i]
+            else:
+                ca_sk = ca_rest
+            z_act = z_inf_SK(ca_sk)
+            i_ion += gsk_v[i] * z_act * (vi - ek)
+
+        # Axial coupling (sparse Laplacian row i)
+        i_ax = 0.0
+        for j_idx in range(l_indptr[i], l_indptr[i + 1]):
+            col = l_indices[j_idx]
+            i_ax += l_data[j_idx] * y[off_v + col]
+
+        # dV/dt
+        dydt[off_v + i] = (i_stim[i] - i_ion + i_ax) / cm_v[i]
+
+        # Gate derivatives (HH core)
+        dydt[off_m + i] = phi * (am(vi) * (1.0 - mi) - bm(vi) * mi)
+        dydt[off_h + i] = phi * (ah(vi) * (1.0 - hi) - bh(vi) * hi)
+        dydt[off_n + i] = phi * (an(vi) * (1.0 - ni) - bn(vi) * ni)
+
+        # Optional gate derivatives
+        if en_ih:
+            ri = y[off_r + i]
+            dydt[off_r + i] = phi * (ar_Ih(vi) * (1.0 - ri) - br_Ih(vi) * ri)
+
+        if en_ica:
+            si = y[off_s + i]
+            ui = y[off_u + i]
+            dydt[off_s + i] = phi * (as_Ca(vi) * (1.0 - si) - bs_Ca(vi) * si)
+            dydt[off_u + i] = phi * (au_Ca(vi) * (1.0 - ui) - bu_Ca(vi) * ui)
+
+        if en_ia:
+            ai = y[off_a + i]
+            bi = y[off_b + i]
+            dydt[off_a + i] = phi * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
+            dydt[off_b + i] = phi * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
+
+        # Calcium dynamics
+        if dyn_ca:
+            ca_i_val = y[off_ca + i]
+            dca = b_ca * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
+            # Hard clamp: prevent negative calcium
+            if ca_i_val < 1e-9 and dca < 0.0:
+                dca = 0.0
+            dydt[off_ca + i] = dca
+
+    # Dendritic filter ODEs (outside main loop — not per-compartment)
     if use_dfilter_primary == 1:
-        dydt[cursor] = d_vfiltered_dt_primary
-        cursor += 1
+        dydt[off_vfilt_primary] = d_vfiltered_dt_primary
     if use_dfilter_secondary == 1:
-        dydt[cursor] = d_vfiltered_dt_secondary
+        dydt[off_vfilt_secondary] = d_vfiltered_dt_secondary
 
     return dydt
