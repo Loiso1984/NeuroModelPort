@@ -50,8 +50,7 @@ class TopologyWidget(QWidget):
         self._info.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._info.setWordWrap(True)
         self._info.setStyleSheet(
-            "color:#D9F99D; font-size:11px; padding:6px;"
-            "background:#0F1520; border:1px solid #334155; border-radius:6px;"
+            "color:#D9F99D; font-size:11px; padding:4px;"
         )
         layout.addWidget(self._info)
 
@@ -125,13 +124,11 @@ class TopologyWidget(QWidget):
         self._win.setBackground("#070B12" if self._high_contrast else "#0D1117")
         if self._high_contrast:
             self._info.setStyleSheet(
-                "color:#ECFCCB; font-size:12px; padding:6px;"
-                "background:#0B1220; border:1px solid #475569; border-radius:6px;"
+                "color:#ECFCCB; font-size:12px; padding:4px;"
             )
         else:
             self._info.setStyleSheet(
-                "color:#D9F99D; font-size:11px; padding:6px;"
-                "background:#0F1520; border:1px solid #334155; border-radius:6px;"
+                "color:#D9F99D; font-size:11px; padding:4px;"
             )
         if self._last_config is not None:
             self.draw_neuron(self._last_config, dual_config=self._last_dual_config)
@@ -266,12 +263,7 @@ class TopologyWidget(QWidget):
             if str(text).startswith("idx ") and not self._show_indices:
                 return
             q_col = _map_color(color)
-            text_html = (
-                f"<div style='background-color:rgba(13,17,23,180);"
-                f"padding:1px 3px;border-radius:3px;color:{q_col.name()};'>"
-                f"{text}</div>"
-            )
-            t = pg.TextItem(text_html, anchor=anchor)
+            t = pg.TextItem(str(text), color=q_col, anchor=anchor)
             t.setFont(pg.Qt.QtGui.QFont("Segoe UI", _scaled_font(size)))
             t.setPos(x, y)
             self._plot.addItem(t)
