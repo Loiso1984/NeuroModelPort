@@ -59,10 +59,12 @@ def br_Ih(V):
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def as_Ca(V):
+    """ICa activation alpha (Huguenard 1992)"""
     return 1.6 / (1.0 + np.exp(-0.072 * (V - 5.0)))
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def bs_Ca(V):
+    """ICa activation beta (Huguenard 1992)"""
     dV = V + 8.9
     if abs(dV) < 1e-7:
         return 0.1
