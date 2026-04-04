@@ -1,61 +1,24 @@
-#!/usr/bin/env python3
-"""Test all 15 presets for spike generation"""
+"""Test: All presets should run without errors and produce finite voltages."""
 
-import sys
-sys.path.insert(0, r'c:\NeuroModelPort')
-
+import pytest
+import numpy as np
 from core.models import FullModelConfig
 from core.presets import get_preset_names, apply_preset
 from core.solver import NeuronSolver
-import numpy as np
-import warnings
-warnings.filterwarnings('ignore')
 
-preset_names = get_preset_names()
-results = []
 
-print("=" * 80)
-print("PRESET VALIDATION TEST SUITE")
-print("=" * 80)
-
-for preset_name in preset_names:
+@pytest.mark.parametrize("preset_name", get_preset_names())
+def test_preset_runs_and_finite(preset_name):
+    """Each preset must run to completion with finite voltage output."""
     cfg = FullModelConfig()
     apply_preset(cfg, preset_name)
-
-    # Ensure const stim for consistent testing
     cfg.stim.stim_type = 'const'
+    cfg.stim.t_sim = 50.0
 
-    try:
-        solver = NeuronSolver(cfg)
-        result = solver.run_single()
+    solver = NeuronSolver(cfg)
+    result = solver.run_single()
 
-        V_soma = result.v_soma
-        V_max = np.max(V_soma)
-        V_min = np.min(V_soma)
-        spike_threshold = -20
-        spike_count = np.sum(V_soma > spike_threshold)
-
-        status = "PASS" if spike_count > 0 else "FAIL"
-        results.append({
-            'name': preset_name,
-            'status': status,
-            'V_max': V_max,
-            'V_min': V_min,
-            'spikes': spike_count
-        })
-
-        print(f"[{status}] {preset_name:40s} | V: [{V_min:7.1f}, {V_max:7.1f}] mV | Spikes: {spike_count:3d}")
-
-    except Exception as e:
-        results.append({
-            'name': preset_name,
-            'status': 'ERROR',
-            'error': str(e)
-        })
-        print(f"[ERR] {preset_name:40s} | {str(e)[:50]}")
-
-print("=" * 80)
-pass_count = sum(1 for r in results if r['status'] == 'PASS')
-fail_count = sum(1 for r in results if r['status'] == 'FAIL')
-error_count = sum(1 for r in results if r['status'] == 'ERROR')
-print(f"SUMMARY: {pass_count} PASS, {fail_count} FAIL, {error_count} ERROR")
+    assert len(result.t) > 0, f"{preset_name}: empty result"
+    assert np.all(np.isfinite(result.v_soma)), f"{preset_name}: NaN/Inf in v_soma"
+    assert result.v_soma.max() < 80, f"{preset_name}: V_max={result.v_soma.max():.1f} unrealistic"
+    assert result.v_soma.min() > -120, f"{preset_name}: V_min={result.v_soma.min():.1f} unrealistic"

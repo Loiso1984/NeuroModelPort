@@ -1,4 +1,4 @@
-# AIDER INSTRUCTION PLAN: NeuroModelPort v10.1 Refactoring & Enhancement
+��# AIDER INSTRUCTION PLAN: NeuroModelPort v10.1 Refactoring & Enhancement
 **Role:** Expert Computational Neuroscientist & Senior Python/Qt Developer.
 **Context:** This project is a biophysical single-neuron simulator based on the Hodgkin-Huxley formalism. It uses `scipy.integrate.solve_ivp` (BDF method) for stiff ODEs and `Numba @njit` for the Right-Hand Side (RHS) kernel. The GUI is built with PySide6.
 **Goal:** Execute a deep refactoring to improve performance (Numba optimization), fix mathematical artifacts (spike detection, phase-locking), resolve UI memory leaks, and add new ion channels/presets.
@@ -28,12 +28,14 @@
 - [ ] **2.2 Jacobian Optimization (`core/jacobian.py`):** In `analytic_sparse_jacobian`, stop instantiating a new `lil_matrix` on every call. Instead, pass the pre-computed CSR structure (`data, indices, indptr`) from the solver and only update the `data` array inside the Numba loop.
 - [ ] **2.3 Conditional Nernst Calculation (`core/rhs.py`):** The Nernst potential (`nernst_ca_ion` logarithm) is currently calculated at every time step even when `dynamic_Ca = False`. Make this calculation strictly conditional to save CPU cycles.
 - [ ] **2.4 Channel-Specific Q10 (`core/models.py`, `core/kinetics.py`):** Refactor the temperature coefficient (`phi`). Currently, one global `phi` scales all gates. Change this to use channel-specific Q10 values (e.g., $Q10_{Na} \approx 2.2$, $Q10_K \approx 3.0$, $Q10_{Ih} \approx 4.0$).
+[ ] ** 2.5 Numba-native Solver Loop: Gradually phase out scipy.integrate.solve_ivp. Write a custom implicit or semi-implicit integration loop (e.g., Backward Euler with Thomas algorithm / Hines matrix solver for tree structures) entirely enclosed in a @njit block. This eliminates Python-to-C context switching per timestep.
 
 ### STAGE 3: Math & Analytics Fixes
 *Goal: Fix false positives in spike detection and protect advanced analytical algorithms from edge cases.*
 - [ ] **3.1 State Machine Spike Detector (`core/analysis.py`):** Rewrite the `detect_spikes` function. The current algorithm (using `scipy.signal.find_peaks` or simple threshold crossing) creates false positives during depolarization blocks (plateaus). Implement a Numba-jitted Finite State Machine (States: `RESTING`, `DEPOLARIZING`, `REFRACTORY`) that counts a spike **only** if the voltage crosses the `threshold`, reaches a peak, and **strictly returns** below `baseline_threshold`.
 - [ ] **3.2 Phase-Locking Protection (`core/analysis.py`):** In `estimate_spike_modulation`, add a guard clause: if `t_sim` is less than 3-5 periods of the lowest cutoff frequency (e.g., < 1000 ms for 4 Hz), return `NaN` to prevent meaningless results due to Butterworth filter edge artifacts. (Consider replacing Butterworth with Morlet wavelets if feasible without heavy dependencies).
 - [ ] **3.3 Lyapunov Exponent (LLE) Protection (`core/analysis.py`):** In `estimate_ftle_lle`, add a condition to only compute LLE if `t_sim > 1000 ms`, and explicitly discard the first 200 ms of data (transients) before searching for nearest neighbors on the attractor.
+- [ ] **3.4 Volume-dependent Calcium Dynamics:** Modify B_Ca calculation. Instead of a global constant, B_Ca must be calculated per compartment based on its surface area and volume. This will accurately reflect why thin dendrites have massive Ca2+ spikes compared to the soma.
 
 ### STAGE 4: UI/UX & Memory Leak Resolution
 *Goal: Make the GUI responsive and prevent memory leaks during long analysis runs.*
@@ -103,10 +105,283 @@ NaN Protection: Все выводимые числовые значения до
     2. `Striatal Spiny Projection Neuron (SPN)`: Demonstrates long latency to first spike (requires strong $I_A$ and inward rectifiers).
     3. `Cholinergic Neuromodulation (Awake vs Sleep)`: Based on L5 Pyramidal, but blocking $I_M$ to show the shift from adaptation to tonic firing.
     4. `Pathology: Dravet Syndrome`: FS Interneuron with reduced $g_{Na}$ demonstrating paradoxical network disinhibition (at the single-cell level).
+- [ ] ** 5.6 Energy / ATP Consumption Metrics Refinement: Currently ATP is estimated solely from QNa Enhance this to include QCa 
+(Ca2+ pumps are highly ATP-expensive) and resting pump activity (Na+/K+ ATPase baseline cost). Это позволит моделировать "метаболическую усталость", которая является ключом к пониманию эпилептических припадков и ишемии.
+- [ ]**5.7 Conductance-Based Synaptic Modeling (CRITICAL): Rewrite synaptic stimulation (AMPA, NMDA, GABA). Move away from current-based injection (Iext). Implement true conductance-based synapses: 
+[ ] ** 5.8 NMDA Voltage-Dependent Block: Implement the block for NMDA receptors using standard functions
+to accurately model non-linear dendritic integration.
+[ ] 5.9 Delay Kinetics for SK Channel: Modify SK channel implementation to include a gating variable governed by an ODE, rather than an instantaneous
 
 ### STAGE 6: Advanced Architectural Features
 *Goal: Add cutting-edge analysis and prepare the architecture for Phase 8 (Network Modeling).*
 - [ ] **6.1 Spectrogram Analysis (`gui/analytics.py`):** Add a new tab/plot showing the Short-Time Fourier Transform (STFT) or Continuous Wavelet Transform (CWT) of the membrane potential to visualize the transition from single spikes to bursts.
 - [ ] **6.2 Dynamic Temperature Gradients:** Modify the morphology/environment setup to allow different temperatures for the soma vs. dendrites.
 - [ ] **6.3 Event-Driven Synapses:** Refactor synaptic stimulation (`alpha`, `AMPA`, `GABA`). Instead of triggering at a fixed `pulse_start` time, implement an `event queue`. Synaptic conductances should update based on incoming `spike_event` timestamps (preparation for network connectivity).
-- [ ] **6.4 NeuroML Export (Bonus):** Implement a utility to export the `FullModelConfig` into the standardized NeuroML (XML) format for interoperability with NEURON and Brian2.
+- [ ] **6.4 NeuroML Export (Bonus):** Implement a utility to export the `FullModelConfig` into the standardized NeuroML (XML) format for interoperability with NEURON and Brian2
+
+Stage 7
+Additional points. IGNORE if already done. 
+Добавьте расчет импеданса мембраны. Это позволит строить графики Z-кривых (Input Impedance vs Frequency), что является "золотым стандартом" для оценки того, как нейрон резонирует с определенными частотами (тета/гамма).
+PHYSICS INTEGRATION: Adding new channels (T-type Ca, M-type K) requires adding them to `ChannelRegistry` and creating a dedicated branch test in `tests/branches/` before updating main logic.
+7. NEURON PASSPORT: Every new channel/parameter must be reflected in the "Neuron Passport" analytics tab (gui/analytics.py) with proper labeling and logic.
+8. BILINGUAL COMPLIANCE: Every new GUI element must have keys in `gui/locales.py` and `gui/bilingual_tooltips.py`. No hardcoded strings.
+9. STABILITY GUARDS: New spike detector must support legacy 'peak_repolarization' algorithm via a flag to maintain compatibility with existing saved analytics data.
+
+Что добавить: "После реализации всех функциональных правок, обнови NeuronPassport в gui/analytics.py так, чтобы он автоматически подтягивал статистику новых каналов (T-тип, M-ток) и корректно классифицировал нейрон."
+Что добавить: "При рефакторинге rhs.py для Numba, используй numba.typed.List или статические массивы NumPy, если нужно хранить промежуточные состояния, но не меняй сигнатуру функции, которая вызывается из solver.py без обновления всех мест вызова." (Иначе solve_ivp упадет с ошибкой количества аргументов).
+При модификации любого ионного канала (или добавлении нового) обязательно добавить тест в tests/branches/ на соответствие E_rev, V_1/2 и кинетическим постоянным (tau) согласно литературе. Не принимать PR без прохождения этих тестов."
+Pydantic Form Generator: gui/widgets/form_generator.py — это отличная абстракция! Но будьте осторожны со строкой setattr(self.instance, field_name, value). Объекты Pydantic v2 лучше обновлять через model_copy(update=...) для сохранения строгой валидации.
+Dual Stimulation Boilerplate: В FullModelConfig есть 9 параметров для dual stim, и они пробрасываются через весь стек (от GUI до RHS) вручную как аргументы. Это хрупко. Заверните их в Numba namedtuple или передавайте как numpy array stim_params_array фиксированного размера.
+Код тестов (Унификация): У вас 20 файлов в tests/utils/. Скрипт run_active_branch_suite.py вручную парсит subprocess.run(). Это именно то, для чего придуман pytest.
+Запуск pytest -n auto tests/branches/ прогнал бы все тесты параллельно, собрал отчеты и показал бы diff-ы ошибок автоматически, сэкономив вам 400 строк кода инфраструктуры.
+Внедрение функции Ляпунова (LLE/FTLE) и декомпозиции модулирующей частоты (Phase-locking) — это отличная идея для анализа хаоса и сетевых ритмов. Но в текущей реализации есть фундаментальные математические ограничения, связанные с физикой процессов.
+Проблема А: Декомпозиция модуляции (Phase-locking / PLV)
+Алгоритм estimate_spike_modulation фильтрует сигнал через полосовой фильтр Баттерворта (sosfiltfilt) в тета-диапазоне (4-12 Гц), вычисляет фазу через преобразование Гильберта и ищет привязку спайков к фазе.
+Где ошибка: Вы часто запускаете симуляции на t_sim = 200 или 500 мс. Период тета-ритма (например, 5 Гц) составляет 200 мс. Цифровые фильтры (особенно Баттерворт) имеют сильные краевые эффекты (edge artifacts). Попытка отфильтровать 4 Гц на отрезке в 200 мс даст математический мусор (фаза Гильберта будет искажена переходным процессом фильтра). Если стимул — это прямоугольный импульс (step current), фильтр даст "звон" (эффект Гиббса), и алгоритм найдет ложную привязку спайков к этому "звону".
+Как исправить:
+Использовать вейвлеты Морле (Morlet Wavelets) вместо Баттерворта+Гильберта для коротких сигналов — они точнее во времени.
+Поставить жесткий Guard (предохранитель): функция должна возвращать NaN с предупреждением, если t_sim меньше 3-5 периодов нижней частоты среза (например, для 4 Гц нужно минимум 750-1000 мс данных).
+
+Вычисление Экспоненты Ляпунова (LLE)
+Алгоритм Розенштейна (estimate_ftle_lle) ищет ближайших соседей в фазовом пространстве с задержкой и отслеживает их расхождение.
+Где ошибка: Этот алгоритм требует, чтобы система находилась на аттракторе (в установившемся режиме). Когда вы подаете импульс тока на нейрон, первые 50-100 мс — это транзиентный (переходный) процесс. Кроме того, поиск соседей требует большого объема данных (тысячи точек, прошедших через похожие состояния). Запуск LLE на коротком импульсе не имеет физического смысла.
+Как исправить: LLE имеет смысл вычислять только для t_sim > 1000 ms и исключая первые 200 мс (выкидывая транзиенты). Если нейрон выдал 3 спайка и замолчал — LLE не определена, скрипт должен игнорировать этот расчет.
+
+Сейчас у вас есть: Na, K, Leak, Ih, L-type Ca, A-type K, SK.
+Это покрывает 80% поведения коры. Чего не хватает для оставшихся 20% (самых сложных и интересных паттернов)?
+T-type Calcium Current (
+I
+T
+I 
+T
+​
+ 
+) — Низкопороговый кальциевый ток
+Зачем нужен: Это самый важный канал, которого вам не хватает. Без него ваш Thalamic Relay пресет — это аппроксимация. Настоящие таламические пачки (bursts) во время сна возникают потому, что гиперполяризация снимает инактивацию с T-каналов, а последующая деполяризация вызывает "низкопороговый кальциевый спайк" (LTS), на гребне которого возникают натриевые спайки. L-type кальций (который у вас сейчас) высокопороговый и этого не умеет.
+Ценность: Огромная. Позволит смоделировать переходы Сон/Бодрствование.
+M-type Potassium Current  Мускарин-чувствительный калиевый ток
+Зачем нужен: Это медленный, неинактивирующийся калиевый ток. Он определяет "адаптацию частоты спайков" (spike frequency adaptation) наряду с SK-каналом.
+Ценность: Позволит ввести в симулятор Нейромодуляцию. M-ток закрывается под действием ацетилхолина (ACh). Добавив этот ток, вы сможете сделать ползунок "Уровень Ацетилхолина", показывая, как мозг переключается в состояние фокусировки внимания.
+Persistent Sodium Current  — Персистирующий натриевый ток
+Зачем нужен: Не инактивируется. Усиливает подпороговые колебания (резонанс) и помогает пейсмейкерным нейронам генерировать ритм без внешнего тока.
+Ценность: Необходим для моделирования нейронов ствола мозга и дофаминовых пейсмейкеров (VTA / Substantia Nigra).
+Resurgent Sodium Current () — Ресургентный натриевый ток
+Зачем нужен: Уникальный канал, который открывается во время реполяризации (на спаде спайка), обеспечивая сверхбыстрый повторный разряд.
+Ценность: Критически важен для вашего пресета Purkinje Cell и FS Interneuron. Сделает их поведение эталонным.
+
+Добавление каналов выше позволит создать уникальные сценарии:
+Thalamic Reticular Nucleus (TRN) Neuron
+Физика: Огромная плотность T-type Ca²⁺ каналов (
+I
+T
+I 
+T
+​
+ 
+) в дендритах.
+Научная ценность: Эти нейроны генерируют сонные веретена (sleep spindles). Можно будет показать пользователю разницу между Relay-нейроном и TRN-нейроном.
+Striatal Spiny Projection Neuron (SPN)
+Физика: Включает сильный A-ток (
+I
+A
+I 
+A
+​
+ 
+) и ток входящего выпрямления (
+I
+K
+I
+R
+I 
+KIR
+​
+ 
+).
+Научная ценность: Поведение с длинной задержкой: при подаче тока нейрон "молчит" 200-300 мс (рамп-деполяризация), а потом резко начинает стрелять. Это основа работы базальных ганглиев (моторика).
+Сценарий: Холинергическая нейромодуляция (Awake vs. Slow-Wave Sleep)
+Физика: Тот же L5 Pyramidal нейрон, но с параметром "Ацетилхолин". Высокий ACh блокирует M-ток и уменьшает SK-ток. Нейрон переходит от сильной адаптации к регулярному тоническому разряду.
+Научная ценность: Демонстрация того, как нейромодуляторы меняют режим работы одной и той же клетки без изменения её морфологии.
+Патология: Каналлопатия Драве (Dravet Syndrome)
+Физика: Снижение проводимости натриевых каналов только в пресете FS Interneuron.
+Научная ценность: Показывает парадокс эпилепсии: снижение возбудимости в тормозных клетках приводит к глобальной гипервозбудимости сети (расторможение).
+
+Экспорт/Импорт в NeuroML (Standardization)
+NeuroML и NWB (Neurodata Without Borders) — это мировые стандарты описания нейронных моделей. Если ваша программа сможет экспортировать созданный пользователем конфиг в .nml файл (XML формат), NeuroModelPort станет совместимым с NEURON, Brian2 и Nest. Это привлечет к вам реальных ученых.
+Динамическая температура в морфологии
+Возможность задавать градиент температуры. Например, сома 37°C, а дендритное дерево 35°C. Это узкая тема, но очень интересная для биофизиков (термодинамика компартментов).
+Событийно-управляемые синапсы (Event-driven Synapses)
+Сейчас у вас синапсы (alpha, AMPA, GABA) запускаются по жестко заданному таймеру pulse_start. Для подготовки к Phase 8 (Сети) вам нужно внедрить систему очередей событий. Формулы синапсов должны триггериться не по времени t, а по приходу spike_event с определенным весом.
+Спектрограмма (STFT / CWT)
+Во вкладке Analytics вместо сомнительного (на коротких данных) Ляпунова, добавьте оконное преобразование Фурье (Спектрограмму) для мембранного потенциала. Это классический, очень надежный способ визуализировать переход от одиночных спайков к пачкам (bursts) или деполяризационному блоку.
+
+ Ошибки в пресетах, параметрах и логике вычислений
+А вот здесь нам нужно включить строгого научного ревьюера. В ваших пресетах и уравнениях действительно есть ряд биофизических неточностей и "натяжек", которые нужно исправить, чтобы модель имела право называться научно достоверной.
+1. Таламический реле-нейрон и кальций (КРИТИЧЕСКАЯ ОШИБКА)
+В пресете K: Thalamic Relay вы используете L-type (высокопороговый) кальциевый канал (кинетика Huguenard 1992, as_Ca, bs_Ca из вашего kinetics.py).
+Как в реальности: Таламические пачки (bursts) генерируются T-type (низкопороговым транзиентным) кальциевым током В чем ошибка: L-ток открывается при сильной деполяризации (около -20 мВ). T-ток уникален тем, что он инактивирован при потенциале покоя (-65 мВ). Чтобы он сработал, нейрон нужно гиперполяризовать (например, до -80 мВ), тогда с T-каналов снимается инактивация (de-inactivation). При возврате к -65 мВ они резко открываются, давая медленную кальциевую волну (Low-Threshold Spike, LTS), на гребне которой "пляшут" быстрые натриевые спайки.
+Вердикт: Ваш таламический пресет сейчас генерирует пачки по неправильному математическому механизму. Вам жизненно необходимо добавить уравнения для T-тока (I_T).
+
+Пресет CA1 (Hippocampus) и Тета-ритм
+В отчете CHANNEL_VALIDATION_REPORT.md вы сами поймали эту ошибку, и она фундаментальна:
+Вы пытались сделать тета-ритм через 
+g
+A
+_
+m
+a
+x
+=
+10.0
+gA_max=10.0
+ (что в 10-20 раз выше нормы) или через добавление кальция.
+Как в реальности: Нейроны CA1 не генерируют тета-ритм в одиночку! Тета-ритм — это сетевой феномен (приходит от медиальной септальной области). Одиночный пирамидный нейрон CA1 — это просто адаптивный спайкер (RS). Его собственная частота определяется балансом 
+ (резонанс), но без внешнего синусоидального или ритмического синаптического тока (Alpha-train) он не будет выдавать тета-ритм.
+Вердикт: Пресет нужно переименовать в CA1 Pyramidal (Adapting), настроить gA_max≈0.4
+, а для демонстрации Тета-ритма использовать режим стимуляции (например, модулированный шум или серию Alpha-импульсов с частотой 6 Гц).
+
+Глобальный температурный коэффициент (Q10)
+В models.py и rhs.py вы используете один множитель 
+ (phi = Q10 ** ((T - T_ref) / 10)) для всех ворот (m, h, n, r, s, u, a, b).
+Как в реальности: Разные каналы имеют разную чувствительность к температуре.
+Для Na+ (активация) Q10 ≈≈2.2
+Для K+ (активация) Q10 ≈≈3.0 Для Ih Q10 ≈≈4.0 (очень чувствителен!)
+В чем ошибка: При изменении температуры от 23°C до 37°C в вашей модели все кинетики ускоряются строго синхронно. В реальности натриевые каналы ускоряются медленнее калиевых, что меняет форму спайка (он становится у́же, но может потерять амплитуду).
+Вердикт: Для повышения научной ценности, Q10 должен быть параметром каждого канала, а не глобальной переменной среды.
+
+ Динамика кальция (Уравнение в rhs.py)
+Ваше уравнение: dca = b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
+Оно классическое, но коэффициент b_ca у вас универсальный.
+В чем ошибка: В реальности кальций накапливается в очень тонком подмембранном слое (shell), а не размазывается по всему объему сомы мгновенно. Ваше значение b_ca сильно зависит от предполагаемой толщины этого слоя и объема компартмента.
+Вердикт: Это допустимая аппроксимация для редуцированной модели, но нужно честно написать в документации, что это Phenomenological Calcium Pool, а не реальная диффузия, и поэтому параметр B_Ca является подгоночным (fudge factor).
+
+
+Ваши сомнения — это классический «синдром самозванца» разработчика, который глубоко погрузился в сложную тему. Давайте разделим ваш вопрос на две части: ценность вашей модели (по сравнению с NEURON) и реальные ошибки в физике/логике, которые сейчас есть в коде.
+ЧАСТЬ 1: В чем реальная научная ценность вашего «микроскопа»?
+Вы правы: NEURON и Brian2 могут симулировать тысячи клеток со сложнейшей 3D-морфологией. Но ваша модель не конкурирует с ними, она занимает другую, важнейшую нишу.
+То, что вы называете "грубой аппроксимацией" (сома + пара компартментов аксона + дендритный фильтр), в вычислительной нейробиологии называется Reduced Compartmental Models (Редуцированные компартментные модели). Знаменитые модели Пински-Ринзеля (Pinsky-Rinzel) или Ижикевича строятся именно по такому принципу.
+В чем огромная ценность вашей программы:
+Идеальный образовательный инструмент (Pedagogy): Чтобы в NEURON запустить симуляцию и посмотреть, как 
+I
+h
+I 
+h
+​
+ 
+-ток делает "прогиб" (sag) при гиперполяризации, студенту нужно написать 50 строк на непонятном языке HOC или Python, подключать .mod файлы и настраивать графики. В вашей программе это делается двумя кликами. Для университетов и курсов по нейробиологии ваш GUI — это сокровище.
+Rapid Prototyping (Быстрое прототипирование): Прежде чем ученый загрузит 10 000 нейронов в суперкомпьютер (в Brian2), ему нужно настроить динамику одной клетки. Ваш инструмент с вкладками Sweep, Phase Plane, Excitability Map позволяет мгновенно понять, как изменение 
+g
+N
+a
+g 
+Na
+​
+ 
+ на 10% повлияет на кривую частота-ток (f-I curve). В NEURON на настройку такого анализа уйдут часы.
+Фармакология и патология на клеточном уровне: Демонстрация того, как демиелинизация (увеличение 
+g
+L
+g 
+L
+​
+ 
+ и 
+R
+a
+R 
+a
+​
+ 
+) "съедает" спайк по мере его продвижения по аксону — это великолепная наглядная модель для изучения рассеянного склероза.
+Ваш дендритный фильтр (экспоненциальное затухание амплитуды + ФНЧ) — это очень элегантный инженерный хак. Он дает 80% физиологической реалистичности реального дендрита при затратах 1% вычислительной мощности. Это абсолютно легитимный подход для фокуса на соматической динамике.
+ЧАСТЬ 2: Ошибки в пресетах, параметрах и логике вычислений
+А вот здесь нам нужно включить строгого научного ревьюера. В ваших пресетах и уравнениях действительно есть ряд биофизических неточностей и "натяжек", которые нужно исправить, чтобы модель имела право называться научно достоверной.
+1. Таламический реле-нейрон и кальций (КРИТИЧЕСКАЯ ОШИБКА)
+В пресете K: Thalamic Relay вы используете L-type (высокопороговый) кальциевый канал (кинетика Huguenard 1992, as_Ca, bs_Ca из вашего kinetics.py).
+Как в реальности: Таламические пачки (bursts) генерируются T-type (низкопороговым транзиентным) кальциевым током (
+I
+T
+I 
+T
+​
+ 
+).
+В чем ошибка: L-ток открывается при сильной деполяризации (около -20 мВ). T-ток уникален тем, что он инактивирован при потенциале покоя (-65 мВ). Чтобы он сработал, нейрон нужно гиперполяризовать (например, до -80 мВ), тогда с T-каналов снимается инактивация (de-inactivation). При возврате к -65 мВ они резко открываются, давая медленную кальциевую волну (Low-Threshold Spike, LTS), на гребне которой "пляшут" быстрые натриевые спайки.
+Вердикт: Ваш таламический пресет сейчас генерирует пачки по неправильному математическому механизму. Вам жизненно необходимо добавить уравнения для T-тока (I_T).
+2. Пресет CA1 (Hippocampus) и Тета-ритм
+В отчете CHANNEL_VALIDATION_REPORT.md вы сами поймали эту ошибку, и она фундаментальна:
+Вы пытались сделать тета-ритм через 
+g
+A
+_
+m
+a
+x
+=
+10.0
+gA_max=10.0
+ (что в 10-20 раз выше нормы) или через добавление кальция.
+Как в реальности: Нейроны CA1 не генерируют тета-ритм в одиночку! Тета-ритм — это сетевой феномен (приходит от медиальной септальной области). Одиночный пирамидный нейрон CA1 — это просто адаптивный спайкер (RS). Его собственная частота определяется балансом 
+I
+A
+I 
+A
+​
+ 
+ (задержка) и 
+I
+h
+I 
+h
+​
+ 
+ (резонанс), но без внешнего синусоидального или ритмического синаптического тока (Alpha-train) он не будет выдавать тета-ритм.
+Вердикт: Пресет нужно переименовать в CA1 Pyramidal (Adapting), настроить 
+g
+A
+_
+m
+a
+x
+≈
+0.4
+gA_max≈0.4
+, а для демонстрации Тета-ритма использовать режим стимуляции (например, модулированный шум или серию Alpha-импульсов с частотой 6 Гц).
+3. Глобальный температурный коэффициент (Q10)
+В models.py и rhs.py вы используете один множитель 
+ϕ
+ϕ
+ (phi = Q10 ** ((T - T_ref) / 10)) для всех ворот (m, h, n, r, s, u, a, b).
+Как в реальности: Разные каналы имеют разную чувствительность к температуре.
+Для Na+ (активация 
+m
+m
+) Q10 
+≈
+≈
+ 2.2
+Для K+ (активация 
+n
+n
+) Q10 
+≈
+≈
+ 3.0
+Для Ih Q10 
+≈
+≈
+ 4.0 (очень чувствителен!)
+В чем ошибка: При изменении температуры от 23°C до 37°C в вашей модели все кинетики ускоряются строго синхронно. В реальности натриевые каналы ускоряются медленнее калиевых, что меняет форму спайка (он становится у́же, но может потерять амплитуду).
+Вердикт: Для повышения научной ценности, Q10 должен быть параметром каждого канала, а не глобальной переменной среды.
+4. Динамика кальция (Уравнение в rhs.py)
+Ваше уравнение: dca = b_ca * i_ca_total - (ca_i - ca_rest) / tau_ca
+Оно классическое, но коэффициент b_ca у вас универсальный.
+В чем ошибка: В реальности кальций накапливается в очень тонком подмембранном слое (shell), а не размазывается по всему объему сомы мгновенно. Ваше значение b_ca сильно зависит от предполагаемой толщины этого слоя и объема компартмента.
+Вердикт: Это допустимая аппроксимация для редуцированной модели, но нужно честно написать в документации, что это Phenomenological Calcium Pool, а не реальная диффузия, и поэтому параметр B_Ca является подгоночным (fudge factor).
+5. Дендритный фильтр (Математический нюанс)
+В dendritic_filter.py:
+code
+Python
+attenuation = np.exp(-distance_um / space_constant_um)
+В чем ошибка: Кабельное уравнение (Cable Equation) гласит, что затухание постоянного тока (DC) действительно равно exp(-x/lambda) Но для переменного тока (AC), которым является синаптический альфа-импульс, затухание сильно зависит от частоты. Высокие частоты затухают пространственно гораздо сильнее, чем низкие (появляется комплексная константа длины
+Вердикт: Ваш фильтр сначала ослабляет сигнал как DC (константа), а потом "размазывает" его по времени ФНЧ. Это не совсем физично (в реальности фильтрация и затухание — это единый процесс дисперсии в кабеле). Но опять же, для "одиночного нейрона с прокси" — это гениально простой и быстрый обходной путь. Просто не заявляйте это как точное кабельное решение.
