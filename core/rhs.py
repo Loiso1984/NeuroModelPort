@@ -258,7 +258,7 @@ def rhs_multicompartment(
         # Calcium dynamics
         if dyn_ca:
             ca_i_val = y[off_ca + i]
-            dca = b_ca * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
+            dca = b_ca[i] * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
             # Hard clamp: prevent negative calcium
             if ca_i_val < 1e-9 and dca < 0.0:
                 dca = 0.0

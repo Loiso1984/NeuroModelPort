@@ -378,10 +378,10 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 ca_row = idx["ca"].start + i
                 d_dca = -1.0 / tau_ca
                 if en_ica and i_ca_val < 0.0:
-                    _add(ca_row, v_col, b_ca * (-dIcadv))
-                    _add(ca_row, idx["s"].start + i, b_ca * (-dIcads))
-                    _add(ca_row, idx["u"].start + i, b_ca * (-dIcadu))
-                    d_dca += b_ca * (-dIcadca)
+                    _add(ca_row, v_col, b_ca[i] * (-dIcadv))
+                    _add(ca_row, idx["s"].start + i, b_ca[i] * (-dIcads))
+                    _add(ca_row, idx["u"].start + i, b_ca[i] * (-dIcadu))
+                    d_dca += b_ca[i] * (-dIcadca)
                 _set(ca_row, ca_row, d_dca)
 
         if idx["dfilter_primary"] is not None:

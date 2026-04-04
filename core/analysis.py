@@ -7,6 +7,7 @@ Ports and improves all analysis functions from Scilab hh_utils.sce:
   space_constant, compute_current_balance + Python-native extensions.
 """
 import numpy as np
+from numba import njit
 from scipy.signal import butter, find_peaks, hilbert, sosfiltfilt
 from scipy.spatial import cKDTree
 
@@ -14,6 +15,66 @@ from scipy.spatial import cKDTree
 # ─────────────────────────────────────────────────────────────────────
 #  1. SPIKE DETECTION
 # ─────────────────────────────────────────────────────────────────────
+
+# FSM states (Stage 3.1 — AIDER_PLAN)
+_FSM_RESTING = 0
+_FSM_DEPOLARIZING = 1
+_FSM_REFRACTORY = 2
+
+
+@njit(cache=True)
+def _fsm_detect_spikes(V, t, threshold, baseline_threshold, refractory_ms):
+    """
+    Numba-jitted Finite State Machine spike detector.
+
+    States
+    ------
+    RESTING       → voltage below threshold; waiting for upswing.
+    DEPOLARIZING  → voltage crossed threshold; tracking peak.
+    REFRACTORY    → spike confirmed (repolarised below baseline);
+                    waiting out refractory period before returning to RESTING.
+
+    A spike is counted only when voltage:
+      1. crosses *threshold* from below  (RESTING → DEPOLARIZING)
+      2. reaches a local peak            (tracked in DEPOLARIZING)
+      3. strictly falls below *baseline_threshold*  (→ REFRACTORY, spike recorded)
+    """
+    n = len(V)
+    # Pre-allocate output arrays (max possible = n)
+    peak_indices = np.empty(n, dtype=np.int64)
+    count = 0
+
+    state = _FSM_RESTING
+    peak_idx = 0
+    peak_val = -1e9
+    refract_end_t = -1e9
+
+    for i in range(n):
+        vi = V[i]
+        ti = t[i]
+
+        if state == _FSM_RESTING:
+            if vi >= threshold:
+                state = _FSM_DEPOLARIZING
+                peak_val = vi
+                peak_idx = i
+
+        elif state == _FSM_DEPOLARIZING:
+            if vi > peak_val:
+                peak_val = vi
+                peak_idx = i
+            if vi < baseline_threshold:
+                # Spike confirmed — record peak
+                peak_indices[count] = peak_idx
+                count += 1
+                state = _FSM_REFRACTORY
+                refract_end_t = ti + refractory_ms
+
+        elif state == _FSM_REFRACTORY:
+            if ti >= refract_end_t and vi < threshold:
+                state = _FSM_RESTING
+
+    return peak_indices[:count]
 
 def detect_spikes(V: np.ndarray, t: np.ndarray,
                   threshold: float = -20.0,
@@ -60,6 +121,17 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
 
     min_distance = max(1, int(round(refractory_ms / dt_ms)))
     repol_window_pts = max(1, int(round(repolarization_window_ms / dt_ms)))
+
+    # ── FSM algorithm: Numba-jitted state machine (Stage 3.1) ──
+    if algorithm == "fsm":
+        V_c = np.ascontiguousarray(V, dtype=np.float64)
+        t_c = np.ascontiguousarray(t, dtype=np.float64)
+        valid_idx = _fsm_detect_spikes(
+            V_c, t_c, threshold, baseline_threshold, refractory_ms
+        )
+        if len(valid_idx) == 0:
+            return np.array([], dtype=int), np.array([]), np.array([])
+        return valid_idx, t[valid_idx], V[valid_idx]
 
     if algorithm == "threshold_crossing":
         above = V >= threshold
@@ -625,6 +697,20 @@ def estimate_ftle_lle(
     if not np.all(np.isfinite(x)) or not np.all(np.isfinite(t)):
         return out
 
+    # Stage 3.3 — LLE protection: require t_sim > 1000 ms and discard
+    # first 200 ms of transients before attractor reconstruction.
+    t_sim_ms = float(t[-1] - t[0])
+    if t_sim_ms < 1000.0:
+        return out
+
+    transient_ms = 200.0
+    transient_mask = t >= (t[0] + transient_ms)
+    if np.sum(transient_mask) < 50:
+        return out
+    x = x[transient_mask]
+    t = t[transient_mask]
+    n = len(x)
+
     dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.1
     dt_ms = max(dt_ms, 1e-9)
 
@@ -837,6 +923,15 @@ def estimate_spike_modulation(
     if not np.all(np.isfinite(t)) or not np.all(np.isfinite(x)):
         return out
     if np.max(t) <= np.min(t):
+        return out
+
+    # Stage 3.2 — Phase-locking protection: require at least 3 full periods
+    # of the lowest cutoff frequency. Without this, Butterworth filter edge
+    # artifacts produce meaningless PLV estimates.
+    t_sim_ms = float(t[-1] - t[0])
+    min_periods = 3.0
+    min_duration_ms = min_periods * (1000.0 / max(float(low_hz), 1e-6))
+    if t_sim_ms < min_duration_ms:
         return out
 
     dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.1

@@ -209,9 +209,9 @@ class SimulationParams(BaseModel):
 class AnalysisParams(BaseModel):
     """Analysis, bifurcation, Monte-Carlo, Sweep, S-D curve, Excitability map."""
     # Spike detection controls (used by passport/analytics and GUI)
-    spike_detect_algorithm: Literal['peak_repolarization', 'threshold_crossing'] = Field(
+    spike_detect_algorithm: Literal['peak_repolarization', 'threshold_crossing', 'fsm'] = Field(
         default='peak_repolarization',
-        description="Spike detection algorithm: peak+repolarization or threshold-crossing"
+        description="Spike detection algorithm: peak+repolarization, threshold-crossing, or fsm (state machine)"
     )
     spike_detect_threshold: float = Field(
         default=-20.0,

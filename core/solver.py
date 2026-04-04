@@ -80,6 +80,37 @@ class NeuronSolver:
         self.config   = config
         self.registry = ChannelRegistry()
 
+    @staticmethod
+    def _build_b_ca_vector(cfg, morph) -> np.ndarray:
+        """Compute per-compartment B_Ca from surface/volume ratio (Stage 3.4).
+
+        Thin compartments get larger B_Ca because their surface-to-volume
+        ratio is higher, producing larger Ca²⁺ transients — matching the
+        physiology of thin dendrites vs. large somata.
+
+        The user's cfg.calcium.B_Ca is treated as the soma value;
+        other compartments are scaled by (A/V)_i / (A/V)_soma.
+        """
+        n_comp = morph['N_comp']
+        diameters = morph['diameters']
+        dx = cfg.morphology.dx
+        b_ca_base = cfg.calcium.B_Ca
+
+        # Surface-to-volume ratio:
+        #   Soma (sphere):   A/V = 6/d
+        #   Cylinder:        A/V = 4/d
+        d_soma = diameters[0]
+        av_soma = 6.0 / d_soma  # sphere
+
+        b_ca_v = np.empty(n_comp, dtype=np.float64)
+        b_ca_v[0] = b_ca_base  # soma = user value
+
+        for i in range(1, n_comp):
+            av_i = 4.0 / diameters[i]  # cylinder
+            b_ca_v[i] = b_ca_base * (av_i / av_soma)
+
+        return b_ca_v
+
     # ─────────────────────────────────────────────────────────────────
     def run_single(self, custom_config: FullModelConfig = None) -> SimulationResult:
         """Run a single deterministic simulation (BDF integrator)."""
@@ -196,7 +227,8 @@ class NeuronSolver:
             cfg.env.phi_channel(cfg.env.Q10_IA),
             t_kelvin,
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
-            cfg.calcium.tau_Ca, cfg.calcium.B_Ca,
+            cfg.calcium.tau_Ca,
+            self._build_b_ca_vector(cfg, morph),
             stype, primary_iext,
             primary_t0, primary_td,
             primary_atau, primary_stim_comp, stim_mode,

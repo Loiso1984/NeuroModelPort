@@ -56,6 +56,22 @@ class MorphologyBuilder:
             for k in range(idx_b2_start, idx_b2_start + mc.N_b2):
                 areas[k] = np.pi * mc.d_b2 * mc.dx
 
+        # 1b. Per-compartment diameters (cm) — for volume-dependent B_Ca (Stage 3.4)
+        diameters = np.full(N_comp, mc.d_soma, dtype=np.float64)
+        if not mc.single_comp:
+            for k in range(1, 1 + mc.N_ais):
+                diameters[k] = mc.d_ais
+            idx_trunk_start = 1 + mc.N_ais
+            idx_fork = idx_trunk_start + mc.N_trunk - 1
+            for k in range(idx_trunk_start, idx_fork + 1):
+                diameters[k] = mc.d_trunk
+            idx_b1_start = idx_fork + 1
+            for k in range(idx_b1_start, idx_b1_start + mc.N_b1):
+                diameters[k] = mc.d_b1
+            idx_b2_start = idx_b1_start + mc.N_b1
+            for k in range(idx_b2_start, idx_b2_start + mc.N_b2):
+                diameters[k] = mc.d_b2
+
         # 2. Векторы проводимостей (с AIS-множителями) в плотности [мСм/см²] | 2. Conductance vectors (with AIS multipliers) in density [mS/cm²]
         gNa_v = np.full(N_comp, cc.gNa_max, dtype=np.float64)
         gK_v  = np.full(N_comp, cc.gK_max, dtype=np.float64)
@@ -133,6 +149,7 @@ class MorphologyBuilder:
         return {
             'N_comp': N_comp,
             'areas': areas,
+            'diameters': diameters,
             'gNa_v': gNa_v, 'gK_v': gK_v, 'gL_v': gL_v,
             'gIh_v': gIh_v, 'gCa_v': gCa_v, 'gA_v': gA_v, 'gSK_v': gSK_v,
             'Cm_v': Cm_v,

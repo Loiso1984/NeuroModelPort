@@ -255,6 +255,10 @@ def run_euler_maruyama(config: FullModelConfig,
     phi      = cfg.env.phi  # legacy global phi for stochastic sim (TODO: per-channel Q10)
     t_kelvin = cfg.env.T_celsius + 273.15
 
+    # Per-compartment B_Ca (Stage 3.4 — volume-dependent calcium dynamics)
+    from core.solver import NeuronSolver
+    b_ca_v = NeuronSolver._build_b_ca_vector(cfg, morph)
+
     # Effective channel counts (proportional to conductance density)
     N_Na = max(50, int(1000 * ch.gNa_max / 120.0))
     N_K  = max(50, int(1000 * ch.gK_max  /  36.0))
@@ -361,7 +365,7 @@ def run_euler_maruyama(config: FullModelConfig,
             dy[cur:cur + n_comp] = phi * (aa_v * (1 - a) - ba_v * a);  cur += n_comp
             dy[cur:cur + n_comp] = phi * (ab_v * (1 - b) - bb_v * b);  cur += n_comp
         if dyn_ca:
-            dca = (-cfg.calcium.B_Ca * I_ca_total
+            dca = (-b_ca_v * I_ca_total
                    - (ca_i - cfg.calcium.Ca_rest) / cfg.calcium.tau_Ca)
             dca = np.where((ca_i < 1e-9) & (dca < 0), 0.0, dca)
             dy[cur:cur + n_comp] = dca
