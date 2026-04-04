@@ -47,10 +47,12 @@ def bn(V):
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def ar_Ih(V):
+    """Ih activation alpha (Destexhe 1993) - V1/2 ~ -78mV"""
     return 0.001 * np.exp(-(V + 78.0) / 18.0)
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def br_Ih(V):
+    """Ih activation beta (Destexhe 1993)"""
     return 0.001 / (1.0 + np.exp(-(V + 78.0) / 18.0))
 
 # =====================================================================
@@ -72,10 +74,12 @@ def bs_Ca(V):
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def au_Ca(V):
+    """ICa inactivation alpha (Huguenard 1992)"""
     return 0.000457 * np.exp(-(V + 13.0) / 50.0)
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def bu_Ca(V):
+    """ICa inactivation beta (Huguenard 1992)"""
     return 0.0065 / (np.exp(-(V + 15.0) / 28.0) + 1.0)
 
 # =====================================================================
