@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
-    QCheckBox, QComboBox, QGroupBox, QVBoxLayout
+    QCheckBox, QComboBox, QGroupBox, QVBoxLayout, QLabel
 )
 from PySide6.QtCore import Qt
 from typing import Literal, get_args, get_origin
@@ -13,6 +13,7 @@ class PydanticFormWidget(QWidget):
         self.instance = pydantic_instance
         self.on_change = on_change
         self.widgets_map = {}
+        self.labels_map = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -53,7 +54,9 @@ class PydanticFormWidget(QWidget):
                 continue
 
             w.setToolTip(field_info.description or field_name)
-            self.form_layout.addRow(field_name, w)
+            label = QLabel(field_name)
+            self.form_layout.addRow(label, w)
+            self.labels_map[field_name] = label
             self.widgets_map[field_name] = w
 
     def _set_field(self, field_name, value):

@@ -277,29 +277,36 @@ class MainWindow(QMainWindow):
         # ── Tab 0: Parameters ─────────────────────────────────────────
         self.tab_params = QWidget()
         self._build_params_tab()
-        self.tabs.addTab(self.tab_params,   "⚙ Parameters")
+        self.tabs.addTab(self.tab_params,   "1) Setup")
+
+        # ── Tab 1: Dual Stimulation ───────────────────────────────────
+        self.dual_stim_widget = getattr(self, "dual_stim_widget", DualStimulationWidget())
+        # Keep a single connection even if this block executes again.
+        try:
+            self.dual_stim_widget.config_changed.disconnect(self._on_dual_stim_config_changed)
+        except Exception:
+            pass
+        self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
+        self.tabs.addTab(self.dual_stim_widget, "2) Dual Stim")
 
         # ── Tab 1: Oscilloscope ───────────────────────────────────────
         self.oscilloscope = OscilloscopeWidget()
-        self.tabs.addTab(self.oscilloscope, "📡 Oscilloscope")
+        self.tabs.addTab(self.oscilloscope, "3) Oscilloscope")
 
         # ── Tab 2: Analytics ──────────────────────────────────────────
         self.analytics = AnalyticsWidget()
-        self.tabs.addTab(self.analytics,    "🔬 Analytics")
+        self.tabs.addTab(self.analytics,    "4) Analytics")
 
         # ── Tab 3: Topology ───────────────────────────────────────────
         self.topology = TopologyWidget()
-        self.tabs.addTab(self.topology,     "🧠 Topology")
+        self.tabs.addTab(self.topology,     "5) Topology")
 
         # ── Tab 4: Axon Biophysics ───────────────────────────────────
         self.axon_biophysics = AxonBiophysicsWidget()
-        self.tabs.addTab(self.axon_biophysics, "⚡ Axon Biophysics")
+        self.tabs.addTab(self.axon_biophysics, "6) Axon Biophysics")
 
         # ── Tab 5: Dual Stimulation ──────────────────────────────────
-        self.dual_stim_widget = DualStimulationWidget()
-        # Connect dual stim widget signals to sync with main config
-        self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
-        self.tabs.addTab(self.dual_stim_widget, "⚡⚡ Dual Stim")
+        # (moved above as step 2 in workflow order)
 
         # ── Tab 6: Guide ──────────────────────────────────────────────
         from PySide6.QtWidgets import QTextBrowser
@@ -308,53 +315,86 @@ class MainWindow(QMainWindow):
         self.guide_browser.setStyleSheet(
             "background:#0D1117; color:#C9D1D9; font-size:13px; border:none;"
         )
-        self.tabs.addTab(self.guide_browser, "📖 Guide")
+        self.tabs.addTab(self.guide_browser, "7) Guide")
 
         self._main_layout.addWidget(self.tabs, stretch=1)
 
     def _build_params_tab(self):
-        layout  = QVBoxLayout(self.tab_params)
-        scroll  = QScrollArea()
+        layout = QVBoxLayout(self.tab_params)
+
+        self.lbl_params_hint = QLabel("")
+        self.lbl_params_hint.setWordWrap(True)
+        self.lbl_params_hint.setStyleSheet(
+            "QLabel {"
+            "background:#1f2538; color:#cdd6f4; border:1px solid #45475a; "
+            "border-radius:6px; padding:8px; font-size:12px;"
+            "}"
+        )
+        layout.addWidget(self.lbl_params_hint)
+
+        scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         scroll.setStyleSheet("QScrollArea { border: none; }")
 
-        content  = QWidget()
-        c_layout = QHBoxLayout(content)
+        content = QWidget()
+        c_layout = QVBoxLayout(content)
         c_layout.setSpacing(10)
 
-        # Left column
-        l_col = QVBoxLayout()
-        self.form_morph   = PydanticFormWidget(self.config.morphology,  "Morphology")
-        self.form_env     = PydanticFormWidget(self.config.env,          "Environment")
+        # Forms
+        self.form_stim = PydanticFormWidget(self.config.stim, "Stimulation")
+        self.form_stim_loc = PydanticFormWidget(self.config.stim_location, "Stimulus Location")
+        self.form_dfilter = PydanticFormWidget(self.config.dendritic_filter, "Dendritic Filter")
         self.form_preset_modes = PydanticFormWidget(
             self.config.preset_modes,
             "Preset Modes (K/N/O)",
             on_change=self._on_preset_mode_changed
         )
-        self.form_ana     = PydanticFormWidget(self.config.analysis,     "Analysis / Sweep / Map")
-        l_col.addWidget(self.form_morph)
-        l_col.addWidget(self.form_env)
-        l_col.addWidget(self.form_preset_modes)
-        l_col.addWidget(self.form_ana)
-        l_col.addStretch()
+        self.form_chan = PydanticFormWidget(self.config.channels, "Ion Channels")
+        self.form_calcium = PydanticFormWidget(self.config.calcium, "Calcium Dynamics")
+        self.form_morph = PydanticFormWidget(self.config.morphology, "Morphology")
+        self.form_env = PydanticFormWidget(self.config.env, "Environment")
+        self.form_ana = PydanticFormWidget(self.config.analysis, "Analysis / Sweep / Map")
 
-        # Right column
-        r_col = QVBoxLayout()
-        self.form_chan    = PydanticFormWidget(self.config.channels,     "Ion Channels")
-        self.form_calcium = PydanticFormWidget(self.config.calcium,      "Calcium Dynamics")
-        self.form_stim    = PydanticFormWidget(self.config.stim,         "Stimulation")
-        self.form_stim_loc = PydanticFormWidget(self.config.stim_location, "Stimulus Location")
-        self.form_dfilter = PydanticFormWidget(self.config.dendritic_filter, "Dendritic Filter")
-        r_col.addWidget(self.form_chan)
-        r_col.addWidget(self.form_calcium)
-        r_col.addWidget(self.form_stim)
-        r_col.addWidget(self.form_stim_loc)
-        r_col.addWidget(self.form_dfilter)
-        r_col.addStretch()
+        # Group 1: run setup (user-edited first)
+        grp_setup = QGroupBox("Run Setup (Edit First)")
+        setup_layout = QHBoxLayout(grp_setup)
+        setup_left = QVBoxLayout()
+        setup_right = QVBoxLayout()
+        setup_left.addWidget(self.form_stim)
+        setup_left.addWidget(self.form_stim_loc)
+        setup_left.addWidget(self.form_dfilter)
+        setup_right.addWidget(self.form_preset_modes)
+        self.lbl_dual_priority = QLabel("")
+        self.lbl_dual_priority.setWordWrap(True)
+        self.lbl_dual_priority.setStyleSheet(
+            "QLabel { color:#f9e2af; background:#2a1f1f; border:1px solid #5a4a3a; border-radius:6px; padding:8px; }"
+        )
+        setup_right.addWidget(self.lbl_dual_priority)
+        setup_right.addStretch()
+        setup_layout.addLayout(setup_left)
+        setup_layout.addLayout(setup_right)
+        c_layout.addWidget(grp_setup)
 
-        c_layout.addLayout(l_col)
-        c_layout.addLayout(r_col)
+        # Group 2: model biophysics
+        grp_model = QGroupBox("Model Biophysics")
+        model_layout = QHBoxLayout(grp_model)
+        model_left = QVBoxLayout()
+        model_right = QVBoxLayout()
+        model_left.addWidget(self.form_chan)
+        model_left.addWidget(self.form_calcium)
+        model_right.addWidget(self.form_morph)
+        model_right.addWidget(self.form_env)
+        model_layout.addLayout(model_left)
+        model_layout.addLayout(model_right)
+        c_layout.addWidget(grp_model)
+
+        # Group 3: advanced analysis/sweep tools
+        grp_ana = QGroupBox("Advanced Analysis Tools")
+        ana_layout = QVBoxLayout(grp_ana)
+        ana_layout.addWidget(self.form_ana)
+        c_layout.addWidget(grp_ana)
+
         scroll.setWidget(content)
         layout.addWidget(scroll)
 
@@ -367,6 +407,37 @@ class MainWindow(QMainWindow):
 
     def _status(self, msg: str):
         self._sb.showMessage(msg)
+
+    def _update_params_hint(self):
+        """Refresh setup hint text so parameter priority is always explicit."""
+        dual_enabled = bool(getattr(self.dual_stim_widget, "config", None) and self.dual_stim_widget.config.enabled)
+        p = (self._current_preset_name or "").lower()
+        pm = self.config.preset_modes
+
+        mode_note = "Mode flags: none for this preset."
+        if "thalamic" in p:
+            mode_note = f"Mode flags: K mode={pm.k_mode}."
+        elif "alzheimer" in p:
+            mode_note = f"Mode flags: N mode={pm.alzheimer_mode}."
+        elif "hypoxia" in p:
+            mode_note = f"Mode flags: O mode={pm.hypoxia_mode}."
+        elif "multiple sclerosis" in p:
+            mode_note = "Mode flags: F is single-stage (no progressive/terminal switch)."
+
+        if dual_enabled:
+            priority_note = (
+                "Priority: Dual Stim is ON, so primary stimulation values from the Dual Stim tab "
+                "override main Stimulation/Stimulus Location fields."
+            )
+        else:
+            priority_note = (
+                "Priority: Dual Stim is OFF, so main Stimulation/Stimulus Location fields are active."
+            )
+
+        if hasattr(self, "lbl_params_hint"):
+            self.lbl_params_hint.setText(f"{priority_note}  {mode_note}")
+        if hasattr(self, "lbl_dual_priority"):
+            self.lbl_dual_priority.setText(priority_note)
 
     def _sync_dual_stim_into_config(self) -> bool:
         """
@@ -410,22 +481,34 @@ class MainWindow(QMainWindow):
         else:
             self.form_stim.group_box.setTitle("Stimulation")
             self.form_stim_loc.group_box.setTitle("Stimulus Location")
+        self._update_params_hint()
 
     def _sync_preset_mode_controls(self):
-        """Enable only the mode selector that applies to the active preset."""
+        """Show only the mode selector that applies to the active preset."""
         p = (self._current_preset_name or "").lower()
         active = {
             "k_mode": "thalamic" in p,
             "alzheimer_mode": "alzheimer" in p,
             "hypoxia_mode": "hypoxia" in p,
         }
+        any_active = False
         for field_name, widget in self.form_preset_modes.widgets_map.items():
             is_active = bool(active.get(field_name, False))
             widget.setEnabled(is_active)
+            widget.setVisible(is_active)
+            label = self.form_preset_modes.labels_map.get(field_name)
+            if label is not None:
+                label.setVisible(is_active)
             if is_active:
+                any_active = True
                 widget.setToolTip("Active for current preset.")
             else:
                 widget.setToolTip("Ignored for current preset.")
+        if any_active:
+            self.form_preset_modes.group_box.setTitle("Preset Modes (K/N/O)")
+        else:
+            self.form_preset_modes.group_box.setTitle("Preset Modes (not used for current preset)")
+        self._update_params_hint()
 
     def _active_mode_suffix(self) -> str:
         """Compact status suffix for active preset mode selector state."""
@@ -585,7 +668,7 @@ class MainWindow(QMainWindow):
 
     def _on_dual_stim_config_changed(self):
         """Handle dual stimulation config changes from widget."""
-        dual_enabled = self._sync_dual_stim_into_config()
+        self._sync_dual_stim_into_config()
         self._sync_stim_controls_with_dual_mode()
         if self.dual_stim_widget.config.enabled:
             self._status(
@@ -898,6 +981,12 @@ Default profile uses <b>K baseline</b>; switch to <b>activated</b> for high-thro
 </p>
 <p style="color:#BAC2DE;">
 Interpret terminal modes as late-pathology behavior for analysis/education, not as healthy baseline physiology.
+</p>
+<p style="color:#BAC2DE;">
+<b>F (Multiple Sclerosis)</b> is currently modeled as a single-stage preset (no progressive/terminal switch).
+</p>
+<p style="color:#BAC2DE;">
+When <b>Dual Stim</b> is enabled, Dual tab primary settings override standard stimulation fields.
 </p>
 
 <h2 style="color:#A6E3A1;">💾 Export</h2>
