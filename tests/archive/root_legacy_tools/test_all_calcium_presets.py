@@ -3,6 +3,10 @@
 Test all neuron presets with calcium dynamics enabled.
 Validates: Alzheimer's, Hypoxia, Thalamic, Purkinje, Hippocampal CA1
 """
+import sys, os
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
 import numpy as np
 from core.models import FullModelConfig
 from core.presets import apply_preset

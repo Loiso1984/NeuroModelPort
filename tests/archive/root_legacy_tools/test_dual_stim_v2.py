@@ -1,5 +1,9 @@
 """test_dual_stim_v2.py - Corrected dual stim tests with proper baselines"""
 
+import sys, os
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
 import numpy as np
 from core.solver import NeuronSolver
 from core.models import FullModelConfig
