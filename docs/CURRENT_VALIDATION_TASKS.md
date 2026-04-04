@@ -399,3 +399,31 @@ If Jacobian mode is validated as both stable and significantly faster, expose it
 3. Branch validation added:
    - `tests/branches/test_modulation_decomposition_branch.py` checks
      locked vs unlocked synthetic spike patterns and `full_analysis` integration.
+
+## UI/Topology Sync Progress (2026-04-04, continued)
+
+70. Delay-target context is now shared between Oscilloscope and Topology:
+   - selecting delay target in Oscilloscope immediately updates Topology delay-focus highlight and info bar,
+   - redraw happens without solver rerun (visual sync only).
+71. Delay-target controls now sync from preset morphology even before first run:
+   - custom-compartment index range (`1..N-1`) is available right after preset load,
+   - avoids pre-run `1..1` lock for custom delay target.
+72. Topology index semantics aligned with morphology indexing:
+   - fork index now tracks the morphology fork compartment (last trunk comp),
+   - index map and delay target labels use consistent compartment numbering.
+73. Added branch regression test for this integration:
+   - `tests/branches/test_delay_target_sync_branch.py` (`3/3` pass),
+   - active branch suite registry and runner updated to include this test.
+74. Lightweight real-time GUI preview hardening:
+   - topology preview now updates immediately on setup edits (stimulation, location, dendritic filter, channels, morphology),
+   - no solver rerun required for these UI-only preview updates.
+75. Delay/junction semantics unified with morphology indexing:
+   - `Trunk Junction` now maps to fork compartment (last trunk segment) consistently across Oscilloscope, Topology, Analytics and core conduction metric extraction.
+76. Validation utility consistency pass:
+   - updated active physiology report scripts to use the same fork/junction indexing (`run_unified_preset_protocol.py`, `run_f_conduction_extended.py`, `run_pathology_focus_report.py`, `run_pathology_worstcase_followup.py`),
+   - avoids cross-report mismatch for junction peaks/delay interpretations.
+77. Added regression guard for progress-callback path in advanced analyses:
+   - new `tests/branches/test_advanced_sim_progress_callbacks_branch.py` (`2/2` pass),
+   - protects `run_sd_curve` and `run_excitability_map` callback contract (`progress_cb`) from future regressions.
+78. Stimulation UI visibility sanity check completed:
+   - verified `const/pulse/alpha/AMPA` correctly show/hide only relevant controls in setup form.

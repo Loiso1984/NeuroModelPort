@@ -11,8 +11,11 @@ This registry separates **active validation tests** from **legacy exploratory sc
 - `tests/branches/test_jacobian_modes_branch.py`
 - `tests/branches/test_multichannel_stress_branch.py`
 - `tests/branches/test_cde_profiles_branch.py`
+- `tests/branches/test_advanced_sim_progress_callbacks_branch.py`
 - `tests/branches/test_lyapunov_analysis_branch.py`
 - `tests/branches/test_modulation_decomposition_branch.py`
+- `tests/branches/test_delay_target_sync_branch.py`
+- `tests/branches/test_passport_ml_classification_branch.py`
 - `tests/branches/test_pathology_mode_sweep_branch.py`
 - `tests/branches/test_solver_validation_branch.py`
 

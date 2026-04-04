@@ -60,8 +60,14 @@ def _collect_single(cfg: FullModelConfig, name: str) -> dict:
         "stable_finite": bool(np.all(np.isfinite(res.v_soma))),
     }
     if res.n_comp > 1:
+        if cfg.morphology.N_trunk > 0:
+            j_idx = min(1 + cfg.morphology.N_ais + cfg.morphology.N_trunk - 1, res.n_comp - 1)
+        elif cfg.morphology.N_ais > 0:
+            j_idx = min(cfg.morphology.N_ais, res.n_comp - 1)
+        else:
+            j_idx = min(1, res.n_comp - 1)
         row["terminal_peak_mV"] = float(np.max(res.v_all[-1, :]))
-        row["junction_peak_mV"] = float(np.max(res.v_all[min(1 + cfg.morphology.N_ais + cfg.morphology.N_trunk, res.n_comp - 1), :]))
+        row["junction_peak_mV"] = float(np.max(res.v_all[j_idx, :]))
         t_s = _first_cross(res.v_soma, res.t, 0.0)
         t_t = _first_cross(res.v_all[-1, :], res.t, 0.0)
         row["delay_term_minus_soma_ms"] = float(t_t - t_s) if not (np.isnan(t_s) or np.isnan(t_t)) else None

@@ -299,6 +299,7 @@ class MainWindow(QMainWindow):
         self._delay_target_name, self._delay_custom_index = (
             self.oscilloscope.get_delay_target_selection()
         )
+        self.oscilloscope.sync_delay_controls_for_config(self.config)
         self.tabs.addTab(self.oscilloscope, "3) Oscilloscope")
 
         # ── Tab 3: Analytics ──────────────────────────────────────────
@@ -360,14 +361,26 @@ class MainWindow(QMainWindow):
             "Stimulation",
             on_change=self._on_stim_field_changed,
         )
-        self.form_stim_loc = PydanticFormWidget(self.config.stim_location, "Stimulus Location")
-        self.form_dfilter = PydanticFormWidget(self.config.dendritic_filter, "Dendritic Filter")
+        self.form_stim_loc = PydanticFormWidget(
+            self.config.stim_location,
+            "Stimulus Location",
+            on_change=self._on_stim_loc_field_changed,
+        )
+        self.form_dfilter = PydanticFormWidget(
+            self.config.dendritic_filter,
+            "Dendritic Filter",
+            on_change=self._on_dfilter_field_changed,
+        )
         self.form_preset_modes = PydanticFormWidget(
             self.config.preset_modes,
             "Preset Modes (K/N/O)",
             on_change=self._on_preset_mode_changed
         )
-        self.form_chan = PydanticFormWidget(self.config.channels, "Ion Channels")
+        self.form_chan = PydanticFormWidget(
+            self.config.channels,
+            "Ion Channels",
+            on_change=self._on_channel_field_changed,
+        )
         self.form_calcium = PydanticFormWidget(self.config.calcium, "Calcium Dynamics")
         self.form_morph = PydanticFormWidget(
             self.config.morphology,
@@ -503,10 +516,12 @@ class MainWindow(QMainWindow):
         self.config.stim.Iext_absolute_nA = float(self.config.stim.Iext) * area * 1000.0
 
     def _on_morph_field_changed(self, field_name: str, _value):
+        self.oscilloscope.sync_delay_controls_for_config(self.config)
         if field_name == "d_soma":
             self._recompute_absolute_iext()
             if "Iext_absolute_nA" in self.form_stim.widgets_map:
                 self.form_stim.refresh()
+        self._refresh_topology_preview()
 
     def _on_stim_field_changed(self, field_name: str, value):
         if field_name == "stim_type":
@@ -528,6 +543,32 @@ class MainWindow(QMainWindow):
             self._recompute_absolute_iext()
             self.form_stim.refresh()
         self._update_params_hint()
+        self._refresh_topology_preview()
+
+    def _on_stim_loc_field_changed(self, _field_name: str, _value):
+        self._update_params_hint()
+        self._refresh_topology_preview()
+
+    def _on_dfilter_field_changed(self, _field_name: str, _value):
+        self._refresh_topology_preview()
+
+    def _on_channel_field_changed(self, _field_name: str, _value):
+        self._refresh_topology_preview()
+
+    def _refresh_topology_preview(self):
+        if not hasattr(self, "topology"):
+            return
+        dual_cfg = (
+            self.dual_stim_widget.config
+            if hasattr(self, "dual_stim_widget") and self.dual_stim_widget.config.enabled
+            else None
+        )
+        self.topology.draw_neuron(
+            self.config,
+            dual_config=dual_cfg,
+            delay_target_name=self._delay_target_name,
+            delay_custom_index=self._delay_custom_index,
+        )
 
     def _on_delay_target_changed(self, target_name: str, custom_index: int):
         self._delay_target_name = str(target_name)
@@ -633,6 +674,7 @@ class MainWindow(QMainWindow):
         self._current_preset_name = name
         apply_preset(self.config, name)
         self._refresh_all_forms()
+        self.oscilloscope.sync_delay_controls_for_config(self.config)
         # Reset dual stim when loading new preset
         self.dual_stim_widget.load_default_preset()
         self._sync_stim_controls_with_dual_mode()
@@ -661,6 +703,7 @@ class MainWindow(QMainWindow):
             return
         apply_preset(self.config, self._current_preset_name)
         self._refresh_all_forms()
+        self.oscilloscope.sync_delay_controls_for_config(self.config)
         self.topology.draw_neuron(
             self.config,
             delay_target_name=self._delay_target_name,

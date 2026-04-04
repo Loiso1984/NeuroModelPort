@@ -1006,7 +1006,12 @@ def full_analysis(result) -> dict:
     cv = 0.0
     mc = cfg.morphology
     if result.n_comp > 2:
-        junction = min(1 + mc.N_ais + mc.N_trunk, result.n_comp - 1)
+        if mc.N_trunk > 0:
+            junction = min(1 + mc.N_ais + mc.N_trunk - 1, result.n_comp - 1)
+        elif mc.N_ais > 0:
+            junction = min(mc.N_ais, result.n_comp - 1)
+        else:
+            junction = min(1, result.n_comp - 1)
         dist_cm  = (mc.N_ais + mc.N_trunk) * mc.dx
         cv = conduction_velocity(
             result.v_all[0, :], result.v_all[junction, :], t, dist_cm

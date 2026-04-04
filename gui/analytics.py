@@ -322,7 +322,12 @@ class AnalyticsWidget(QTabWidget):
             t_soma = _first_crossing_ms(result.v_soma)
             if np.isfinite(t_soma):
                 if result.n_comp > 2:
-                    j_idx = min(1 + mc.N_ais + mc.N_trunk, result.n_comp - 1)
+                    if mc.N_trunk > 0:
+                        j_idx = min(1 + mc.N_ais + mc.N_trunk - 1, result.n_comp - 1)
+                    elif mc.N_ais > 0:
+                        j_idx = min(mc.N_ais, result.n_comp - 1)
+                    else:
+                        j_idx = 0
                     t_j = _first_crossing_ms(result.v_all[j_idx, :])
                     if np.isfinite(t_j) and t_j >= t_soma:
                         delay_junction_ms = t_j - t_soma
@@ -472,8 +477,13 @@ class AnalyticsWidget(QTabWidget):
         if n > 1 and mc.N_ais > 0:
             key_indices.append(1)
             labels.append('AIS')
-        junc = 1 + mc.N_ais + mc.N_trunk
-        if n > junc:
+        if mc.N_trunk > 0:
+            junc = 1 + mc.N_ais + mc.N_trunk - 1
+        elif mc.N_ais > 0:
+            junc = mc.N_ais
+        else:
+            junc = 0
+        if 1 <= junc < n:
             key_indices.append(min(junc, n-1))
             labels.append('Junction')
         if n > 2:

@@ -348,8 +348,13 @@ class OscilloscopeWidget(QWidget):
                 return 1, "AIS", "ais"
             return None, "", "ais"
         if target == "Trunk Junction":
-            j = 1 + int(mc.N_ais) + int(mc.N_trunk)
-            if 0 <= j < n:
+            if int(mc.N_trunk) > 0:
+                j = 1 + int(mc.N_ais) + int(mc.N_trunk) - 1
+            elif int(mc.N_ais) > 0:
+                j = int(mc.N_ais)
+            else:
+                j = 0
+            if 1 <= j < n:
                 return j, "junction", "terminal"
             return None, "", "terminal"
         if target == "Custom Compartment":
@@ -366,8 +371,13 @@ class OscilloscopeWidget(QWidget):
         if self._spin_delay_comp.value() > max_idx:
             self._spin_delay_comp.setValue(max_idx)
         has_ais = n > 1 and int(mc.N_ais) > 0
-        j = 1 + int(mc.N_ais) + int(mc.N_trunk)
-        has_junction = 0 <= j < n
+        if int(mc.N_trunk) > 0:
+            j = 1 + int(mc.N_ais) + int(mc.N_trunk) - 1
+        elif int(mc.N_ais) > 0:
+            j = int(mc.N_ais)
+        else:
+            j = 0
+        has_junction = 1 <= j < n
         model = self._combo_delay_target.model()
         for i in range(self._combo_delay_target.count()):
             name = self._combo_delay_target.itemText(i)

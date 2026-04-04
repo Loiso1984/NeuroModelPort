@@ -71,7 +71,12 @@ def _run_case(
     cfg.stim.jacobian_mode = "sparse_fd"
 
     res = NeuronSolver(cfg).run_single()
-    j = min(1 + cfg.morphology.N_ais + cfg.morphology.N_trunk, res.n_comp - 1)
+    if cfg.morphology.N_trunk > 0:
+        j = min(1 + cfg.morphology.N_ais + cfg.morphology.N_trunk - 1, res.n_comp - 1)
+    elif cfg.morphology.N_ais > 0:
+        j = min(cfg.morphology.N_ais, res.n_comp - 1)
+    else:
+        j = min(1, res.n_comp - 1)
 
     peak_s = float(np.max(res.v_soma))
     peak_j = float(np.max(res.v_all[j, :]))
@@ -207,4 +212,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

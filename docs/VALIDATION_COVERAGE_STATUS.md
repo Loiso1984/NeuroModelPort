@@ -17,6 +17,7 @@ Current status snapshot after latest branch-contour runs.
 - `3` Configurable spike detection in GUI: integrated and branch-tested; iterative GUI UX improvements still possible.
 - GUI clarity hardening in progress:
   - fixed SD/Excitability worker callback crash path,
+  - callback contract regression test added (`test_advanced_sim_progress_callbacks_branch.py`),
   - dual-stim now resets to disabled default on preset load and explicitly overrides primary stimulation fields only when enabled,
   - preset mode selectors are context-scoped to relevant K/N/O presets,
   - setup/dual-stim/analysis tab order and setup grouping were reworked for clearer workflow,
@@ -29,13 +30,17 @@ Current status snapshot after latest branch-contour runs.
 - Deferred: targeted `C/L` baseline stimulation refinement pass (kept out of current high-priority lane).
 - `7` Plot readability/interactive improvements (beyond current export integration).
   - progress update: theme + linewidth + spike/delay overlays + title-font/grid controls integrated in oscilloscope.
-  - delay visualization now supports target selection (terminal / AIS / junction / custom compartment).
+  - delay visualization now supports target selection (terminal / AIS / junction / custom compartment),
+  - delay target controls are now preset-synced before first run (custom index range available pre-simulation).
 - `8` Neuron passport with ML classification.
   - progress update: passport now includes Lyapunov/modulation blocks, channel-engagement/delay summaries,
     and a first hybrid rule+ML classifier baseline (prototype ML + confidence + source tag).
 - `9` Topology/axon propagation visualization upgrades.
-  - progress update: topology now includes compartment-index labeling and compact index map in info bar for better axonal targeting.
+  - progress update: topology now includes compartment-index labeling and compact index map in info bar for better axonal targeting,
+  - topology delay focus is now linked to oscilloscope delay-target selection (shared cross-tab context),
+  - fork/index semantics aligned with morphology indexing across GUI + analytics + core conduction extraction and active validation utility reports; branch regression test added (`test_delay_target_sync_branch.py`).
 - `10` Real-time sliders with immediate recompute.
+  - progress update: lightweight real-time preview is now active for setup edits (stimulation/location/filter/channel/morphology) by instant topology redraw without solver rerun.
 - `11` Extended export workflows polishing.
 - `12` Full doc rewrite/reorganization (user+developer).
 - `13` Further compute optimization beyond current Jacobian speedup path.
