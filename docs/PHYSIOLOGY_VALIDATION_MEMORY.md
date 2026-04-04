@@ -1,6 +1,7 @@
 # Physiology Validation Memory
 
 This file captures mandatory project rules for all future simulation work.
+Canonical verbatim backlog/rules source: `docs/MASTER_BACKLOG_CONTRACT.md`.
 
 ## Mandatory Rules
 
@@ -30,3 +31,4 @@ This file captures mandatory project rules for all future simulation work.
    - proximal axonal spike transfer effectiveness is reduced.
 9. Long sweeps for branch validation should run in parallel with checkpoint/resume support
    (do not run monolithic single-process brute-force jobs for hours).
+10. If Jacobian-based acceleration proves stable and physiologically correct, add Jacobian mode as a GUI-selectable solver option and evaluate making it default for heavy presets.

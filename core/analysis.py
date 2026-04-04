@@ -7,7 +7,8 @@ Ports and improves all analysis functions from Scilab hh_utils.sce:
   space_constant, compute_current_balance + Python-native extensions.
 """
 import numpy as np
-from scipy.signal import find_peaks
+from scipy.signal import butter, find_peaks, hilbert, sosfiltfilt
+from scipy.spatial import cKDTree
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -17,7 +18,9 @@ from scipy.signal import find_peaks
 def detect_spikes(V: np.ndarray, t: np.ndarray,
                   threshold: float = -20.0,
                   prominence: float = 10.0,
-                  baseline_threshold: float = -50.0) -> tuple:
+                  baseline_threshold: float = -50.0,
+                  repolarization_window_ms: float = 20.0,
+                  refractory_ms: float = 1.0) -> tuple:
     """
     Spike detection: find peaks above threshold with repolarization check.
     
@@ -43,81 +46,45 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
     spike_times: np.ndarray[float] — times of peaks (ms)
     spike_amps : np.ndarray[float] — amplitudes of peaks (mV)
     """
-    # Find regions where V crosses threshold
-    above_thresh = V > threshold
-    if not np.any(above_thresh):
+    if len(V) == 0 or len(t) == 0:
         return np.array([], dtype=int), np.array([]), np.array([])
 
-    # Find local maxima within suprathreshold regions
-    peak_idx_list = []
-    in_spike = False
-    spike_start = 0
+    if len(V) != len(t):
+        n = min(len(V), len(t))
+        V = V[:n]
+        t = t[:n]
 
-    for i in range(len(V)):
-        if above_thresh[i] and not in_spike:
-            # Start of suprathreshold region
-            in_spike = True
-            spike_start = i
-        elif not above_thresh[i] and in_spike:
-            # End of suprathreshold region - find peak within
-            if spike_start < i:
-                peak_in_region = np.argmax(V[spike_start:i]) + spike_start
-                
-                # NEW: Check if this is a true peak (local maximum)
-                peak_val = V[peak_in_region]
-                
-                # Check if it's significantly higher than neighbors
-                left_idx = max(0, peak_in_region - 5)
-                right_idx = min(len(V), peak_in_region + 5)
-                local_region = V[left_idx:right_idx]
-                
-                # Must be the maximum in local region
-                is_local_max = peak_val == np.max(local_region)
-                
-                # NEW: Check if it's a sharp peak (not plateau)
-                # Calculate prominence: difference from surrounding minima
-                left_min = np.min(V[left_idx:peak_in_region]) if peak_in_region > left_idx else peak_val
-                right_min = np.min(V[peak_in_region+1:right_idx]) if peak_in_region < right_idx-1 else peak_val
-                prominence = peak_val - max(left_min, right_min)
-                
-                # Must have minimum prominence to be considered a real spike
-                min_prominence = 5.0  # mV
-                is_sharp_peak = prominence >= min_prominence
-                
-                # NEW: Check repolarization to baseline
-                # Look ahead to see if voltage returns to baseline
-                look_ahead = min(100, len(V) - i)  # Look up to 100 points ahead
-                valid_repolarization = False
-                
-                if look_ahead > 0:
-                    future_v = V[i:min(i + look_ahead, len(V))]
-                    # Check if voltage falls below baseline threshold at any point
-                    if len(future_v) > 0 and np.min(future_v) < baseline_threshold:
-                        valid_repolarization = True
-                else:
-                    # Can't verify repolarization at end of trace
-                    # Only count if we're already near baseline
-                    if V[i] < baseline_threshold:
-                        valid_repolarization = True
-                
-                # Only count if all conditions met: local max + sharp peak + repolarization
-                if is_local_max and is_sharp_peak and valid_repolarization:
-                    peak_idx_list.append(peak_in_region)
-                
-            in_spike = False
+    dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.05
+    dt_ms = max(dt_ms, 1e-6)
 
-    # Handle case where trace ends while in spike
-    if in_spike and spike_start < len(V):
-        peak_in_region = np.argmax(V[spike_start:]) + spike_start
-        # For final spike, check if it was already high at end
-        # (can't verify repolarization if trace ends)
-        peak_idx_list.append(peak_in_region)
+    min_distance = max(1, int(round(refractory_ms / dt_ms)))
+    repol_window_pts = max(1, int(round(repolarization_window_ms / dt_ms)))
 
-    if len(peak_idx_list) == 0:
+    peak_idx, _ = find_peaks(
+        V,
+        height=threshold,
+        prominence=max(prominence, 0.0),
+        distance=min_distance,
+    )
+
+    if len(peak_idx) == 0:
         return np.array([], dtype=int), np.array([]), np.array([])
 
-    peak_idx = np.array(peak_idx_list, dtype=int)
-    return peak_idx, t[peak_idx], V[peak_idx]
+    valid = []
+    for pk in peak_idx:
+        end = min(len(V), pk + repol_window_pts + 1)
+        if np.min(V[pk:end]) < baseline_threshold:
+            valid.append(int(pk))
+            continue
+        # Edge case: near trace end we may not have full window.
+        if end == len(V) and V[-1] < threshold:
+            valid.append(int(pk))
+
+    if len(valid) == 0:
+        return np.array([], dtype=int), np.array([]), np.array([])
+
+    valid_idx = np.array(valid, dtype=int)
+    return valid_idx, t[valid_idx], V[valid_idx]
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -467,9 +434,354 @@ def extract_gate_traces(result) -> dict:
     return gates
 
 
+def classify_lyapunov(ftle_per_ms: float, tol_per_ms: float = 1e-3) -> str:
+    """Qualitative regime label from FTLE/LLE estimate."""
+    if np.isnan(ftle_per_ms):
+        return "unknown"
+    if ftle_per_ms > tol_per_ms:
+        return "unstable_or_chaotic"
+    if ftle_per_ms < -tol_per_ms:
+        return "stable"
+    return "limit_cycle_like"
+
+
+def estimate_ftle_lle(
+    x: np.ndarray,
+    t: np.ndarray,
+    *,
+    embedding_dim: int = 3,
+    lag_steps: int = 2,
+    min_separation_ms: float = 10.0,
+    fit_start_ms: float = 5.0,
+    fit_end_ms: float = 40.0,
+) -> dict:
+    """
+    Estimate FTLE/LLE from scalar time-series using Rosenstein-style divergence.
+    """
+    out = {
+        "lle_per_ms": np.nan,
+        "lle_per_s": np.nan,
+        "fit_window_ms": (fit_start_ms, fit_end_ms),
+        "valid_pairs": 0,
+        "ftle_time_ms": np.array([]),
+        "ftle_log_divergence": np.array([]),
+    }
+
+    if len(x) < 50 or len(t) < 50:
+        return out
+
+    n = min(len(x), len(t))
+    x = np.asarray(x[:n], dtype=float)
+    t = np.asarray(t[:n], dtype=float)
+    if not np.all(np.isfinite(x)) or not np.all(np.isfinite(t)):
+        return out
+
+    dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.1
+    dt_ms = max(dt_ms, 1e-9)
+
+    embedding_dim = max(2, int(embedding_dim))
+    lag_steps = max(1, int(lag_steps))
+    max_start = n - (embedding_dim - 1) * lag_steps
+    if max_start <= 30:
+        return out
+
+    x_std = float(np.std(x))
+    if x_std < 1e-12:
+        return out
+    xn = (x - float(np.mean(x))) / x_std
+
+    emb = np.empty((max_start, embedding_dim), dtype=float)
+    for d in range(embedding_dim):
+        emb[:, d] = xn[d * lag_steps : d * lag_steps + max_start]
+
+    tree = cKDTree(emb)
+    min_sep_steps = int(round(min_separation_ms / dt_ms))
+
+    max_k = min(250, max_start // 3)
+    if max_k < 8:
+        return out
+
+    pair_i = []
+    pair_j = []
+    for i in range(max_start - max_k):
+        dists, idxs = tree.query(emb[i], k=min(20, max_start))
+        del dists
+        if np.isscalar(idxs):
+            continue
+        chosen = None
+        for cand in idxs[1:]:
+            if abs(int(cand) - i) >= min_sep_steps:
+                chosen = int(cand)
+                break
+        if chosen is None or chosen + max_k >= max_start:
+            continue
+        pair_i.append(i)
+        pair_j.append(chosen)
+
+    if len(pair_i) < 20:
+        return out
+
+    pair_i = np.asarray(pair_i, dtype=int)
+    pair_j = np.asarray(pair_j, dtype=int)
+
+    mean_log_div = np.full(max_k, np.nan, dtype=float)
+    for k in range(max_k):
+        diff = emb[pair_i + k] - emb[pair_j + k]
+        dist = np.linalg.norm(diff, axis=1)
+        dist = np.maximum(dist, 1e-12)
+        mean_log_div[k] = float(np.mean(np.log(dist)))
+
+    times_ms = np.arange(max_k, dtype=float) * dt_ms
+    fit_mask = (times_ms >= fit_start_ms) & (times_ms <= fit_end_ms) & np.isfinite(mean_log_div)
+    if np.sum(fit_mask) < 6:
+        return out
+
+    slope, intercept = np.polyfit(times_ms[fit_mask], mean_log_div[fit_mask], 1)
+    del intercept
+
+    out["lle_per_ms"] = float(slope)
+    out["lle_per_s"] = float(slope * 1000.0)
+    out["valid_pairs"] = int(len(pair_i))
+    out["ftle_time_ms"] = times_ms
+    out["ftle_log_divergence"] = mean_log_div
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────
 #  9. NEURON PASSPORT  (full analysis report dict)
 # ─────────────────────────────────────────────────────────────────────
+
+def _stim_type_to_code(stim_type: str) -> int:
+    """Map textual stimulus type to the RHS integer code."""
+    return {
+        "const": 0,
+        "pulse": 1,
+        "alpha": 2,
+        "ou_noise": 3,
+        "AMPA": 4,
+        "NMDA": 5,
+        "GABAA": 6,
+        "GABAB": 7,
+        "Kainate": 8,
+        "Nicotinic": 9,
+    }.get(stim_type, 0)
+
+
+def _reconstruct_stimulus_proxy(result) -> np.ndarray:
+    """
+    Build a deterministic low-frequency stimulus proxy for modulation analysis.
+
+    Priority:
+    1) If dendritic filtering state exists in solution, use that directly.
+    2) Otherwise reconstruct from configured stimulus equations.
+    """
+    from core.rhs import get_stim_current
+
+    t = np.asarray(result.t, dtype=float)
+    n = len(t)
+    stim = np.zeros(n, dtype=float)
+    if n == 0:
+        return stim
+
+    cfg = result.config
+    mode = getattr(cfg.stim_location, "location", "soma")
+    stype = _stim_type_to_code(cfg.stim.stim_type)
+
+    if (
+        mode == "dendritic_filtered"
+        and cfg.dendritic_filter.enabled
+        and getattr(result, "v_dendritic_filtered", None) is not None
+    ):
+        vd = np.asarray(result.v_dendritic_filtered, dtype=float)
+        stim += vd[:n]
+    else:
+        attenuation = 1.0
+        if mode == "dendritic_filtered" and cfg.dendritic_filter.space_constant_um > 0.0:
+            attenuation = float(
+                np.exp(-cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um)
+            )
+        for i, ti in enumerate(t):
+            base = get_stim_current(
+                float(ti),
+                stype,
+                cfg.stim.Iext,
+                cfg.stim.pulse_start,
+                cfg.stim.pulse_dur,
+                cfg.stim.alpha_tau,
+            )
+            stim[i] += attenuation * float(base)
+
+    dual_cfg = getattr(cfg, "dual_stimulation", None)
+    if dual_cfg is not None and getattr(dual_cfg, "enabled", False):
+        stype_2 = _stim_type_to_code(getattr(dual_cfg, "secondary_stim_type", "const"))
+        mode_2 = getattr(dual_cfg, "secondary_location", "soma")
+        attenuation_2 = 1.0
+        if mode_2 == "dendritic_filtered":
+            space_const = float(getattr(dual_cfg, "secondary_space_constant_um", 0.0))
+            dist = float(getattr(dual_cfg, "secondary_distance_um", 0.0))
+            if space_const > 0.0:
+                attenuation_2 = float(np.exp(-dist / space_const))
+        for i, ti in enumerate(t):
+            base_2 = get_stim_current(
+                float(ti),
+                stype_2,
+                float(getattr(dual_cfg, "secondary_Iext", 0.0)),
+                float(getattr(dual_cfg, "secondary_start", 0.0)),
+                float(getattr(dual_cfg, "secondary_duration", 0.0)),
+                float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
+            )
+            stim[i] += attenuation_2 * float(base_2)
+
+    return stim
+
+
+def estimate_spike_modulation(
+    spike_times_ms: np.ndarray,
+    t_ms: np.ndarray,
+    mod_signal: np.ndarray,
+    *,
+    low_hz: float = 4.0,
+    high_hz: float = 12.0,
+    phase_bins: int = 18,
+    surrogate_count: int = 60,
+) -> dict:
+    """
+    Estimate phase-locking between spikes and a slow modulatory rhythm.
+
+    This is a non-FFT readout from spike timing:
+    - PLV / preferred phase
+    - phase-conditioned firing rates
+    - deterministic circular-shift surrogate p-value
+    """
+    out = {
+        "valid": False,
+        "plv": np.nan,
+        "preferred_phase_rad": np.nan,
+        "preferred_phase_deg": np.nan,
+        "modulation_depth": np.nan,
+        "modulation_index": np.nan,
+        "surrogate_p_value": np.nan,
+        "surrogate_z_score": np.nan,
+        "spikes_used": 0,
+        "band_low_hz": float(low_hz),
+        "band_high_hz": float(high_hz),
+        "phase_bin_centers_rad": np.array([]),
+        "phase_rate_hz": np.array([]),
+    }
+
+    n = min(len(t_ms), len(mod_signal))
+    if n < 32 or len(spike_times_ms) < 3:
+        return out
+
+    t = np.asarray(t_ms[:n], dtype=float)
+    x = np.asarray(mod_signal[:n], dtype=float)
+    if not np.all(np.isfinite(t)) or not np.all(np.isfinite(x)):
+        return out
+    if np.max(t) <= np.min(t):
+        return out
+
+    dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.1
+    dt_ms = max(dt_ms, 1e-9)
+    fs_hz = 1000.0 / dt_ms
+    nyq_hz = 0.5 * fs_hz
+
+    low = max(float(low_hz), 0.05)
+    high = min(float(high_hz), nyq_hz * 0.95)
+    if high <= low:
+        return out
+
+    x_demean = x - float(np.mean(x))
+    if float(np.std(x_demean)) < 1e-12:
+        return out
+
+    try:
+        sos = butter(2, [low / nyq_hz, high / nyq_hz], btype="band", output="sos")
+        x_band = sosfiltfilt(sos, x_demean)
+        phase = np.angle(hilbert(x_band))
+    except Exception:
+        return out
+
+    st = np.asarray(spike_times_ms, dtype=float)
+    st = st[np.isfinite(st)]
+    st = st[(st >= float(t[0])) & (st <= float(t[-1]))]
+    if len(st) < 3:
+        return out
+
+    unit = np.exp(1j * phase)
+    re_sp = np.interp(st, t, np.real(unit))
+    im_sp = np.interp(st, t, np.imag(unit))
+    phase_sp = np.angle(re_sp + 1j * im_sp)
+    if len(phase_sp) < 3:
+        return out
+
+    vec = np.mean(np.exp(1j * phase_sp))
+    plv = float(np.abs(vec))
+    pref = float(np.angle(vec))
+
+    bins = max(8, int(phase_bins))
+    edges = np.linspace(-np.pi, np.pi, bins + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    occ_counts, _ = np.histogram(phase, bins=edges)
+    spike_counts, _ = np.histogram(phase_sp, bins=edges)
+    occ_time_s = occ_counts.astype(float) * (dt_ms / 1000.0)
+    rate_hz = np.divide(
+        spike_counts.astype(float),
+        occ_time_s,
+        out=np.zeros_like(occ_time_s, dtype=float),
+        where=occ_time_s > 0,
+    )
+    mean_rate = float(np.mean(rate_hz)) if len(rate_hz) > 0 else 0.0
+    mod_depth = (
+        float((np.max(rate_hz) - np.min(rate_hz)) / mean_rate) if mean_rate > 0.0 else np.nan
+    )
+
+    total_spikes = int(np.sum(spike_counts))
+    if total_spikes > 0:
+        p = spike_counts.astype(float) / float(total_spikes)
+        p = np.maximum(p, 1e-12)
+        uniform = 1.0 / float(len(p))
+        kl = float(np.sum(p * np.log(p / uniform)))
+        mod_index = float(kl / np.log(len(p))) if len(p) > 1 else np.nan
+    else:
+        mod_index = np.nan
+
+    p_value = np.nan
+    z_score = np.nan
+    if surrogate_count > 0:
+        s_count = int(surrogate_count)
+        if s_count > 0:
+            rng = np.random.default_rng(20260404)
+            plv_surr = np.empty(s_count, dtype=float)
+            for i in range(s_count):
+                st_surr = np.sort(rng.choice(t, size=len(st), replace=True))
+                re_s = np.interp(st_surr, t, np.real(unit))
+                im_s = np.interp(st_surr, t, np.imag(unit))
+                phase_s = np.angle(re_s + 1j * im_s)
+                plv_surr[i] = float(np.abs(np.mean(np.exp(1j * phase_s))))
+            p_value = float((1.0 + np.sum(plv_surr >= plv)) / (len(plv_surr) + 1.0))
+            s_std = float(np.std(plv_surr))
+            if s_std > 1e-12:
+                z_score = float((plv - float(np.mean(plv_surr))) / s_std)
+
+    out.update(
+        {
+            "valid": True,
+            "plv": plv,
+            "preferred_phase_rad": pref,
+            "preferred_phase_deg": float(np.degrees(pref)),
+            "modulation_depth": mod_depth,
+            "modulation_index": mod_index,
+            "surrogate_p_value": p_value,
+            "surrogate_z_score": z_score,
+            "spikes_used": int(len(phase_sp)),
+            "band_low_hz": low,
+            "band_high_hz": high,
+            "phase_bin_centers_rad": centers,
+            "phase_rate_hz": rate_hz,
+        }
+    )
+    return out
+
 
 def full_analysis(result) -> dict:
     """
@@ -583,6 +895,63 @@ def full_analysis(result) -> dict:
             if actual_isi_steady > 0:
                 firing_reliability = min(1.0, expected_isi / actual_isi_steady)
 
+    # Optional FTLE/LLE stability analysis (default OFF).
+    lyap = {
+        "lle_per_ms": np.nan,
+        "lle_per_s": np.nan,
+        "lyapunov_class": "disabled",
+        "lyapunov_valid_pairs": 0,
+    }
+    ana = cfg.analysis
+    if getattr(ana, "enable_lyapunov", False):
+        lyap_raw = estimate_ftle_lle(
+            V,
+            t,
+            embedding_dim=getattr(ana, "lyapunov_embedding_dim", 3),
+            lag_steps=getattr(ana, "lyapunov_lag_steps", 2),
+            min_separation_ms=getattr(ana, "lyapunov_min_separation_ms", 10.0),
+            fit_start_ms=getattr(ana, "lyapunov_fit_start_ms", 5.0),
+            fit_end_ms=getattr(ana, "lyapunov_fit_end_ms", 40.0),
+        )
+        lyap = {
+            "lle_per_ms": float(lyap_raw["lle_per_ms"]) if np.isfinite(lyap_raw["lle_per_ms"]) else np.nan,
+            "lle_per_s": float(lyap_raw["lle_per_s"]) if np.isfinite(lyap_raw["lle_per_s"]) else np.nan,
+            "lyapunov_class": classify_lyapunov(lyap_raw["lle_per_ms"]),
+            "lyapunov_valid_pairs": int(lyap_raw["valid_pairs"]),
+        }
+
+    # Optional non-FFT modulation decomposition (default OFF).
+    modulation = {
+        "valid": False,
+        "source": getattr(ana, "modulation_source", "voltage"),
+        "plv": np.nan,
+        "preferred_phase_rad": np.nan,
+        "preferred_phase_deg": np.nan,
+        "modulation_depth": np.nan,
+        "modulation_index": np.nan,
+        "surrogate_p_value": np.nan,
+        "surrogate_z_score": np.nan,
+        "spikes_used": 0,
+        "band_low_hz": np.nan,
+        "band_high_hz": np.nan,
+        "phase_bin_centers_rad": np.array([]),
+        "phase_rate_hz": np.array([]),
+    }
+    if getattr(ana, "enable_modulation_decomposition", False):
+        source = getattr(ana, "modulation_source", "voltage")
+        mod_signal = V if source == "voltage" else _reconstruct_stimulus_proxy(result)
+        mod_raw = estimate_spike_modulation(
+            spike_times,
+            t,
+            mod_signal,
+            low_hz=getattr(ana, "modulation_low_hz", 4.0),
+            high_hz=getattr(ana, "modulation_high_hz", 12.0),
+            phase_bins=getattr(ana, "modulation_phase_bins", 18),
+            surrogate_count=getattr(ana, "modulation_surrogates", 60),
+        )
+        modulation.update(mod_raw)
+        modulation["source"] = source
+
     return {
         'n_spikes':            n_spikes,
         'spike_times':         spike_times,
@@ -612,4 +981,22 @@ def full_analysis(result) -> dict:
         'first_spike_latency_ms': first_spike_lat,
         'refractory_period_ms':   refr_period,
         'firing_reliability':  firing_reliability,
+        'lle_per_ms':          lyap["lle_per_ms"],
+        'lle_per_s':           lyap["lle_per_s"],
+        'lyapunov_class':      lyap["lyapunov_class"],
+        'lyapunov_valid_pairs': lyap["lyapunov_valid_pairs"],
+        'modulation_valid':    modulation["valid"],
+        'modulation_source':   modulation["source"],
+        'modulation_plv':      modulation["plv"],
+        'modulation_preferred_phase_rad': modulation["preferred_phase_rad"],
+        'modulation_preferred_phase_deg': modulation["preferred_phase_deg"],
+        'modulation_depth':    modulation["modulation_depth"],
+        'modulation_index':    modulation["modulation_index"],
+        'modulation_p_value':  modulation["surrogate_p_value"],
+        'modulation_z_score':  modulation["surrogate_z_score"],
+        'modulation_spikes_used': modulation["spikes_used"],
+        'modulation_band_low_hz': modulation["band_low_hz"],
+        'modulation_band_high_hz': modulation["band_high_hz"],
+        'modulation_phase_bin_centers_rad': modulation["phase_bin_centers_rad"],
+        'modulation_phase_rate_hz': modulation["phase_rate_hz"],
     }

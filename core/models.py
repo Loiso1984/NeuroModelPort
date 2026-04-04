@@ -164,6 +164,10 @@ class SimulationParams(BaseModel):
     """
     t_sim:      float   = Field(default=150.0, gt=0,  description="Simulation duration (ms)")
     dt_eval:    float   = Field(default=0.05,  gt=0,  description="Output time step (ms)")
+    jacobian_mode: Literal['dense_fd', 'sparse_fd', 'analytic_sparse'] = Field(
+        default='dense_fd',
+        description="Jacobian handling for BDF: dense finite-diff, sparse finite-diff, or analytic sparse"
+    )
     stim_type:  Literal[
         'const', 'pulse', 'alpha', 'ou_noise',
         'AMPA', 'NMDA', 'GABAA', 'GABAB',
@@ -218,6 +222,22 @@ class AnalysisParams(BaseModel):
     excmap_D_min: float = Field(default=0.1,   description="Excitability map: min duration (ms)")
     excmap_D_max: float = Field(default=5.0,   description="Excitability map: max duration (ms)")
     excmap_ND:    int   = Field(default=15,   ge=2, description="Excitability map: duration resolution")
+
+    # Lyapunov / FTLE analysis (default OFF)
+    enable_lyapunov: bool = Field(default=False, description="Enable FTLE/LLE stability analysis")
+    lyapunov_embedding_dim: int = Field(default=3, ge=2, le=8, description="Delay-embedding dimension for FTLE/LLE")
+    lyapunov_lag_steps: int = Field(default=2, ge=1, le=50, description="Delay-embedding lag in samples")
+    lyapunov_min_separation_ms: float = Field(default=10.0, ge=0.0, description="Minimum temporal separation for neighbor search (ms)")
+    lyapunov_fit_start_ms: float = Field(default=5.0, ge=0.0, description="Linear-fit window start for FTLE/LLE (ms)")
+    lyapunov_fit_end_ms: float = Field(default=40.0, gt=0.0, description="Linear-fit window end for FTLE/LLE (ms)")
+
+    # Non-FFT modulatory contribution analysis (default OFF)
+    enable_modulation_decomposition: bool = Field(default=False, description="Enable phase-based modulation analysis")
+    modulation_source: Literal['voltage', 'stimulus'] = Field(default='voltage', description="Signal used as low-frequency modulator proxy")
+    modulation_low_hz: float = Field(default=4.0, gt=0.0, description="Low cutoff of modulatory band (Hz)")
+    modulation_high_hz: float = Field(default=12.0, gt=0.0, description="High cutoff of modulatory band (Hz)")
+    modulation_phase_bins: int = Field(default=18, ge=8, le=72, description="Phase-bin count for phase-rate profile")
+    modulation_surrogates: int = Field(default=60, ge=0, le=500, description="Number of surrogate shuffles for significance estimate")
 
 
 class PresetModeParams(BaseModel):

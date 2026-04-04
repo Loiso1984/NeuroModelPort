@@ -58,6 +58,7 @@ def _run_preset(
     apply_preset(cfg, preset_name)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
+    cfg.stim.jacobian_mode = "sparse_fd"
     res = NeuronSolver(cfg).run_single()
     st = _spike_times_by_crossing(res.v_soma, res.t)
     return cfg, res, st
@@ -164,7 +165,8 @@ def test_hypoxia_progressive_vs_terminal_modes():
     )
     first_half_prog = int(np.sum(st_prog < 160.0))
     second_half_prog = int(np.sum(st_prog >= 160.0))
-    assert first_half_prog >= 1, "Progressive hypoxia mode should show initial spiking"
+    assert first_half_prog >= 2, "Progressive hypoxia mode should show a visible early spiking phase"
+    assert len(st_prog) >= 2, "Progressive hypoxia mode should produce at least two spikes before attenuation"
     assert second_half_prog <= first_half_prog, "Progressive hypoxia should not gain late activity"
     assert len(st_term) <= len(st_prog), "Terminal hypoxia mode should be equal or less excitable"
 

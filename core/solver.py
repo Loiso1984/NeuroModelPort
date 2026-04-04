@@ -6,6 +6,7 @@ from concurrent.futures import ProcessPoolExecutor
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
+from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity
 from core.rhs import rhs_multicompartment, F_CONST, R_GAS
 from core.kinetics import z_inf_SK
 
@@ -85,6 +86,7 @@ class NeuronSolver:
             print(f"   Duration: {t_sim}ms, Steps: {n_steps:,}, Compartments: {n_comp}")
             print(f"   Active channels: {n_channels} (Na+K+Leak{'+Ih' if cfg.channels.enable_Ih else ''}{'+ICa' if cfg.channels.enable_ICa else ''}{'+IA' if cfg.channels.enable_IA else ''}{'+SK' if cfg.channels.enable_SK else ''})")
             print(f"   Estimated time: {est_time_sec:.1f}s")
+            print(f"   Jacobian mode: {cfg.stim.jacobian_mode}")
             print(f"   Starting simulation...")
         
         import time
@@ -175,6 +177,25 @@ class NeuronSolver:
         # max_step prevents integrator from taking too large steps
         # which can cause instability in stiff systems
         max_step = min(cfg.stim.dt_eval * 5, 1.0)  # Max 1ms or 5x evaluation step
+
+        jacobian_mode = cfg.stim.jacobian_mode
+        jacobian_options = {}
+        if jacobian_mode == "sparse_fd":
+            jacobian_options["jac_sparsity"] = build_jacobian_sparsity(
+                n_comp=n_comp,
+                en_ih=cfg.channels.enable_Ih,
+                en_ica=cfg.channels.enable_ICa,
+                en_ia=cfg.channels.enable_IA,
+                en_sk=cfg.channels.enable_SK,
+                dyn_ca=cfg.calcium.dynamic_Ca,
+                l_indices=morph["L_indices"],
+                l_indptr=morph["L_indptr"],
+                use_dfilter=use_dfilter,
+            )
+        elif jacobian_mode == "analytic_sparse":
+            jacobian_options["jac"] = analytic_sparse_jacobian
+        elif jacobian_mode != "dense_fd":
+            raise ValueError(f"Unsupported jacobian_mode={jacobian_mode}")
         
         sol = solve_ivp(
             rhs_multicompartment,
@@ -187,6 +208,7 @@ class NeuronSolver:
             atol=1e-7,
             max_step=max_step,
             dense_output=False,  # Save memory
+            **jacobian_options,
         )
         
         # Report actual simulation time

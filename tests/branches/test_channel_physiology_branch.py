@@ -25,6 +25,7 @@ from core.analysis import detect_spikes
 def _build_hcn_pulse_config(enable_hcn: bool) -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.morphology.single_comp = True
+    cfg.stim.jacobian_mode = "sparse_fd"
 
     # Disable spike-generating channels to isolate passive+Ih behavior.
     cfg.channels.gNa_max = 0.0
@@ -52,6 +53,7 @@ def _build_hcn_pulse_config(enable_hcn: bool) -> FullModelConfig:
 def _build_ia_probe_config() -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.morphology.single_comp = True
+    cfg.stim.jacobian_mode = "sparse_fd"
 
     cfg.channels.gNa_max = 120.0
     cfg.channels.gK_max = 36.0
@@ -80,6 +82,7 @@ def _build_ia_probe_config() -> FullModelConfig:
 def _build_calcium_probe_config() -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.morphology.single_comp = True
+    cfg.stim.jacobian_mode = "sparse_fd"
 
     cfg.channels.gNa_max = 0.0
     cfg.channels.gK_max = 0.0
@@ -219,6 +222,7 @@ def test_hcn_presets_have_stable_rest_without_stimulus():
         cfg.stim.stim_type = "const"
         cfg.stim.t_sim = 300.0
         cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "sparse_fd"
 
         res = NeuronSolver(cfg).run_single()
         tail = res.v_soma[-100:]
@@ -235,6 +239,7 @@ def test_hcn_presets_remain_excitable_with_default_stimulus():
         apply_preset(cfg, preset)
         cfg.stim.t_sim = 200.0
         cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "sparse_fd"
 
         res = NeuronSolver(cfg).run_single()
         peaks, spike_times, _ = detect_spikes(res.v_soma, res.t, threshold=-20.0, baseline_threshold=-50.0)
@@ -247,6 +252,7 @@ def test_ca1_theta_preset_has_theta_band_rate():
     apply_preset(cfg, "L: Hippocampal CA1 (Theta rhythm)")
     cfg.stim.t_sim = 500.0
     cfg.stim.dt_eval = 0.2
+    cfg.stim.jacobian_mode = "sparse_fd"
 
     res = NeuronSolver(cfg).run_single()
     _, spike_times, _ = detect_spikes(res.v_soma, res.t, threshold=-20.0, baseline_threshold=-50.0)
@@ -267,6 +273,7 @@ def test_dynamic_calcium_presets_have_bounded_calcium_range():
         cfg = FullModelConfig()
         apply_preset(cfg, preset)
         assert cfg.calcium.dynamic_Ca, f"{preset}: expected dynamic calcium enabled"
+        cfg.stim.jacobian_mode = "sparse_fd"
 
         res = NeuronSolver(cfg).run_single()
         ca = res.ca_i[0, :] * 1e6  # mM -> nM
@@ -275,6 +282,36 @@ def test_dynamic_calcium_presets_have_bounded_calcium_range():
 
         assert ca_min >= 0.0, f"{preset}: negative calcium ({ca_min:.2f} nM)"
         assert ca_max <= 5000.0, f"{preset}: unrealistic calcium overload ({ca_max:.2f} nM)"
+
+
+def test_dynamic_calcium_presets_have_physiological_eca_and_temp_behavior():
+    presets = [
+        "E: Cerebellar Purkinje (De Schutter)",
+        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "M: Epilepsy (v10 SCN1A mutation)",
+        "N: Alzheimer's (v10 Calcium Toxicity)",
+        "O: Hypoxia (v10 ATP-pump failure)",
+    ]
+    for preset in presets:
+        cfg = FullModelConfig()
+        apply_preset(cfg, preset)
+        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.t_sim = 180.0
+        cfg.stim.dt_eval = 0.25
+        assert cfg.calcium.dynamic_Ca, f"{preset}: expected dynamic calcium enabled"
+
+        res = NeuronSolver(cfg).run_single()
+        ca_i = np.maximum(res.ca_i[0, :], 1e-9)  # mM
+
+        eca_23 = np.array([nernst_ca_ion(float(c), cfg.calcium.Ca_ext, 296.15) for c in ca_i])
+        eca_37 = np.array([nernst_ca_ion(float(c), cfg.calcium.Ca_ext, 310.15) for c in ca_i])
+
+        assert np.all(np.isfinite(eca_23)) and np.all(np.isfinite(eca_37)), f"{preset}: non-finite E_Ca"
+        assert 95.0 <= float(np.min(eca_37)) <= 170.0, f"{preset}: E_Ca(37C) minimum out of range"
+        assert 110.0 <= float(np.max(eca_37)) <= 190.0, f"{preset}: E_Ca(37C) maximum out of range"
+        assert float(np.median(eca_37)) > float(np.median(eca_23)), (
+            f"{preset}: E_Ca should increase with temperature"
+        )
 
 
 def _run_as_script() -> int:
@@ -290,6 +327,7 @@ def _run_as_script() -> int:
         test_hcn_presets_remain_excitable_with_default_stimulus,
         test_ca1_theta_preset_has_theta_band_rate,
         test_dynamic_calcium_presets_have_bounded_calcium_range,
+        test_dynamic_calcium_presets_have_physiological_eca_and_temp_behavior,
     ]
 
     passed = 0

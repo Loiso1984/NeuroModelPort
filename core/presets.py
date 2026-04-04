@@ -82,9 +82,9 @@ def _copy_defaults(target, source) -> None:
 def _apply_k_mode(cfg: FullModelConfig) -> None:
     """Apply thalamic relay mode variants."""
     if cfg.preset_modes.k_mode == "baseline":
-        # Baseline: low-drive relay state close to rest, minimal spontaneous spiking.
+        # Baseline: lower-drive tonic relay mode.
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 12.0
+        cfg.stim.Iext = 14.0
         cfg.channels.gIh_max = 0.02
         cfg.channels.gCa_max = 0.06
     else:
@@ -126,14 +126,14 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         cfg.stim.stim_type = "const"
         cfg.stim.Iext = 80.0
     else:
-        # Progressive stage: early spikes then attenuation as ionic imbalance grows.
-        cfg.channels.EK = -55.0
-        cfg.channels.EL = -48.0
-        cfg.channels.gL = 0.2
+        # Progressive stage: short early spiking epoch, then attenuation.
+        cfg.channels.EK = -60.0
+        cfg.channels.EL = -50.0
+        cfg.channels.gL = 0.15
         cfg.calcium.tau_Ca = 900.0
         cfg.channels.gCa_max = 0.08
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 35.0
+        cfg.stim.Iext = 30.0
 
 
 def apply_preset(cfg: FullModelConfig, name: str):

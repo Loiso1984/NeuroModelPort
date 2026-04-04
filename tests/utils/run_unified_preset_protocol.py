@@ -67,6 +67,23 @@ def _base_cfg(name: str, *, t_sim: float = 260.0, dt_eval: float = 0.2) -> FullM
     apply_preset(cfg, name)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
+    cfg.stim.jacobian_mode = "sparse_fd"
+    return cfg
+
+
+def _build_standard_probe_cfg(name: str) -> FullModelConfig:
+    """
+    Unified probe protocol for cross-preset comparability.
+    """
+    cfg = FullModelConfig()
+    apply_preset(cfg, name)
+    probe_amp = float(abs(cfg.stim.Iext))
+    probe_amp = max(8.0, min(30.0, probe_amp if probe_amp > 0 else 10.0))
+    cfg.stim.stim_type = "const"
+    cfg.stim.Iext = probe_amp
+    cfg.stim.t_sim = 160.0
+    cfg.stim.dt_eval = 0.3
+    cfg.stim.jacobian_mode = "sparse_fd"
     return cfg
 
 
@@ -75,14 +92,17 @@ def main() -> int:
     out_dir.mkdir(exist_ok=True)
 
     report = {
-        "all_presets": [],
+        "default_behavior": [],
+        "standard_probe": [],
         "mode_variants": [],
         "demyelination_conduction_check": {},
     }
 
     for preset in get_preset_names():
         cfg = _base_cfg(preset, t_sim=220.0, dt_eval=0.25)
-        report["all_presets"].append(_collect_single(cfg, preset))
+        report["default_behavior"].append(_collect_single(cfg, preset))
+        probe_cfg = _build_standard_probe_cfg(preset)
+        report["standard_probe"].append(_collect_single(probe_cfg, preset))
 
     # Mode variants: K baseline/activated, N progressive/terminal, O progressive/terminal
     for mode in ["baseline", "activated"]:
@@ -91,6 +111,7 @@ def main() -> int:
         apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
         cfg.stim.t_sim = 300.0
         cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "sparse_fd"
         row = _collect_single(cfg, f"K_mode={mode}")
         row["mode_family"] = "K"
         report["mode_variants"].append(row)
@@ -101,6 +122,7 @@ def main() -> int:
         apply_preset(cfg, "N: Alzheimer's (v10 Calcium Toxicity)")
         cfg.stim.t_sim = 320.0
         cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "sparse_fd"
         row = _collect_single(cfg, f"N_mode={mode}")
         row["mode_family"] = "N"
         report["mode_variants"].append(row)
@@ -111,6 +133,7 @@ def main() -> int:
         apply_preset(cfg, "O: Hypoxia (v10 ATP-pump failure)")
         cfg.stim.t_sim = 320.0
         cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "sparse_fd"
         res = NeuronSolver(cfg).run_single()
         st = _spike_times(res.v_soma, res.t)
         row = {
