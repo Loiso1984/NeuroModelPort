@@ -236,6 +236,14 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - new `tests/branches/test_gui_stim_sync_branch.py`,
    - verifies `const/pulse/alpha/synaptic` visibility contract and Dual-primary preview sync,
    - relevant branch checks rerun green (`gui_stim_sync`, `dual_stim`, progress-callback tests).
+58. GUI full-screen plot expansion implemented (requested UX upgrade):
+   - Oscilloscope `View` panel now has `Full Screen` action,
+   - opens an interactive maximized clone of current plots with preserved display toggles/settings,
+   - covered by new branch test `tests/branches/test_gui_fullscreen_plot_branch.py`.
+59. Analytics full-screen expansion implemented:
+   - Analytics now has a `Full Screen` action in tab corner,
+   - opens a maximized analytics clone with replay of latest analysis data and preserved active tab index,
+   - covered by new branch test `tests/branches/test_gui_fullscreen_analytics_branch.py`.
    - S-D and Excitability Map analyses now run with dual-stim disabled by design to avoid metric contamination,
    - preset-mode controls are now context-sensitive (`K/N/O` only for relevant presets).
 53. GUI structure/clarity pass (workflow-oriented):

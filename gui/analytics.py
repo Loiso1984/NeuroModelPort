@@ -20,7 +20,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget,
                                 QLabel, QTextEdit, QHBoxLayout,
-                                QSizePolicy, QScrollArea)
+                                QSizePolicy, QScrollArea, QPushButton, QMainWindow)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
@@ -129,12 +129,25 @@ class AnalyticsWidget(QTabWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._last_result = None
+        self._last_bif_data = None
+        self._last_bif_param_name = None
+        self._last_sweep_results = None
+        self._last_sweep_param_name = None
+        self._last_sd = None
+        self._last_exc = None
+        self._fullscreen_windows = []
         self._build_tabs()
 
     # ─────────────────────────────────────────────────────────────────
     #  TAB CONSTRUCTION
     # ─────────────────────────────────────────────────────────────────
     def _build_tabs(self):
+        self._btn_fullscreen = QPushButton("Full Screen")
+        self._btn_fullscreen.setToolTip("Open analytics in a maximized window")
+        self._btn_fullscreen.clicked.connect(self.open_fullscreen)
+        self.setCornerWidget(self._btn_fullscreen, Qt.Corner.TopRightCorner)
+
         # 0 — Passport (text)
         self.passport_view = QTextEdit()
         self.passport_view.setReadOnly(True)
@@ -232,6 +245,7 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     def update_analytics(self, result):
         """Update all standard tabs from a SimulationResult."""
+        self._last_result = result
         from core.analysis import (full_analysis, compute_equilibrium_curves,
                                     compute_optional_equilibrium,
                                     compute_nullclines, compute_current_balance,
@@ -1013,6 +1027,8 @@ class AnalyticsWidget(QTabWidget):
     #  8 — BIFURCATION
     # ─────────────────────────────────────────────────────────────────
     def update_bifurcation(self, bif_data: list, param_name: str):
+        self._last_bif_data = bif_data
+        self._last_bif_param_name = param_name
         vals   = np.array([d['val']   for d in bif_data])
         vmax   = np.array([d['max']   for d in bif_data])
         vmin   = np.array([d['min']   for d in bif_data])
@@ -1057,6 +1073,8 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     def update_sweep(self, sweep_results: list, param_name: str):
         """sweep_results: list of (param_value, SimulationResult|None)"""
+        self._last_sweep_results = sweep_results
+        self._last_sweep_param_name = param_name
         from core.analysis import detect_spikes
 
         self.fig_sweep.clear()
@@ -1110,6 +1128,7 @@ class AnalyticsWidget(QTabWidget):
     #  10 — S-D CURVE
     # ─────────────────────────────────────────────────────────────────
     def update_sd_curve(self, sd: dict):
+        self._last_sd = sd
         dur  = sd['durations']
         I_th = sd['I_threshold']
         I_rh = sd['rheobase']
@@ -1147,6 +1166,7 @@ class AnalyticsWidget(QTabWidget):
     #  11 — EXCITABILITY MAP
     # ─────────────────────────────────────────────────────────────────
     def update_excmap(self, exc: dict):
+        self._last_exc = exc
         I_r  = exc['I_range']
         d_r  = exc['dur_range']
         S    = exc['spike_matrix']
@@ -1171,6 +1191,35 @@ class AnalyticsWidget(QTabWidget):
         self.fig_excmap.tight_layout()
         self.cvs_excmap.draw()
         self.setCurrentWidget(self.tab_excmap)
+
+    def open_fullscreen(self):
+        """Open analytics clone in a maximized window preserving current tab/data."""
+        idx = int(self.currentIndex())
+        win = QMainWindow(self)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        win.setWindowTitle("NeuroModelPort — Analytics (Full Screen)")
+        full = AnalyticsWidget()
+        win.setCentralWidget(full)
+
+        if self._last_result is not None:
+            full.update_analytics(self._last_result)
+        if self._last_bif_data is not None and self._last_bif_param_name is not None:
+            full.update_bifurcation(self._last_bif_data, self._last_bif_param_name)
+        if self._last_sweep_results is not None and self._last_sweep_param_name is not None:
+            full.update_sweep(self._last_sweep_results, self._last_sweep_param_name)
+        if self._last_sd is not None:
+            full.update_sd_curve(self._last_sd)
+        if self._last_exc is not None:
+            full.update_excmap(self._last_exc)
+
+        full.setCurrentIndex(max(0, min(idx, full.count() - 1)))
+        win.showMaximized()
+        self._fullscreen_windows.append(win)
+
+        def _cleanup(*_):
+            self._fullscreen_windows = [w for w in self._fullscreen_windows if w is not win]
+
+        win.destroyed.connect(_cleanup)
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ v10.3 changes:
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                                QCheckBox, QGroupBox, QComboBox, QDoubleSpinBox, QLabel, QSpinBox)
+                                QCheckBox, QGroupBox, QComboBox, QDoubleSpinBox, QLabel, QSpinBox, QPushButton, QMainWindow)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPageSize, QPdfWriter
 
@@ -94,6 +94,7 @@ class OscilloscopeWidget(QWidget):
         self._delay_custom_index = 1
         self._last_result = None
         self._last_mc_results = None
+        self._fullscreen_windows = []
         self._build_ui()
         self._curves_v:    dict = {}
         self._curves_gate: dict = {}
@@ -292,10 +293,55 @@ class OscilloscopeWidget(QWidget):
         vl2.addWidget(lbl_delay_comp)
         vl2.addWidget(self._spin_delay_comp)
 
+        self._btn_fullscreen = QPushButton("Full Screen")
+        self._btn_fullscreen.setToolTip("Open oscilloscope plots in a maximized window")
+        self._btn_fullscreen.clicked.connect(self.open_fullscreen)
+        vl2.addWidget(self._btn_fullscreen)
+
         cb_layout.addWidget(grp_view)
         cb_layout.addStretch()
 
         root.addWidget(cb_widget, stretch=1)
+
+    def _copy_view_state_to(self, other: "OscilloscopeWidget"):
+        """Copy current visual toggles/settings into another oscilloscope widget."""
+        other._combo_theme.setCurrentText(self._combo_theme.currentText())
+        other._spin_line_width.setValue(self._spin_line_width.value())
+        other._spin_title_px.setValue(self._spin_title_px.value())
+        other._spin_grid_alpha.setValue(self._spin_grid_alpha.value())
+        other._cb_show_spike_markers.setChecked(self._cb_show_spike_markers.isChecked())
+        other._cb_show_delay.setChecked(self._cb_show_delay.isChecked())
+        other._combo_delay_target.setCurrentText(self._combo_delay_target.currentText())
+        other._spin_delay_comp.setValue(self._spin_delay_comp.value())
+        for name, cb in self._cb_v.items():
+            if name in other._cb_v:
+                other._cb_v[name].setChecked(cb.isChecked())
+        for name, cb in self._cb_g.items():
+            if name in other._cb_g:
+                other._cb_g[name].setChecked(cb.isChecked())
+        for name, cb in self._cb_i.items():
+            if name in other._cb_i:
+                other._cb_i[name].setChecked(cb.isChecked())
+
+    def open_fullscreen(self):
+        """Open an interactive, maximized oscilloscope clone for detailed inspection."""
+        win = QMainWindow(self)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        win.setWindowTitle("NeuroModelPort — Oscilloscope (Full Screen)")
+        full = OscilloscopeWidget()
+        self._copy_view_state_to(full)
+        if self._last_result is not None:
+            full.update_plots(self._last_result)
+        elif self._last_mc_results is not None:
+            full.update_plots_mc(self._last_mc_results)
+        win.setCentralWidget(full)
+        win.showMaximized()
+        self._fullscreen_windows.append(win)
+
+        def _cleanup(*_):
+            self._fullscreen_windows = [w for w in self._fullscreen_windows if w is not win]
+
+        win.destroyed.connect(_cleanup)
 
     # ─────────────────────────────────────────────────────────────────
     #  TOGGLE VISIBILITY

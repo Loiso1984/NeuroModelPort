@@ -14,7 +14,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QPushButton, QMainWindow
 
 
 class TopologyWidget(QWidget):
@@ -45,6 +45,35 @@ class TopologyWidget(QWidget):
         self._delay_custom_index = 1
         self._last_config = None
         self._last_dual_config = None
+        self._fullscreen_windows = []
+
+        self._btn_fullscreen = QPushButton("Full Screen")
+        self._btn_fullscreen.setToolTip("Open topology view in a maximized window")
+        self._btn_fullscreen.clicked.connect(self.open_fullscreen)
+        layout.addWidget(self._btn_fullscreen)
+
+    def open_fullscreen(self):
+        """Open topology clone in a maximized window preserving last rendered state."""
+        win = QMainWindow(self)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        win.setWindowTitle("NeuroModelPort — Topology (Full Screen)")
+        full = TopologyWidget()
+        full.set_delay_focus(self._delay_target_name, self._delay_custom_index)
+        if self._last_config is not None:
+            full.draw_neuron(
+                self._last_config,
+                dual_config=self._last_dual_config,
+                delay_target_name=self._delay_target_name,
+                delay_custom_index=self._delay_custom_index,
+            )
+        win.setCentralWidget(full)
+        win.showMaximized()
+        self._fullscreen_windows.append(win)
+
+        def _cleanup(*_):
+            self._fullscreen_windows = [w for w in self._fullscreen_windows if w is not win]
+
+        win.destroyed.connect(_cleanup)
 
     def set_delay_focus(self, target_name: str, custom_index: int = 1):
         """Update delay focus target and redraw if a morphology is already shown."""
@@ -636,4 +665,3 @@ class TopologyWidget(QWidget):
         if dual_config is not None and dual_config.enabled:
             info_parts.append(f"DUAL: {dual_config.primary_location}+{dual_config.secondary_location}")
         self._info.setText("  |  ".join(info_parts))
-
