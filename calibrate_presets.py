@@ -4,7 +4,8 @@ Finds optimal Iext for each preset to match target firing frequency.
 Uses bisection on Iext with const stimulus for frequency calibration.
 """
 import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 from core.models import FullModelConfig
