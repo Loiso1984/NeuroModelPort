@@ -13,7 +13,7 @@ from core.errors import SimulationParameterError
 from core.models import FullModelConfig
 from core.presets import apply_preset
 from core.solver import NeuronSolver
-from core.validation import validate_simulation_config
+from core.validation import validate_simulation_config, build_preset_mode_warnings
 
 
 def test_invalid_dt_eval_vs_t_sim_raises_custom_error():
@@ -81,6 +81,28 @@ def test_validation_warns_on_heavy_runtime_estimate():
     )
 
 
+def test_validation_warns_on_terminal_pathology_modes():
+    cfg_n = FullModelConfig()
+    cfg_n.preset_modes.alzheimer_mode = "terminal"
+    apply_preset(cfg_n, "N: Alzheimer's (v10 Calcium Toxicity)")
+    wn = build_preset_mode_warnings(cfg_n, "N: Alzheimer's (v10 Calcium Toxicity)")
+    assert any("N mode=terminal" in w for w in wn), "Expected terminal-stage warning for N terminal mode"
+
+    cfg_o = FullModelConfig()
+    cfg_o.preset_modes.hypoxia_mode = "terminal"
+    apply_preset(cfg_o, "O: Hypoxia (v10 ATP-pump failure)")
+    wo = build_preset_mode_warnings(cfg_o, "O: Hypoxia (v10 ATP-pump failure)")
+    assert any("O mode=terminal" in w for w in wo), "Expected terminal-stage warning for O terminal mode"
+
+
+def test_validation_reports_thalamic_mode_note():
+    cfg = FullModelConfig()
+    cfg.preset_modes.k_mode = "activated"
+    apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
+    wk = build_preset_mode_warnings(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
+    assert any("K mode=activated" in w for w in wk), "Expected K activated mode note"
+
+
 def _run_as_script() -> int:
     tests = [
         test_invalid_dt_eval_vs_t_sim_raises_custom_error,
@@ -89,6 +111,8 @@ def _run_as_script() -> int:
         test_valid_config_still_runs_after_validation_layer,
         test_validation_warns_on_nonphysiological_iext,
         test_validation_warns_on_heavy_runtime_estimate,
+        test_validation_warns_on_terminal_pathology_modes,
+        test_validation_reports_thalamic_mode_note,
     ]
     passed = 0
     for fn in tests:

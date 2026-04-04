@@ -25,7 +25,7 @@ from core.presets import get_preset_names, apply_preset
 from core.advanced_sim import (SWEEP_PARAMS, run_sweep,
                                  run_sd_curve, run_excitability_map,
                                  run_euler_maruyama)
-from core.validation import validate_simulation_config
+from core.validation import validate_simulation_config, build_preset_mode_warnings
 from gui.widgets.form_generator import PydanticFormWidget
 from gui.plots import OscilloscopeWidget
 from gui.analytics import AnalyticsWidget
@@ -367,6 +367,20 @@ class MainWindow(QMainWindow):
     def _status(self, msg: str):
         self._sb.showMessage(msg)
 
+    def _active_mode_suffix(self) -> str:
+        """Compact status suffix for active preset mode selector state."""
+        if not self._current_preset_name:
+            return ""
+        name = self._current_preset_name
+        pm = self.config.preset_modes
+        if "Thalamic" in name:
+            return f" | K mode={pm.k_mode}"
+        if "Alzheimer" in name:
+            return f" | N mode={pm.alzheimer_mode}"
+        if "Hypoxia" in name:
+            return f" | O mode={pm.hypoxia_mode}"
+        return ""
+
     # ─────────────────────────────────────────────────────────────────
     #  PRESET & LANGUAGE
     # ─────────────────────────────────────────────────────────────────
@@ -379,7 +393,7 @@ class MainWindow(QMainWindow):
         # Reset dual stim when loading new preset
         self.dual_stim_widget.load_default_preset()
         self.topology.draw_neuron(self.config)
-        self._status(f"Preset applied: {name}")
+        self._status(f"Preset applied: {name}{self._active_mode_suffix()}")
 
     def _refresh_all_forms(self):
         for form in (self.form_morph, self.form_env, self.form_chan,
@@ -394,7 +408,9 @@ class MainWindow(QMainWindow):
         apply_preset(self.config, self._current_preset_name)
         self._refresh_all_forms()
         self.topology.draw_neuron(self.config)
-        self._status(f"Preset mode updated: {self._current_preset_name}")
+        self._status(
+            f"Preset mode updated: {self._current_preset_name}{self._active_mode_suffix()}"
+        )
 
     def change_language(self, lang: str):
         T.set_language(lang)
@@ -430,6 +446,9 @@ class MainWindow(QMainWindow):
         """
         try:
             warnings = validate_simulation_config(self.config)
+            warnings.extend(
+                build_preset_mode_warnings(self.config, self._current_preset_name)
+            )
         except SimulationParameterError as exc:
             QMessageBox.critical(self, "Parameter Validation Error", str(exc))
             self._status("Validation error.")

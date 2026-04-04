@@ -1,0 +1,39 @@
+# Validation Coverage Status (Master 0-16)
+
+Current status snapshot after latest branch-contour runs.
+
+## Closed in validation contour
+
+- `1` Calcium/Nernst calibration checks (core acceptance layer): active branch tests + extended deterministic report artifacts.
+- `2` HCN validation (rest stability, V1/2, temperature behavior) and IA validation (suppression trends) in branch contour.
+- `2.1` Dual-stim computational validation (branch tests + extended deterministic dual-stim report).
+- `4` Dual-stimulation refactor to dedicated module (`core/dual_stimulation.py`) completed earlier and covered by branch tests.
+- `6` Multichannel stress test branch coverage (`Ih+ICa`, `IA+SK`, all channels) plus broad preset stress matrix artifacts.
+- Pathology mode validation core loop (`N/O/F`) currently green on focus + worst-case follow-up + extended F-vs-D conduction checks.
+
+## Partially closed / continuing
+
+- `0` Test grouping and cleanup: active contour grouped/cleaned; root ad-hoc + legacy `test_*`/`validate_*` helpers archived under `tests/archive/root_legacy_tools`; only final optional pruning remains.
+- `3` Configurable spike detection in GUI: integrated and branch-tested; iterative GUI UX improvements still possible.
+- `5` Error handling/logging/warnings: core layer implemented and tested; can be expanded with richer user-facing diagnostics.
+- K/N/O pathology UX/documentation guidance: mode switches + guide + preflight/status-mode warnings integrated; final bilingual polish still needed.
+
+## Not closed yet (planned follow-up)
+
+- `7` Plot readability/interactive improvements (beyond current export integration).
+- `8` Neuron passport with ML classification.
+- `9` Topology/axon propagation visualization upgrades.
+- `10` Real-time sliders with immediate recompute.
+- `11` Extended export workflows polishing.
+- `12` Full doc rewrite/reorganization (user+developer).
+- `13` Further compute optimization beyond current Jacobian speedup path.
+- `14` Full cleanup + bilingual polish final pass.
+- `15` Additional future improvements (ongoing bucket).
+- `16` Lyapunov practical integration and UX polishing (core feature added, final productization pending).
+
+## Current gating principle
+
+Preset/core-calculation changes continue to follow:
+1. branch contour first,
+2. deterministic utility artifacts,
+3. only then promotion to primary program defaults.

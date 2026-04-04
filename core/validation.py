@@ -132,3 +132,39 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
         )
 
     return warnings
+
+
+def build_preset_mode_warnings(cfg: FullModelConfig, preset_name: str) -> List[str]:
+    """
+    Return user-facing mode notes/warnings for currently selected preset mode.
+
+    These are non-fatal and intended for GUI preflight visibility.
+    """
+    warnings: list[str] = []
+    if not preset_name:
+        return warnings
+
+    p = preset_name.lower()
+    pm = cfg.preset_modes
+
+    if "thalamic" in p:
+        if pm.k_mode == "activated":
+            warnings.append(
+                "K mode=activated: high-throughput relay state enabled; expect higher spike rates than baseline."
+            )
+        else:
+            warnings.append(
+                "K mode=baseline: lower-throughput relay state enabled (theta-like global envelope)."
+            )
+
+    if "alzheimer" in p and pm.alzheimer_mode == "terminal":
+        warnings.append(
+            "N mode=terminal: late-stage pathology profile selected; near-silent/strongly reduced excitability is expected."
+        )
+
+    if "hypoxia" in p and pm.hypoxia_mode == "terminal":
+        warnings.append(
+            "O mode=terminal: severe failure profile selected; depolarization-block-like behavior is expected."
+        )
+
+    return warnings

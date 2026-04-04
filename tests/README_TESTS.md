@@ -31,6 +31,18 @@ This document reflects the *current* local validation flow used in active develo
    - `python tests/utils/run_cde_extended_report.py ...`
    - deterministic `I_scale x temperature` sweep for C/D/E with physiology flags,
    - artifact: `_test_results/cde_extended_report.json`.
+9. Extended HCN/IA operating report:
+   - `python tests/utils/run_hcn_ia_extended_report.py`
+   - deterministic isolated-channel probes + preset-level sanity rows for HCN/IA,
+   - artifact: `_test_results/hcn_ia_extended_report.json`.
+10. Extended calcium/Nernst operating report:
+   - `python tests/utils/run_calcium_nernst_extended_report.py`
+   - deterministic K/L/M/N/O (+ N/O modes) checks for Ca-range, E_Ca bounds/trend, ICa inward proxy, `B_Ca` and `gCa_max` audit,
+   - artifact: `_test_results/calcium_nernst_extended_report.json`.
+11. Extended dual-stimulation operating report:
+   - `python tests/utils/run_dual_stim_extended_report.py`
+   - deterministic branch-equivalent scenario report for dual-stim behavior and modulation expectations,
+   - artifact: `_test_results/dual_stim_extended_report.json`.
 
 ## Directory Roles
 
@@ -40,10 +52,12 @@ This document reflects the *current* local validation flow used in active develo
   - Legacy branch scripts are isolated under `tests/branches/legacy/`.
 - `tests/utils/`
   - Protocol runners, benchmarks, deterministic calibration/search utilities.
+  - See `tests/utils/UTILS_REGISTRY.md` for active vs legacy split.
 - `tests/core/`, `tests/presets/`, `tests/stress/`, `tests/validation/`
   - Historical and support tests/tools. Useful, but not the primary active gate.
 - `tests/archive/`
   - Archived artifacts/debug scripts.
+  - Includes `tests/archive/root_legacy_tools/` for root-level ad-hoc helpers moved out of active workspace.
 
 ## Important Notes
 
@@ -57,6 +71,8 @@ This document reflects the *current* local validation flow used in active develo
 4. Pathology checks must preserve mode ordering:
    - `K activated >= baseline`,
    - `N/O terminal <= progressive`.
+5. C/D/E guardrail:
+   - Purkinje (`E`) must remain excitable at `37C` under moderate low drive (`0.8x`) in branch checks.
 
 ## Runtime Expectations (current machine, approximate)
 
@@ -82,5 +98,8 @@ This document reflects the *current* local validation flow used in active develo
 - `_test_results/pathology_worstcase_followup.json`
 - `_test_results/pathology_f_conduction_extended.json`
 - `_test_results/cde_extended_report.json`
+- `_test_results/hcn_ia_extended_report.json`
+- `_test_results/calcium_nernst_extended_report.json`
+- `_test_results/dual_stim_extended_report.json`
 
 Last updated: 2026-04-04

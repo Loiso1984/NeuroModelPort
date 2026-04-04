@@ -83,3 +83,22 @@ Canonical verbatim backlog/rules source: `docs/MASTER_BACKLOG_CONTRACT.md`.
 26. C/D/E operating envelope flow:
    - periodically run deterministic C/D/E extended report (`run_cde_extended_report.py`),
    - track temperature/drive sensitivity and preserve baseline frequency envelopes before preset promotion.
+27. Purkinje (`E`) low-drive robustness rule:
+   - keep branch coverage for `0.8x` drive at `37C` to prevent silent-island regression,
+   - if this guard fails, tune preset drive/excitability in branch contour first and rerun unified protocol before promotion.
+28. HCN/IA sweep reporting policy:
+   - periodically run `run_hcn_ia_extended_report.py` and persist artifact,
+   - keep isolated-channel probe criteria (HCN Rin/sag and IA suppression trend) separate from preset-level sanity checks,
+   - treat HCN/IA sweep anomalies as blockers before promoting channel-related preset changes.
+29. Calcium/Nernst focused reporting policy (`K/L/M/N/O`, Alzheimer/Hypoxia emphasis):
+   - run `run_calcium_nernst_extended_report.py` after Ca-related preset or solver changes,
+   - require Ca non-negativity, bounded Ca_i range, physiological E_Ca bounds, and positive temperature E_Ca trend,
+   - keep explicit audit export for `B_Ca` and `gCa_max` per case.
+30. Dual-stimulation reporting policy:
+   - run `run_dual_stim_extended_report.py` after dual-stim logic/preset updates,
+   - keep rebound-aware modulation acceptance for `K activated` (throughput/pattern modulation, not strict monotonic suppression),
+   - treat dual-stim report anomalies as blockers before promoting dual-stim changes.
+31. GUI mode-awareness policy:
+   - preflight warnings must surface stage context for terminal pathology modes (`N terminal`, `O terminal`),
+   - thalamic `K activated` should surface an explicit high-throughput mode note before run,
+   - mode context should be visible in status updates when presets/modes change.

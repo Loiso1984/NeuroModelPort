@@ -156,6 +156,52 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - sweeps `I_scale x temperature` for `C/D/E` with deterministic physiology flags,
    - latest sweep artifact: `_test_results/cde_extended_report.json`,
    - current run status: anomalies `0` on tested grid.
+39. C/D/E contour hardened to catch Purkinje silent-island regression:
+   - added branch guard `test_e_moderate_low_drive_not_silent_at_37c` in `test_cde_profiles_branch.py`,
+   - tuned `E` preset default drive (`Iext: 30 -> 32`) to preserve excitability at `0.8x / 37C`,
+   - reran `run_cde_extended_report.py` and full active branch suite after tuning; both green,
+   - refreshed `_test_results/unified_preset_protocol.json` after preset update per promotion rule.
+40. Added deterministic HCN/IA extended sweep artifact:
+   - new utility `tests/utils/run_hcn_ia_extended_report.py`,
+   - combines isolated-channel probe checks (HCN pulse sag/Rin, IA excitability suppression) with preset-level sanity rows,
+   - artifact: `_test_results/hcn_ia_extended_report.json`,
+   - latest run status: anomalies `0`.
+41. Re-ran broad all-preset stress matrix after E tuning:
+   - command: `python tests/utils/run_preset_stress_matrix.py --i-scales 0.6,0.8,1.0,1.2,1.4 --temps 23,30,37 --t-sim 120 --dt-eval 0.35`,
+   - refreshed artifact: `_test_results/preset_stress_matrix.json`,
+   - latest result: guard pass `225/225` (100%).
+42. Added strict calcium/Nernst extended report for K/L/M/N/O focus:
+   - new utility `tests/utils/run_calcium_nernst_extended_report.py`,
+   - includes `N/O` progressive/terminal mode variants,
+   - validates Ca-range, E_Ca range, inward ICa proxy, temperature trend, and exports `B_Ca/gCa_max` audit fields,
+   - artifact: `_test_results/calcium_nernst_extended_report.json`,
+   - latest run status: anomalies `0/28`.
+43. Added deterministic dual-stimulation extended report:
+   - new utility `tests/utils/run_dual_stim_extended_report.py`,
+   - exports branch-equivalent scenarios (dual-off baseline match, inhibitory secondary, soma+AIS, primary override, K-activated modulation),
+   - artifact: `_test_results/dual_stim_extended_report.json`,
+   - latest run status: anomalies `0/7`.
+44. Utilities hygiene / unification pass:
+   - removed runtime cache artifacts under active test folders (`tests/utils/__pycache__`, `tests/branches/__pycache__`),
+   - added active-vs-legacy utility registry: `tests/utils/UTILS_REGISTRY.md`,
+   - documented canonical usage path in `tests/README_TESTS.md`.
+45. Added explicit master backlog coverage snapshot:
+   - `docs/VALIDATION_COVERAGE_STATUS.md` now tracks closed / partial / pending items for 0–16 list,
+   - used as checklist anchor before promoting validation-contour changes into primary defaults.
+46. GUI preset-mode integration hardening:
+   - preflight now includes preset-mode notes/warnings (`K activated`, `N terminal`, `O terminal`) via `build_preset_mode_warnings`,
+   - status bar now shows active mode suffix when loading/changing K/N/O presets,
+   - branch coverage extended in `test_solver_validation_branch.py`,
+   - active branch suite rerun green after integration.
+47. Root-level legacy cleanup pass (safe archival):
+   - moved ad-hoc `check_*`, `debug_*`, `quick_*`, `simple_*`, `verify_*` python helpers from repository root
+     into `tests/archive/root_legacy_tools/`,
+   - added archive index `tests/archive/root_legacy_tools/README.md`,
+   - reran active branch suite after move; green.
+48. Root legacy `test_*` / `validate_*` cleanup pass:
+   - moved non-active root `test_*` and `validate_*` scripts into `tests/archive/root_legacy_tools/`,
+   - active validation entry points remain `tests/branches/*` + `tests/utils/*`,
+   - reran active branch suite after move; green.
 
 ## Preset Mode Requirements
 

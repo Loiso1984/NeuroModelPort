@@ -2,24 +2,6 @@
 
 This document is the canonical, verbatim-preserved project contract and must be treated as immutable source context between sessions.
 
-## Normalized Working Copy (ASCII-safe)
-
-The detailed contract is preserved below. For operational continuity in terminals with limited encodings, use this normalized checklist:
-
-1. Validate all channel/preset parameters against physiology/literature/NEURON-like references.
-2. Any preset or core-calculation change must be tested in branch tests first, then promoted.
-3. Spike detection checks must verify transition-based counting and physiological plausibility.
-4. Validate calcium + Nernst (K/L/M/N/O, Alzheimer focus): Ca influx sign/magnitude, E_Ca range, B_Ca, gCa_max, temperature stability.
-5. Validate HCN resting stability and IA behavior in isolation and interaction modes.
-6. Keep dual stimulation disabled by default in presets; validate dual-stim math and GUI behavior separately.
-7. Pathology modes:
-   - Alzheimer/Hypoxia progressive: early spikes then attenuation,
-   - terminal: near-silent or severe failure state.
-8. Demyelination must show soma spiking with impaired/delayed axonal propagation.
-9. Run wide stress sweeps (Ih+ICa, IA+SK, all channels), check numerical stability and physiology guards.
-10. Group/clean tests and legacy debug artifacts; keep active vs legacy validation registry explicit.
-11. If Jacobian acceleration is stable and error-free, expose Jacobian mode in GUI and evaluate default use for heavy presets.
-
 ## Verbatim Backlog + Rules (User Source)
 
 ```text
@@ -95,9 +77,9 @@ If Jacobian optimization is confirmed to accelerate simulations without introduc
 
 ## Additional Exploratory Item 17
 
-Implement non-FFT spike-modulation analysis (toggleable by flag) to quantify how slow modulatory rhythms (for example theta-like presynaptic drive) contribute to high-frequency spiking and burst structure.
+17. Можем ли мы сделать что-то навроде фурье анализа (но не фурье анализ) для симуляций. Также настройка с флагом, чтобы для высокочастотных спайков узнать вклад в них модулирующего ритма (тета) основного от пресинаптической стимуляции итд?
 
-Expected direction:
+Working interpretation:
 1. phase-locking and preferred phase of spikes relative to low-frequency modulatory rhythm,
 2. phase-dependent firing-rate/burst probability estimates,
 3. surrogate-based significance checks to avoid false coupling.
