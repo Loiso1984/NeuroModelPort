@@ -427,3 +427,36 @@ If Jacobian mode is validated as both stable and significantly faster, expose it
    - protects `run_sd_curve` and `run_excitability_map` callback contract (`progress_cb`) from future regressions.
 78. Stimulation UI visibility sanity check completed:
    - verified `const/pulse/alpha/AMPA` correctly show/hide only relevant controls in setup form.
+79. Added explicit stimulus waveform visualization in Oscilloscope:
+   - currents panel now shows `Stim(input)` trace reconstructed from active stimulation settings (including dual-stim contribution),
+   - `Stim(filt)` remains separately visible when dendritic filter state exists.
+80. Added branch regression coverage for stimulus overlay:
+   - `tests/branches/test_stimulus_trace_overlay_branch.py` (`2/2` pass),
+   - active suite registry/runner updated accordingly.
+81. Jacobian usability update in GUI setup flow:
+   - setup hint now always shows current `jacobian_mode` and recommends sparse modes for heavy multi-comp presets,
+   - heavy presets (`K/N/O/F`) now auto-switch from `dense_fd` to `sparse_fd` on preset load (user can still change manually).
+82. Added branch regression test for Jacobian GUI auto-selection:
+   - `tests/branches/test_gui_jacobian_autoselect_branch.py` (`2/2` pass),
+   - active suite registry/runner updated.
+83. C/D/E deterministic quick recalibration pass executed:
+   - `run_cde_extended_report.py` on grid `i_scale={0.8,1.0,1.2}`, `T={30,37}` (`18` cases),
+   - output: `_test_results/cde_extended_report_quick.json`,
+   - result: `0/18` anomalies under current guards (baseline windows for C/D/E satisfied on sampled grid).
+84. Added expanded spike-causality analytics view:
+   - new `Spike Mechanism` tab in Analytics with:
+     - spike timeline and indexed peaks,
+     - per-spike `V_peak` + `Ca_i@spike`,
+     - per-spike sampled ionic currents (`Na/K/ICa/IA/SK/Ih/Leak` where present),
+     - heuristic attenuation explanation (Na reduction / K-SK increase / Ca accumulation).
+   - branch test added: `tests/branches/test_spike_mechanism_analytics_branch.py` (`1/1` pass).
+85. Multiple sclerosis (F) status checkpoint (critical):
+   - targeted verification currently shows soma→terminal spike count ratio `1.0` (thresholds `-20/-10/0 mV`),
+   - this means present F preset still conducts spikes to terminal branch too well for intended “propagation failure” phenotype,
+   - recalibration task for F remains open and high-priority.
+86. Legacy Scilab v9 audit (folder `C:\\NeruroModelV9`) produced useful transfer candidates:
+   - per-compartment spike report across soma/AIS/fork/branch terminals,
+   - explicit Ca/E_Ca visualization panel,
+   - current-balance diagnostic and energy overlays,
+   - Remak law annotation + richer topology labels,
+   - these are mapped to follow-up Python analytics/topology enhancements.

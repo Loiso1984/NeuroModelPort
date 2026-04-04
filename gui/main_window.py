@@ -477,10 +477,33 @@ class MainWindow(QMainWindow):
                 "not a single synaptic event; switch stim_type to alpha/AMPA/NMDA for event-like input."
             )
 
+        jac = str(getattr(self.config.stim, "jacobian_mode", "dense_fd"))
+        is_multi = not bool(self.config.morphology.single_comp)
+        heavy_family = any(k in p for k in ("thalamic", "alzheimer", "hypoxia", "multiple sclerosis"))
+        if is_multi and heavy_family:
+            jac_note = (
+                f" Jacobian: {jac}. Recommended for heavy presets: sparse_fd/analytic_sparse "
+                "(faster than dense_fd)."
+            )
+        else:
+            jac_note = f" Jacobian: {jac}."
+
         if hasattr(self, "lbl_params_hint"):
-            self.lbl_params_hint.setText(f"{priority_note}  {mode_note}{stim_note}")
+            self.lbl_params_hint.setText(f"{priority_note}  {mode_note}{stim_note}{jac_note}")
         if hasattr(self, "lbl_dual_priority"):
             self.lbl_dual_priority.setText(priority_note)
+
+    def _auto_select_jacobian_for_preset(self):
+        """
+        Prefer sparse_fd for computationally heavy multi-compartment presets
+        unless user explicitly selected another non-dense mode.
+        """
+        p = (self._current_preset_name or "").lower()
+        heavy_family = any(k in p for k in ("thalamic", "alzheimer", "hypoxia", "multiple sclerosis"))
+        if not heavy_family or bool(self.config.morphology.single_comp):
+            return
+        if str(getattr(self.config.stim, "jacobian_mode", "dense_fd")) == "dense_fd":
+            self.config.stim.jacobian_mode = "sparse_fd"
 
     def _sync_stim_type_controls(self):
         """Show only stimulation parameters relevant for current stim_type."""
@@ -673,6 +696,7 @@ class MainWindow(QMainWindow):
             return
         self._current_preset_name = name
         apply_preset(self.config, name)
+        self._auto_select_jacobian_for_preset()
         self._refresh_all_forms()
         self.oscilloscope.sync_delay_controls_for_config(self.config)
         # Reset dual stim when loading new preset

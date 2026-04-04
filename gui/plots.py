@@ -50,6 +50,7 @@ PLOT_THEMES = {
         "terminal": (0, 200, 100),
         "threshold": "#F9E2AF",
         "spike": "#F38BA8",
+        "stim_input": "#F5C2E7",
         "stim_filtered": "#89B4FA",
     },
     "High Contrast": {
@@ -58,6 +59,7 @@ PLOT_THEMES = {
         "terminal": "#00FF7F",
         "threshold": "#FFD700",
         "spike": "#FF66CC",
+        "stim_input": "#FFC0CB",
         "stim_filtered": "#8EC5FF",
     },
     "Colorblind Friendly": {
@@ -66,6 +68,7 @@ PLOT_THEMES = {
         "terminal": "#009E73",
         "threshold": "#F0E442",
         "spike": "#CC79A7",
+        "stim_input": "#E69F00",
         "stim_filtered": "#56B4E9",
     },
 }
@@ -196,8 +199,13 @@ class OscilloscopeWidget(QWidget):
         grp_i.setStyleSheet("QGroupBox { color: #FAB387; font-size:11px; }")
         il = QVBoxLayout(grp_i)
         self._cb_i = {}
-        for name in list(CHAN_COLORS.keys()) + ['Stim_filtered']:
-            label = name if name != 'Stim_filtered' else 'Stim(filt)'
+        for name in list(CHAN_COLORS.keys()) + ['Stim_input', 'Stim_filtered']:
+            if name == 'Stim_filtered':
+                label = 'Stim(filt)'
+            elif name == 'Stim_input':
+                label = 'Stim(input)'
+            else:
+                label = name
             cb = QCheckBox(label)
             cb.setChecked(True)
             cb.setStyleSheet("color:#CDD6F4; font-size:11px;")
@@ -544,9 +552,20 @@ class OscilloscopeWidget(QWidget):
             self._curves_i[name] = c
             c.setVisible(self._cb_i.get(name, QCheckBox()).isChecked())
 
+        # ── Reconstructed stimulus input trace ─────────────────────────
+        from core.analysis import reconstruct_stimulus_trace
+        stim_input = reconstruct_stimulus_trace(result)
+        stim_input_pen = pg.mkPen(
+            color=theme["stim_input"],
+            width=1.8 * lw,
+            style=Qt.PenStyle.SolidLine,
+        )
+        c_si = self._p_i.plot(t, stim_input, pen=stim_input_pen, name="I_stim(input)")
+        self._curves_i['Stim_input'] = c_si
+        c_si.setVisible(self._cb_i['Stim_input'].isChecked())
+
         # ── Filtered stimulus current ─────────────────────────────────
-        # Show the post-filter injected current in the currents pane so the
-        # user can see how much the dendritic cable attenuated the stimulus.
+        # Show the post-filter state so user can compare with reconstructed input.
         if result.v_dendritic_filtered is not None:
             filt_curr_pen = pg.mkPen(color=theme["stim_filtered"], width=1.5 * lw,
                                       style=Qt.PenStyle.DashLine)
@@ -634,7 +653,9 @@ class OscilloscopeWidget(QWidget):
         """Show only checkboxes for channels / traces present in result."""
         self._sync_delay_controls(result)
         for name, cb in self._cb_i.items():
-            if name == 'Stim_filtered':
+            if name == 'Stim_input':
+                cb.setVisible(True)
+            elif name == 'Stim_filtered':
                 cb.setVisible(result.v_dendritic_filtered is not None)
             else:
                 cb.setVisible(name in result.currents)

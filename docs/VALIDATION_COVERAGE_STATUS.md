@@ -9,7 +9,9 @@ Current status snapshot after latest branch-contour runs.
 - `2.1` Dual-stim computational validation (branch tests + extended deterministic dual-stim report).
 - `4` Dual-stimulation refactor to dedicated module (`core/dual_stimulation.py`) completed earlier and covered by branch tests.
 - `6` Multichannel stress test branch coverage (`Ih+ICa`, `IA+SK`, all channels) plus broad preset stress matrix artifacts.
-- Pathology mode validation core loop (`N/O/F`) currently green on focus + worst-case follow-up + extended F-vs-D conduction checks.
+- Pathology mode validation core loop (`N/O/F`) is mostly green on focus + worst-case follow-up + extended F-vs-D conduction checks.
+- Important caveat: F preset still shows near-complete soma→terminal propagation in current checkpoints (ratio ~1.0), so demyelination severity tuning remains open.
+- `3` C/D/E tuning lane progress: deterministic quick recalibration grid (`18` cases) produced `0` anomalies in `_test_results/cde_extended_report_quick.json`.
 
 ## Partially closed / continuing
 
@@ -20,6 +22,7 @@ Current status snapshot after latest branch-contour runs.
   - callback contract regression test added (`test_advanced_sim_progress_callbacks_branch.py`),
   - dual-stim now resets to disabled default on preset load and explicitly overrides primary stimulation fields only when enabled,
   - preset mode selectors are context-scoped to relevant K/N/O presets,
+  - GUI now surfaces Jacobian mode guidance and auto-selects `sparse_fd` for heavy multi-comp presets on load (with manual override preserved),
   - setup/dual-stim/analysis tab order and setup grouping were reworked for clearer workflow,
   - post-run tab focusing now uses explicit widget targets (no stale index jumps after tab reordering).
 - `5` Error handling/logging/warnings: core layer implemented and tested; can be expanded with richer user-facing diagnostics.
@@ -32,9 +35,11 @@ Current status snapshot after latest branch-contour runs.
   - progress update: theme + linewidth + spike/delay overlays + title-font/grid controls integrated in oscilloscope.
   - delay visualization now supports target selection (terminal / AIS / junction / custom compartment),
   - delay target controls are now preset-synced before first run (custom index range available pre-simulation).
+  - explicit stimulus waveform overlay `Stim(input)` added to currents panel and branch-tested.
 - `8` Neuron passport with ML classification.
   - progress update: passport now includes Lyapunov/modulation blocks, channel-engagement/delay summaries,
     and a first hybrid rule+ML classifier baseline (prototype ML + confidence + source tag).
+  - progress update: new Spike Mechanism analytics tab provides per-spike ion/Ca dynamics and attenuation-driver hypotheses.
 - `9` Topology/axon propagation visualization upgrades.
   - progress update: topology now includes compartment-index labeling and compact index map in info bar for better axonal targeting,
   - topology delay focus is now linked to oscilloscope delay-target selection (shared cross-tab context),

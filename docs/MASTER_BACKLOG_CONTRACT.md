@@ -84,6 +84,13 @@ Working interpretation:
 2. phase-dependent firing-rate/burst probability estimates,
 3. surrogate-based significance checks to avoid false coupling.
 
+## Additional Exploratory Item 18
+
+18. Expanded ion/channel causality view on spike analytics:
+1. add an optional analytics view that shows per-spike evolution of key ionic currents/channels and Ca load,
+2. expose an interpretable explanation for spike attenuation/block tendency (e.g., Ca accumulation, SK/K increase, Na drive reduction),
+3. keep this as analysis-layer diagnostics (default non-invasive for core solver behavior).
+
 ## Integration Note for Item 16 (Lyapunov / LLE-FTLE)
 
 Use a practical Lyapunov-based stability module (not symbolic Lyapunov function search):

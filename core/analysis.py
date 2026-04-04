@@ -784,6 +784,16 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
     return stim
 
 
+def reconstruct_stimulus_trace(result) -> np.ndarray:
+    """
+    Public wrapper for deterministic stimulus reconstruction from a run result.
+
+    Intended for GUI/analytics overlays where a direct stimulus trace is needed
+    without rerunning the solver.
+    """
+    return _reconstruct_stimulus_proxy(result)
+
+
 def estimate_spike_modulation(
     spike_times_ms: np.ndarray,
     t_ms: np.ndarray,

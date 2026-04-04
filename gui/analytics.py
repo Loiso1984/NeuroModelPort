@@ -157,6 +157,11 @@ class AnalyticsWidget(QTabWidget):
         self.addTab(_tab_with_toolbar(cvs), "⚡ Currents")
         self.cvs_currents = cvs
 
+        # 2.6 — Spike Mechanism (why spikes attenuate)
+        self.fig_spike_mech, cvs = _mpl_fig(3, 1)
+        self.addTab(_tab_with_toolbar(cvs), "🧪 Spike Mechanism")
+        self.cvs_spike_mech = cvs
+
         # 3 — Equilibrium Curves
         self.fig_equil, cvs = _mpl_fig(2, 2)
         self.addTab(_tab_with_toolbar(cvs), "📈 Equilibrium")
@@ -184,22 +189,26 @@ class AnalyticsWidget(QTabWidget):
 
         # 8 — Bifurcation
         self.fig_bif, cvs = _mpl_fig(2, 2)
-        self.addTab(_tab_with_toolbar(cvs), "🔀 Bifurcation")
+        self.tab_bif = _tab_with_toolbar(cvs)
+        self.addTab(self.tab_bif, "🔀 Bifurcation")
         self.cvs_bif = cvs
 
         # 9 — Sweep
         self.fig_sweep, cvs = _mpl_fig(2, 2)
-        self.addTab(_tab_with_toolbar(cvs), "↔ Sweep")
+        self.tab_sweep = _tab_with_toolbar(cvs)
+        self.addTab(self.tab_sweep, "↔ Sweep")
         self.cvs_sweep = cvs
 
         # 10 — S-D Curve
         self.fig_sd, cvs = _mpl_fig(1, 2)
-        self.addTab(_tab_with_toolbar(cvs), "⏱ S-D Curve")
+        self.tab_sd = _tab_with_toolbar(cvs)
+        self.addTab(self.tab_sd, "⏱ S-D Curve")
         self.cvs_sd = cvs
 
         # 11 — Excitability Map
         self.fig_excmap, cvs = _mpl_fig(1, 2)
-        self.addTab(_tab_with_toolbar(cvs), "🗺 Excit. Map")
+        self.tab_excmap = _tab_with_toolbar(cvs)
+        self.addTab(self.tab_excmap, "🗺 Excit. Map")
         self.cvs_excmap = cvs
 
     def _build_traces_tab(self):
@@ -232,6 +241,7 @@ class AnalyticsWidget(QTabWidget):
         self._update_traces(result)
         self._update_gates(result)
         self._update_currents(result)
+        self._update_spike_mechanism(result, stats)
         self._update_equil(result)
         self._update_phase(result, stats)
         self._update_kymo(result)
@@ -574,6 +584,142 @@ class AnalyticsWidget(QTabWidget):
         self.fig_currents.axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
         self.cvs_currents.draw()
 
+    def _update_spike_mechanism(self, result, stats: dict):
+        """
+        Explain spike attenuation using per-spike ion/channel dynamics.
+        """
+        from core.analysis import detect_spikes
+
+        t = np.asarray(result.t, dtype=float)
+        v = np.asarray(result.v_soma, dtype=float)
+        self.fig_spike_mech.clear()
+        self.fig_spike_mech.set_tight_layout({'pad': 2.5})
+
+        ax1 = self.fig_spike_mech.add_subplot(3, 1, 1)
+        ax2 = self.fig_spike_mech.add_subplot(3, 1, 2)
+        ax3 = self.fig_spike_mech.add_subplot(3, 1, 3)
+
+        kwargs = _spike_detect_kwargs_from_stats(stats)
+        peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
+        n_sp = len(spike_times)
+
+        ax1.plot(t, v, color="#2060CC", lw=2.0, label="V_soma")
+        if n_sp > 0:
+            ax1.scatter(
+                t[peak_idx],
+                v[peak_idx],
+                c=np.arange(n_sp),
+                cmap="plasma",
+                s=26,
+                label="spike peaks",
+                zorder=4,
+            )
+        _configure_ax_interactive(
+            ax1,
+            title=f"Spike Peaks Timeline (N={n_sp})",
+            xlabel="Time (ms)",
+            ylabel="V (mV)",
+            show_legend=True,
+        )
+
+        if n_sp < 2:
+            ax2.text(
+                0.02,
+                0.55,
+                "Need at least 2 spikes for attenuation diagnostics.",
+                transform=ax2.transAxes,
+                fontsize=10,
+                color="#444444",
+            )
+            ax2.set_axis_off()
+            ax3.set_axis_off()
+            self.cvs_spike_mech.draw()
+            return
+
+        sp_no = np.arange(1, n_sp + 1)
+        peak_v = v[peak_idx]
+        ax2.plot(sp_no, peak_v, "o-", color="#1F77B4", lw=1.8, label="V_peak")
+        ax2.set_ylabel("Peak V (mV)", fontsize=10, fontweight="bold")
+        ax2.grid(True, alpha=0.25)
+
+        if result.ca_i is not None and len(result.ca_i) > 0:
+            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
+            ca_sp = ca_nM[peak_idx]
+            ax2b = ax2.twinx()
+            ax2b.plot(sp_no, ca_sp, "s--", color="#D62728", lw=1.4, label="Ca_i@spike")
+            ax2b.set_ylabel("Ca_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
+            ax2b.tick_params(axis="y", labelcolor="#D62728")
+
+        _configure_ax_interactive(
+            ax2,
+            title="Per-Spike Amplitude and Calcium Load",
+            xlabel="Spike #",
+            ylabel="Peak V (mV)",
+            show_legend=True,
+        )
+
+        curr_candidates = ["Na", "K", "ICa", "IA", "SK", "Ih", "Leak"]
+        traces = {k: np.asarray(result.currents[k], dtype=float) for k in curr_candidates if k in result.currents}
+        for name, tr in traces.items():
+            ax3.plot(sp_no, tr[peak_idx], marker=".", lw=1.2, label=name, color=CHAN_COLORS.get(name, "#555555"))
+        _configure_ax_interactive(
+            ax3,
+            title="Currents Sampled at Spike Peaks",
+            xlabel="Spike #",
+            ylabel="I_channel (uA/cm2)",
+            show_legend=True,
+        )
+
+        # Heuristic explanation block
+        peak_drop = float(peak_v[-1] - peak_v[0])
+        reasons = []
+        if peak_drop < -5.0:
+            reasons.append(f"Peak attenuation detected: ΔV_peak={peak_drop:.1f} mV")
+
+        if "Na" in traces:
+            na_mag = np.abs(traces["Na"][peak_idx])
+            if na_mag[0] > 1e-9:
+                na_rel = float((na_mag[-1] - na_mag[0]) / na_mag[0])
+                if na_rel < -0.20:
+                    reasons.append(f"Na drive decreased at peaks ({na_rel*100:.1f}%) -> possible Na inactivation")
+
+        k_like = None
+        if "SK" in traces:
+            k_like = np.abs(traces["SK"][peak_idx])
+            k_name = "SK"
+        elif "K" in traces:
+            k_like = np.abs(traces["K"][peak_idx])
+            k_name = "K"
+        else:
+            k_name = None
+        if k_like is not None and k_like[0] > 1e-9:
+            k_rel = float((k_like[-1] - k_like[0]) / k_like[0])
+            if k_rel > 0.20:
+                reasons.append(f"{k_name} outward component increased ({k_rel*100:.1f}%)")
+
+        if result.ca_i is not None and len(result.ca_i) > 0:
+            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
+            ca_sp = ca_nM[peak_idx]
+            if ca_sp[0] > 1e-9:
+                ca_rel = float((ca_sp[-1] - ca_sp[0]) / ca_sp[0])
+                if ca_rel > 0.25:
+                    reasons.append(f"Ca_i accumulation at peaks ({ca_rel*100:.1f}%) may promote adaptation/block")
+
+        if not reasons:
+            reasons = ["No dominant attenuation driver from peak-sampled metrics; inspect full-current traces."]
+
+        ax3.text(
+            0.01,
+            0.02,
+            " | ".join(reasons[:3]),
+            transform=ax3.transAxes,
+            fontsize=8.5,
+            color="#333333",
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="#F8F8F8", edgecolor="#CCCCCC", alpha=0.9),
+        )
+
+        self.cvs_spike_mech.draw()
+
     # ─────────────────────────────────────────────────────────────────
     #  3 — EQUILIBRIUM CURVES
     # ─────────────────────────────────────────────────────────────────
@@ -844,7 +990,7 @@ class AnalyticsWidget(QTabWidget):
 
         self.fig_bif.tight_layout()
         self.cvs_bif.draw()
-        self.setCurrentIndex(8)
+        self.setCurrentWidget(self.tab_bif)
 
     # ─────────────────────────────────────────────────────────────────
     #  9 — SWEEP
@@ -898,7 +1044,7 @@ class AnalyticsWidget(QTabWidget):
 
         self.fig_sweep.tight_layout()
         self.cvs_sweep.draw()
-        self.setCurrentIndex(9)
+        self.setCurrentWidget(self.tab_sweep)
 
     # ─────────────────────────────────────────────────────────────────
     #  10 — S-D CURVE
@@ -935,7 +1081,7 @@ class AnalyticsWidget(QTabWidget):
 
         self.fig_sd.tight_layout()
         self.cvs_sd.draw()
-        self.setCurrentIndex(10)
+        self.setCurrentWidget(self.tab_sd)
 
     # ─────────────────────────────────────────────────────────────────
     #  11 — EXCITABILITY MAP
@@ -964,7 +1110,7 @@ class AnalyticsWidget(QTabWidget):
 
         self.fig_excmap.tight_layout()
         self.cvs_excmap.draw()
-        self.setCurrentIndex(11)
+        self.setCurrentWidget(self.tab_excmap)
 
 
 # ─────────────────────────────────────────────────────────────────────
