@@ -171,42 +171,50 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_currents = cvs
 
         # 2.6 — Spike Mechanism (why spikes attenuate)
-        self.fig_spike_mech, cvs = _mpl_fig(3, 1)
+        self.fig_spike_mech, cvs = _mpl_fig(4, 1)
+        self.ax_spike_mech = [self.fig_spike_mech.add_subplot(4, 1, k) for k in range(1, 5)]
+        self.fig_spike_mech.set_tight_layout({'pad': 2.5})
         self.addTab(_tab_with_toolbar(cvs), "🧪 Spike Mechanism")
         self.cvs_spike_mech = cvs
 
         # 3 — Equilibrium Curves
         self.fig_equil, cvs = _mpl_fig(2, 2)
+        self.ax_equil = [self.fig_equil.add_subplot(2, 2, k) for k in range(1, 5)]
+        self.fig_equil.set_tight_layout({'pad': 3.0})
         self.addTab(_tab_with_toolbar(cvs), "📈 Equilibrium")
         self.cvs_equil = cvs
 
         # 4 — Phase Plane + Nullclines
         self.fig_phase, cvs = _mpl_fig(1, 1)
+        self.ax_phase = self.fig_phase.add_subplot(1, 1, 1)
         self.addTab(_tab_with_toolbar(cvs), "🔄 Phase Plane")
         self.cvs_phase = cvs
 
-        # 5 — Kymograph
+        # 5 — Kymograph (dynamic layout — 1 or 2 subplots depending on n_comp)
         self.fig_kymo, cvs = _mpl_fig(1, 1)
         self.addTab(_tab_with_toolbar(cvs), "🌊 Kymograph")
         self.cvs_kymo = cvs
 
         # 6 — Current Balance
         self.fig_balance, cvs = _mpl_fig(2, 1)
+        self.ax_balance = [self.fig_balance.add_subplot(2, 1, k) for k in range(1, 3)]
         self.addTab(_tab_with_toolbar(cvs), "⚖ Balance")
         self.cvs_balance = cvs
 
         # 7 — Energy
         self.fig_energy, cvs = _mpl_fig(2, 1)
+        self.ax_energy = [self.fig_energy.add_subplot(2, 1, k) for k in range(1, 3)]
         self.addTab(_tab_with_toolbar(cvs), "⚡ Energy")
         self.cvs_energy = cvs
 
         # 8 — Bifurcation
         self.fig_bif, cvs = _mpl_fig(2, 2)
+        self.ax_bif = [self.fig_bif.add_subplot(2, 2, k) for k in range(1, 5)]
         self.tab_bif = _tab_with_toolbar(cvs)
         self.addTab(self.tab_bif, "🔀 Bifurcation")
         self.cvs_bif = cvs
 
-        # 9 — Sweep
+        # 9 — Sweep (uses colorbar — needs fig.clear() for cleanup)
         self.fig_sweep, cvs = _mpl_fig(2, 2)
         self.tab_sweep = _tab_with_toolbar(cvs)
         self.addTab(self.tab_sweep, "↔ Sweep")
@@ -214,11 +222,12 @@ class AnalyticsWidget(QTabWidget):
 
         # 10 — S-D Curve
         self.fig_sd, cvs = _mpl_fig(1, 2)
+        self.ax_sd = [self.fig_sd.add_subplot(1, 2, k) for k in range(1, 3)]
         self.tab_sd = _tab_with_toolbar(cvs)
         self.addTab(self.tab_sd, "⏱ S-D Curve")
         self.cvs_sd = cvs
 
-        # 11 — Excitability Map
+        # 11 — Excitability Map (uses colorbar — needs fig.clear() for cleanup)
         self.fig_excmap, cvs = _mpl_fig(1, 2)
         self.tab_excmap = _tab_with_toolbar(cvs)
         self.addTab(self.tab_excmap, "🗺 Excit. Map")
@@ -558,7 +567,7 @@ class AnalyticsWidget(QTabWidget):
             _configure_ax_interactive(ax, show_legend=True, grid_alpha=0.15)
 
         self.fig_gates.axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
-        self.cvs_gates.draw()
+        self.cvs_gates.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  2.5 — CHANNEL CURRENTS (NEW)
@@ -596,7 +605,7 @@ class AnalyticsWidget(QTabWidget):
             _configure_ax_interactive(ax, show_legend=True, grid_alpha=0.15)
 
         self.fig_currents.axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
-        self.cvs_currents.draw()
+        self.cvs_currents.draw_idle()
 
     def _update_spike_mechanism(self, result, stats: dict):
         """
@@ -606,13 +615,9 @@ class AnalyticsWidget(QTabWidget):
 
         t = np.asarray(result.t, dtype=float)
         v = np.asarray(result.v_soma, dtype=float)
-        self.fig_spike_mech.clear()
-        self.fig_spike_mech.set_tight_layout({'pad': 2.5})
-
-        ax1 = self.fig_spike_mech.add_subplot(4, 1, 1)
-        ax2 = self.fig_spike_mech.add_subplot(4, 1, 2)
-        ax3 = self.fig_spike_mech.add_subplot(4, 1, 3)
-        ax4 = self.fig_spike_mech.add_subplot(4, 1, 4)
+        ax1, ax2, ax3, ax4 = self.ax_spike_mech
+        for ax in self.ax_spike_mech:
+            ax.cla()
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
@@ -649,7 +654,7 @@ class AnalyticsWidget(QTabWidget):
             ax2.set_axis_off()
             ax3.set_axis_off()
             ax4.set_axis_off()
-            self.cvs_spike_mech.draw()
+            self.cvs_spike_mech.draw_idle()
             return
 
         sp_no = np.arange(1, n_sp + 1)
@@ -792,7 +797,7 @@ class AnalyticsWidget(QTabWidget):
             bbox=dict(boxstyle="round,pad=0.25", facecolor="#F8F8F8", edgecolor="#CCCCCC", alpha=0.9),
         )
 
-        self.cvs_spike_mech.draw()
+        self.cvs_spike_mech.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  3 — EQUILIBRIUM CURVES
@@ -806,13 +811,9 @@ class AnalyticsWidget(QTabWidget):
         eq    = compute_equilibrium_curves(V_rng, phi)
         opt   = compute_optional_equilibrium(V_rng, cfg, phi)
 
-        self.fig_equil.clear()
-        self.fig_equil.set_tight_layout({'pad': 3.0})  # Better spacing
-        
-        ax1 = self.fig_equil.add_subplot(2, 2, 1)
-        ax2 = self.fig_equil.add_subplot(2, 2, 2)
-        ax3 = self.fig_equil.add_subplot(2, 2, 3)
-        ax4 = self.fig_equil.add_subplot(2, 2, 4)
+        ax1, ax2, ax3, ax4 = self.ax_equil
+        for ax in self.ax_equil:
+            ax.cla()
 
         # x_inf(V) — improved layout
         ax1.plot(V_rng, eq['m_inf'], color=GATE_COLORS['m'], lw=2.5, label='m∞ (Na act)', alpha=0.9)
@@ -856,7 +857,7 @@ class AnalyticsWidget(QTabWidget):
         _configure_ax_interactive(ax4, title='Effective Conductances',
                                   xlabel='Time (ms)', ylabel='g (mS/cm²)', show_legend=True)
 
-        self.cvs_equil.draw()
+        self.cvs_equil.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  4 — PHASE PLANE + NULLCLINES
@@ -873,8 +874,8 @@ class AnalyticsWidget(QTabWidget):
         V_rng               = np.linspace(-100, 60, 500)
         n_V_null, n_n_null  = compute_nullclines(V_rng, cfg, I_stm)
 
-        self.fig_phase.clear()
-        ax = self.fig_phase.add_subplot(1, 1, 1)
+        ax = self.ax_phase
+        ax.cla()
 
         # Trajectory
         ax.plot(V, n_t, color='#F0B020', lw=1.5, zorder=3, label='AP trajectory')
@@ -904,7 +905,7 @@ class AnalyticsWidget(QTabWidget):
                     transform=ax.transAxes, fontsize=8, color='gray')
 
         self.fig_phase.tight_layout()
-        self.cvs_phase.draw()
+        self.cvs_phase.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  5 — KYMOGRAPH
@@ -918,7 +919,7 @@ class AnalyticsWidget(QTabWidget):
             ax.text(0.5, 0.5, 'Single-compartment mode\n(no kymograph)',
                     ha='center', va='center', fontsize=14, color='gray',
                     transform=ax.transAxes)
-            self.cvs_kymo.draw()
+            self.cvs_kymo.draw_idle()
             return
 
         mc = result.config.morphology
@@ -956,7 +957,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.set_title('Kymograph — Path to Branch 2')
 
         self.fig_kymo.tight_layout()
-        self.cvs_kymo.draw()
+        self.cvs_kymo.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  6 — CURRENT BALANCE
@@ -971,8 +972,9 @@ class AnalyticsWidget(QTabWidget):
         t  = result.t
         err = float(np.max(np.abs(I_bal)))
 
-        self.fig_balance.clear()
-        ax1 = self.fig_balance.add_subplot(2, 1, 1)
+        ax1, ax2 = self.ax_balance
+        ax1.cla()
+        ax2.cla()
         ax1.plot(t, I_bal, color='#DC3232', lw=1)
         ax1.axhline(0, color='k', lw=0.8, ls='--')
         ax1.set_ylabel('I_balance (µA/cm²)')
@@ -980,14 +982,13 @@ class AnalyticsWidget(QTabWidget):
                       f'{"✓ Good" if err < 0.05 else "⚠ Check solver settings"}')
         ax1.grid(alpha=0.3)
 
-        ax2 = self.fig_balance.add_subplot(2, 1, 2)
         ax2.semilogy(t, np.abs(I_bal) + 1e-12, color='#3264DC', lw=1)
         ax2.set_xlabel('Time (ms)');  ax2.set_ylabel('|Error|  log scale')
         ax2.set_title('Absolute balance error (log)')
         ax2.grid(alpha=0.3)
 
         self.fig_balance.tight_layout()
-        self.cvs_balance.draw()
+        self.cvs_balance.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  7 — ENERGY
@@ -996,9 +997,9 @@ class AnalyticsWidget(QTabWidget):
         t   = result.t
         dt  = float(t[1] - t[0]) if len(t) > 1 else 0.05
 
-        self.fig_energy.clear()
-        ax1 = self.fig_energy.add_subplot(2, 1, 1)
-        ax2 = self.fig_energy.add_subplot(2, 1, 2)
+        ax1, ax2 = self.ax_energy
+        ax1.cla()
+        ax2.cla()
 
         P_total = np.zeros_like(t)
         for name, curr in result.currents.items():
@@ -1021,7 +1022,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.legend(fontsize=8);  ax2.grid(alpha=0.3)
 
         self.fig_energy.tight_layout()
-        self.cvs_energy.draw()
+        self.cvs_energy.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  8 — BIFURCATION
@@ -1035,11 +1036,9 @@ class AnalyticsWidget(QTabWidget):
         freq   = np.array([d['freq']  for d in bif_data])
         n_sp   = np.array([d['n_sp']  for d in bif_data])
 
-        self.fig_bif.clear()
-        ax1 = self.fig_bif.add_subplot(2, 2, 1)
-        ax2 = self.fig_bif.add_subplot(2, 2, 2)
-        ax3 = self.fig_bif.add_subplot(2, 2, 3)
-        ax4 = self.fig_bif.add_subplot(2, 2, 4)
+        ax1, ax2, ax3, ax4 = self.ax_bif
+        for ax in self.ax_bif:
+            ax.cla()
 
         for d in bif_data:
             pks = d.get('peaks', [])
@@ -1065,7 +1064,7 @@ class AnalyticsWidget(QTabWidget):
         ax4.set_title('Spike count');  ax4.grid(alpha=0.3)
 
         self.fig_bif.tight_layout()
-        self.cvs_bif.draw()
+        self.cvs_bif.draw_idle()
         self.setCurrentWidget(self.tab_bif)
 
     # ─────────────────────────────────────────────────────────────────
@@ -1121,7 +1120,7 @@ class AnalyticsWidget(QTabWidget):
         ax4.set_title('Spike count');  ax4.grid(alpha=0.3)
 
         self.fig_sweep.tight_layout()
-        self.cvs_sweep.draw()
+        self.cvs_sweep.draw_idle()
         self.setCurrentWidget(self.tab_sweep)
 
     # ─────────────────────────────────────────────────────────────────
@@ -1136,9 +1135,9 @@ class AnalyticsWidget(QTabWidget):
         weiss = sd['weiss_fit']
         Q_th  = sd['Q_threshold']
 
-        self.fig_sd.clear()
-        ax1 = self.fig_sd.add_subplot(1, 2, 1)
-        ax2 = self.fig_sd.add_subplot(1, 2, 2)
+        ax1, ax2 = self.ax_sd
+        ax1.cla()
+        ax2.cla()
 
         ax1.plot(dur, I_th, 'b.-', lw=2, ms=8, label='I_threshold')
         if weiss is not None:
@@ -1159,7 +1158,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.legend();  ax2.grid(alpha=0.3)
 
         self.fig_sd.tight_layout()
-        self.cvs_sd.draw()
+        self.cvs_sd.draw_idle()
         self.setCurrentWidget(self.tab_sd)
 
     # ─────────────────────────────────────────────────────────────────
@@ -1189,7 +1188,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.set_title('Mean frequency map')
 
         self.fig_excmap.tight_layout()
-        self.cvs_excmap.draw()
+        self.cvs_excmap.draw_idle()
         self.setCurrentWidget(self.tab_excmap)
 
     def open_fullscreen(self):
