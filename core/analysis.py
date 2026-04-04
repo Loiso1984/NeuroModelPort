@@ -236,6 +236,116 @@ def classify_neuron(AI: float, hw_ms: float,
         return "Intermediate"
 
 
+_NEURON_ML_PROTOTYPES = {
+    # feature units:
+    # fi_hz, fs_hz, ai, hw_ms, cv_isi
+    "FS":  {"fi_hz": 180.0, "fs_hz": 160.0, "ai": 0.05, "hw_ms": 0.40, "cv_isi": 0.10},
+    "RS":  {"fi_hz": 35.0,  "fs_hz": 15.0,  "ai": 0.40, "hw_ms": 1.00, "cv_isi": 0.25},
+    "IB":  {"fi_hz": 80.0,  "fs_hz": 30.0,  "ai": -0.30, "hw_ms": 0.90, "cv_isi": 0.45},
+    "LTS": {"fi_hz": 20.0,  "fs_hz": 8.0,   "ai": 0.20, "hw_ms": 1.80, "cv_isi": 0.30},
+}
+
+_NEURON_ML_SCALES = {
+    "fi_hz": 120.0,
+    "fs_hz": 100.0,
+    "ai": 0.60,
+    "hw_ms": 1.20,
+    "cv_isi": 0.50,
+}
+
+
+def _rule_label_to_code(rule_label: str) -> str:
+    if rule_label.startswith("FS"):
+        return "FS"
+    if rule_label.startswith("RS"):
+        return "RS"
+    if rule_label.startswith("IB"):
+        return "IB"
+    if rule_label.startswith("LTS"):
+        return "LTS"
+    if rule_label.startswith("Silent"):
+        return "Silent"
+    return "Intermediate"
+
+
+def classify_neuron_ml(
+    fi_hz: float,
+    fs_hz: float,
+    ai: float,
+    hw_ms: float,
+    cv_isi: float,
+) -> tuple[str, float]:
+    """
+    Lightweight prototype-based classifier.
+
+    Returns (label_code, confidence_0_1).
+    """
+    feat = {
+        "fi_hz": fi_hz,
+        "fs_hz": fs_hz,
+        "ai": ai,
+        "hw_ms": hw_ms,
+        "cv_isi": cv_isi,
+    }
+    valid_keys = [k for k, v in feat.items() if np.isfinite(v)]
+    if len(valid_keys) < 3:
+        return "Intermediate", 0.0
+
+    dists = {}
+    for cls, proto in _NEURON_ML_PROTOTYPES.items():
+        d2 = 0.0
+        for k in valid_keys:
+            scale = _NEURON_ML_SCALES[k]
+            dv = (feat[k] - proto[k]) / scale
+            d2 += dv * dv
+        dists[cls] = np.sqrt(d2 / len(valid_keys))
+
+    ranking = sorted(dists.items(), key=lambda kv: kv[1])
+    best_cls, best_d = ranking[0]
+    second_d = ranking[1][1] if len(ranking) > 1 else best_d + 1.0
+    # Confidence from margin in normalized feature space.
+    conf = 1.0 / (1.0 + max(0.0, best_d))
+    margin = max(0.0, second_d - best_d)
+    conf = float(np.clip(conf * (0.7 + 0.3 * np.tanh(2.0 * margin)), 0.0, 1.0))
+    return best_cls, conf
+
+
+def classify_neuron_hybrid(
+    rule_label: str,
+    fi_hz: float,
+    fs_hz: float,
+    ai: float,
+    hw_ms: float,
+    cv_isi: float,
+) -> tuple[str, str, float]:
+    """
+    Hybrid classifier = rules + prototype-ML.
+
+    Returns:
+    - hybrid label (human-readable)
+    - source tag (rule_only / ml_only / rule+ml / rule_priority)
+    - confidence in [0, 1]
+    """
+    rule_code = _rule_label_to_code(rule_label)
+    if rule_code == "Silent":
+        return "Silent", "rule_only", 1.0
+
+    ml_code, ml_conf = classify_neuron_ml(fi_hz, fs_hz, ai, hw_ms, cv_isi)
+    if ml_conf <= 0.0:
+        return rule_label, "rule_only", 0.50
+
+    if rule_code in {"FS", "RS", "IB", "LTS"} and ml_code == rule_code:
+        return rule_label, "rule+ml", float(np.clip(0.65 + 0.35 * ml_conf, 0.0, 1.0))
+
+    if rule_code == "Intermediate" and ml_conf >= 0.65:
+        return f"{ml_code} (ML)", "ml_only", ml_conf
+
+    if ml_conf >= 0.85:
+        return f"{ml_code} (ML override)", "ml_only", ml_conf
+
+    return rule_label, "rule_priority", float(np.clip(0.55 + 0.25 * ml_conf, 0.0, 1.0))
+
+
 # ─────────────────────────────────────────────────────────────────────
 #  4. CONDUCTION & CABLE PROPERTIES
 # ─────────────────────────────────────────────────────────────────────
@@ -931,7 +1041,31 @@ def full_analysis(result) -> dict:
         isi_max  = float(np.max(isi))
         if isi_mean > 0:
             cv_isi = isi_std / isi_mean
-    
+
+    neuron_type_rule = neuron_type
+    neuron_type_ml = "Intermediate"
+    neuron_type_ml_conf = 0.0
+    neuron_type_hybrid = neuron_type_rule
+    neuron_type_source = "rule_only"
+    if n_spikes > 1:
+        neuron_type_ml, neuron_type_ml_conf = classify_neuron_ml(
+            f_initial,
+            f_steady,
+            AI,
+            hw if not np.isnan(hw) else np.nan,
+            cv_isi,
+        )
+        neuron_type_hybrid, neuron_type_source, hybrid_conf = classify_neuron_hybrid(
+            neuron_type_rule,
+            f_initial,
+            f_steady,
+            AI,
+            hw if not np.isnan(hw) else np.nan,
+            cv_isi,
+        )
+    else:
+        hybrid_conf = 1.0 if neuron_type_rule == "Silent" else 0.5
+
     # First spike latency (time to first spike from stim onset)
     first_spike_lat = np.nan
     if n_spikes > 0:
@@ -1040,6 +1174,12 @@ def full_analysis(result) -> dict:
         'f_steady_hz':         f_steady,
         'adaptation_index':    AI,
         'neuron_type':         neuron_type,
+        'neuron_type_rule':    neuron_type_rule,
+        'neuron_type_ml':      neuron_type_ml,
+        'neuron_type_ml_confidence': neuron_type_ml_conf,
+        'neuron_type_hybrid':  neuron_type_hybrid,
+        'neuron_type_hybrid_source': neuron_type_source,
+        'neuron_type_hybrid_confidence': hybrid_conf,
         'conduction_vel_ms':   cv,
         'tau_m_ms':            tau_m,
         'Rin_kohm_cm2':        Rin,

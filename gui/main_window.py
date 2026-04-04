@@ -117,6 +117,8 @@ class MainWindow(QMainWindow):
         self._current_preset_name = ""
         self._thread_pool = QThreadPool()
         self._dual_stim_signal_connected = False
+        self._delay_target_name = "Terminal"
+        self._delay_custom_index = 1
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -293,6 +295,10 @@ class MainWindow(QMainWindow):
         # ── Tab 2: Oscilloscope ───────────────────────────────────────
         # Step 3: Oscilloscope
         self.oscilloscope = OscilloscopeWidget()
+        self.oscilloscope.delay_target_changed.connect(self._on_delay_target_changed)
+        self._delay_target_name, self._delay_custom_index = (
+            self.oscilloscope.get_delay_target_selection()
+        )
         self.tabs.addTab(self.oscilloscope, "3) Oscilloscope")
 
         # ── Tab 3: Analytics ──────────────────────────────────────────
@@ -303,6 +309,10 @@ class MainWindow(QMainWindow):
         # ── Tab 4: Topology ───────────────────────────────────────────
         # Step 5: Topology
         self.topology = TopologyWidget()
+        self.topology.set_delay_focus(
+            self._delay_target_name,
+            self._delay_custom_index,
+        )
         self.tabs.addTab(self.topology,     "5) Topology")
 
         # ── Tab 5: Axon Biophysics ───────────────────────────────────
@@ -519,6 +529,15 @@ class MainWindow(QMainWindow):
             self.form_stim.refresh()
         self._update_params_hint()
 
+    def _on_delay_target_changed(self, target_name: str, custom_index: int):
+        self._delay_target_name = str(target_name)
+        self._delay_custom_index = int(custom_index)
+        if hasattr(self, "topology"):
+            self.topology.set_delay_focus(
+                self._delay_target_name,
+                self._delay_custom_index,
+            )
+
     def _sync_dual_stim_into_config(self) -> bool:
         """
         Sync dual-stimulation GUI config into main model config.
@@ -618,7 +637,11 @@ class MainWindow(QMainWindow):
         self.dual_stim_widget.load_default_preset()
         self._sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
-        self.topology.draw_neuron(self.config)
+        self.topology.draw_neuron(
+            self.config,
+            delay_target_name=self._delay_target_name,
+            delay_custom_index=self._delay_custom_index,
+        )
         self._status(f"Preset applied: {name}{self._active_mode_suffix()}")
 
     def _refresh_all_forms(self):
@@ -638,7 +661,11 @@ class MainWindow(QMainWindow):
             return
         apply_preset(self.config, self._current_preset_name)
         self._refresh_all_forms()
-        self.topology.draw_neuron(self.config)
+        self.topology.draw_neuron(
+            self.config,
+            delay_target_name=self._delay_target_name,
+            delay_custom_index=self._delay_custom_index,
+        )
         self._status(
             f"Preset mode updated: {self._current_preset_name}{self._active_mode_suffix()}"
         )
@@ -728,7 +755,12 @@ class MainWindow(QMainWindow):
                 self.oscilloscope.update_plots(res)
                 self.analytics.update_analytics(res)
                 dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
-                self.topology.draw_neuron(self.config, dual_config=dual_cfg)
+                self.topology.draw_neuron(
+                    self.config,
+                    dual_config=dual_cfg,
+                    delay_target_name=self._delay_target_name,
+                    delay_custom_index=self._delay_custom_index,
+                )
                 self.axon_biophysics.plot_axon_data(res, self.config)
                 self.btn_export_plot.setEnabled(True)
                 self.btn_export.setEnabled(True)
@@ -791,7 +823,12 @@ class MainWindow(QMainWindow):
         self.oscilloscope.update_plots(res)
         self.analytics.update_analytics(res)
         dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
-        self.topology.draw_neuron(self.config, dual_config=dual_cfg)
+        self.topology.draw_neuron(
+            self.config,
+            dual_config=dual_cfg,
+            delay_target_name=self._delay_target_name,
+            delay_custom_index=self._delay_custom_index,
+        )
         self.axon_biophysics.plot_axon_data(res, self.config)
         self.btn_export_plot.setEnabled(True)
         self.btn_export.setEnabled(True)
@@ -997,6 +1034,10 @@ extended with multi-compartment morphology, optional ion channels, and advanced 
   <li>Click <b>▶ RUN SIMULATION</b> — results appear in Oscilloscope and Analytics.</li>
   <li>Inspect traces in <b>3) Oscilloscope</b> and metrics in <b>4) Analytics</b>.</li>
 </ol>
+<p style="color:#BAC2DE;">
+In <b>Oscilloscope → View</b>, conduction delay can be measured from soma to
+<i>Terminal</i>, <i>AIS</i>, <i>Trunk Junction</i>, or a custom compartment index.
+</p>
 
 <h2 style="color:#A6E3A1;">🔬 Run Modes</h2>
 <table style="border-collapse:collapse; width:100%;">

@@ -256,6 +256,12 @@ class AnalyticsWidget(QTabWidget):
         fs   = stats['f_steady_hz']
         AI   = stats['adaptation_index']
         nt   = stats['neuron_type']
+        nt_rule = stats.get('neuron_type_rule', nt)
+        nt_ml = stats.get('neuron_type_ml', '—')
+        nt_ml_conf = stats.get('neuron_type_ml_confidence', np.nan)
+        nt_hybrid = stats.get('neuron_type_hybrid', nt)
+        nt_source = stats.get('neuron_type_hybrid_source', 'rule_only')
+        nt_hybrid_conf = stats.get('neuron_type_hybrid_confidence', np.nan)
         cv   = stats['conduction_vel_ms']
         tau  = stats['tau_m_ms']
         Rin  = stats['Rin_kohm_cm2']
@@ -286,6 +292,43 @@ class AnalyticsWidget(QTabWidget):
         modulation_spikes_used = int(stats.get('modulation_spikes_used', 0) or 0)
         modulation_low_hz = stats.get('modulation_band_low_hz', np.nan)
         modulation_high_hz = stats.get('modulation_band_high_hz', np.nan)
+        dt_val = float(np.mean(np.diff(result.t))) if len(result.t) > 1 else 0.0
+        current_stats = {}
+        for name, curr in result.currents.items():
+            if curr is None or len(curr) == 0:
+                continue
+            i_min = float(np.min(curr))
+            i_max = float(np.max(curr))
+            q_abs = float(np.sum(np.abs(curr)) * dt_val) if dt_val > 0 else np.nan
+            current_stats[name] = (i_min, i_max, q_abs)
+        dominant_current = "—"
+        if current_stats:
+            dominant_current = max(
+                current_stats.items(),
+                key=lambda kv: kv[1][2] if np.isfinite(kv[1][2]) else -1.0,
+            )[0]
+
+        def _first_crossing_ms(v_trace: np.ndarray, threshold: float = -20.0) -> float:
+            if len(v_trace) < 2:
+                return np.nan
+            idx = np.where((v_trace[:-1] < threshold) & (v_trace[1:] >= threshold))[0]
+            if len(idx) == 0:
+                return np.nan
+            return float(result.t[idx[0] + 1])
+
+        delay_junction_ms = np.nan
+        delay_terminal_ms = np.nan
+        if result.n_comp > 1:
+            t_soma = _first_crossing_ms(result.v_soma)
+            if np.isfinite(t_soma):
+                if result.n_comp > 2:
+                    j_idx = min(1 + mc.N_ais + mc.N_trunk, result.n_comp - 1)
+                    t_j = _first_crossing_ms(result.v_all[j_idx, :])
+                    if np.isfinite(t_j) and t_j >= t_soma:
+                        delay_junction_ms = t_j - t_soma
+                t_t = _first_crossing_ms(result.v_all[-1, :])
+                if np.isfinite(t_t) and t_t >= t_soma:
+                    delay_terminal_ms = t_t - t_soma
 
         def _fmt(v, fmt='.2f', unit=''):
             if v is None or (isinstance(v, float) and np.isnan(v)):
@@ -326,7 +369,9 @@ class AnalyticsWidget(QTabWidget):
                 f"║    f_initial  = {_fmt(fi, '.1f', 'Hz'):<12}  "
                 f"f_steady = {_fmt(fs, '.1f', 'Hz'):<12}  "
                 f"AI = {_fmt(AI, '+.3f')}  ║",
-                f"║    Type: {nt:<35}  ║",
+                f"║    Type (rule): {nt_rule:<28}  ║",
+                f"║    Type (ML): {nt_ml:<13} conf={_fmt(nt_ml_conf, '.2f'):<8} source={nt_source:<10} ║",
+                f"║    Type (hybrid): {nt_hybrid:<19} conf={_fmt(nt_hybrid_conf, '.2f')}        ║",
             ]
         if cv > 0:
             lines.append(
@@ -373,6 +418,27 @@ class AnalyticsWidget(QTabWidget):
                 f"║    PLV={_fmt(modulation_plv, '.3f'):<10} Phase={_fmt(modulation_phase_deg, '.1f', 'deg'):<14} Nsp={modulation_spikes_used:<5}  ║",
                 f"║    Depth={_fmt(modulation_depth, '.3f'):<10} MI={_fmt(modulation_index, '.3f'):<10} p={_fmt(modulation_p, '.3f'):<9} z={_fmt(modulation_z, '.2f')}  ║",
             ]
+
+        lines += [
+            "╠══════════════════════════════════════════════════════════════════╣",
+            "║  CHANNEL ENGAGEMENT                                              ║",
+            f"║    Dominant |Q| channel: {dominant_current:<10}                        ║",
+        ]
+        top_channels = sorted(
+            current_stats.items(),
+            key=lambda kv: kv[1][2] if np.isfinite(kv[1][2]) else -1.0,
+            reverse=True,
+        )[:4]
+        for name, (i_min, i_max, q_abs) in top_channels:
+            lines.append(
+                f"║    {name:<5} Imin={_fmt(i_min, '.2f', 'uA/cm²'):<14} "
+                f"Imax={_fmt(i_max, '.2f', 'uA/cm²'):<14} Qabs={_fmt(q_abs, '.2f', 'nC/cm²')}  ║"
+            )
+        if result.n_comp > 1:
+            lines.append(
+                f"║    Delay soma->junction={_fmt(delay_junction_ms, '.2f', 'ms'):<10} "
+                f"soma->terminal={_fmt(delay_terminal_ms, '.2f', 'ms')}  ║"
+            )
 
         lines += [
             "╠══════════════════════════════════════════════════════════════════╣",

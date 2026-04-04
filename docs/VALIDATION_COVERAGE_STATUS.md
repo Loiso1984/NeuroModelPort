@@ -26,9 +26,15 @@ Current status snapshot after latest branch-contour runs.
 
 ## Not closed yet (planned follow-up)
 
+- Deferred: targeted `C/L` baseline stimulation refinement pass (kept out of current high-priority lane).
 - `7` Plot readability/interactive improvements (beyond current export integration).
+  - progress update: theme + linewidth + spike/delay overlays + title-font/grid controls integrated in oscilloscope.
+  - delay visualization now supports target selection (terminal / AIS / junction / custom compartment).
 - `8` Neuron passport with ML classification.
+  - progress update: passport now includes Lyapunov/modulation blocks, channel-engagement/delay summaries,
+    and a first hybrid rule+ML classifier baseline (prototype ML + confidence + source tag).
 - `9` Topology/axon propagation visualization upgrades.
+  - progress update: topology now includes compartment-index labeling and compact index map in info bar for better axonal targeting.
 - `10` Real-time sliders with immediate recompute.
 - `11` Extended export workflows polishing.
 - `12` Full doc rewrite/reorganization (user+developer).

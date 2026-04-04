@@ -255,6 +255,39 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - stimulation fields are now context-sensitive by `stim_type` (no alpha-only clutter for `const/pulse`),
    - selecting receptor modes (`AMPA/NMDA/GABAA/GABAB/Kainate/Nicotinic`) now auto-applies corresponding synaptic default parameters in GUI config,
    - added explicit setup hint clarifying that `const` in selected physiological presets is tonic-drive proxy (not a single synaptic event).
+61. Deferred physiology tuning backlog:
+   - postponed `C/L` baseline stimulation refinement (FS Interneuron / Hippocampal CA1) for a dedicated pass,
+   - keep current validated settings for now and return after higher-priority master-plan items.
+62. Oscilloscope readability follow-up:
+   - added View controls for title font size and grid alpha,
+   - titles now render with configurable font size in single-run and MC modes,
+   - grid contrast now user-adjustable without rerunning physiology sweeps.
+63. Axonal delay target selector in Oscilloscope:
+   - delay overlay is no longer terminal-only; user can select `Terminal`, `AIS`, `Trunk Junction`, or `Custom Compartment`,
+   - single-compartment runs auto-disable delay controls to avoid misleading metrics,
+   - delay title tag now reports selected target (e.g., `delay soma->junction ... ms`).
+64. Delay-target UX safety hardening:
+   - delay-target options are auto-disabled when unavailable for current morphology (e.g., no AIS or no junction),
+   - selector falls back to valid target automatically, preventing empty/non-physiological delay readouts.
+65. Guide documentation sync:
+   - built-in Guide now documents new oscilloscope delay-target options
+     (terminal / AIS / junction / custom compartment).
+66. Passport informativeness upgrade:
+   - added `CHANNEL ENGAGEMENT` section in analytics passport with dominant channel by |Q|,
+   - added per-channel peak inward/outward current and |Q| summaries (top channels),
+   - added soma->junction and soma->terminal delay fields directly in passport text.
+67. Hybrid passport classification baseline:
+   - added lightweight prototype-ML classifier in `core.analysis` (`FS/RS/IB/LTS`) with confidence,
+   - added hybrid decision layer (rule + ML) with source tag (`rule_only / rule+ml / ml_only / rule_priority`),
+   - exported ML/hybrid fields through `full_analysis` and surfaced them in Passport text.
+68. Topology readability enhancement (index map):
+   - morphology view now annotates compartment index ranges on AIS/trunk/branches and fork index,
+   - info bar includes compact index map (`soma/fork/terminal`) for easier targeting of custom compartment analyses.
+69. Targeted regression checks for latest analytics/topology pass:
+   - `test_passport_ml_classification_branch.py` passed (`3/3`),
+   - `test_modulation_decomposition_branch.py` passed (`3/3`),
+   - `test_spike_detection_math_branch.py` passed (`5/5`),
+   - lightweight GUI offscreen smoke checks passed for analytics/topology/plots.
 
 ## Preset Mode Requirements
 

@@ -15,8 +15,8 @@ v10.3 changes:
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                                QCheckBox, QGroupBox, QComboBox, QDoubleSpinBox, QLabel)
-from PySide6.QtCore import Qt
+                                QCheckBox, QGroupBox, QComboBox, QDoubleSpinBox, QLabel, QSpinBox)
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPageSize, QPdfWriter
 
 # Colour scheme (matches analytics.py)
@@ -79,16 +79,36 @@ class OscilloscopeWidget(QWidget):
     - Bottom: ionic currents (fill to zero) + optional filtered stim trace
     """
 
+    delay_target_changed = Signal(str, int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._theme_name = "Default"
         self._line_width_scale = 1.0
+        self._grid_alpha = 0.2
+        self._title_font_px = 13
+        self._delay_target_name = "Terminal"
+        self._delay_custom_index = 1
         self._last_result = None
         self._last_mc_results = None
         self._build_ui()
         self._curves_v:    dict = {}
         self._curves_gate: dict = {}
         self._curves_i:    dict = {}
+
+    # ─────────────────────────────────────────────────────────────────
+    def _title_html(self, text: str, color: str) -> str:
+        return f"<span style='color:{color}; font-size:{self._title_font_px}px'>{text}</span>"
+
+    def _apply_grid_alpha(self):
+        self._p_v.showGrid(x=True, y=True, alpha=self._grid_alpha)
+        self._p_g.showGrid(x=True, y=True, alpha=self._grid_alpha)
+        self._p_i.showGrid(x=True, y=True, alpha=self._grid_alpha)
+
+    def _set_default_titles(self):
+        self._p_v.setTitle(self._title_html("Membrane Potential  V(t)", "#89B4FA"))
+        self._p_g.setTitle(self._title_html("Gate Variables  m, h, n", "#A6E3A1"))
+        self._p_i.setTitle(self._title_html("Ion Currents  (soma)", "#FAB387"))
 
     # ─────────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -102,17 +122,17 @@ class OscilloscopeWidget(QWidget):
 
         # V(t) — row 0
         self._p_v = self._win.addPlot(
-            title="<span style='color:#89B4FA'>Membrane Potential  V(t)</span>")
+            title=self._title_html("Membrane Potential  V(t)", "#89B4FA"))
         self._p_v.setLabel('left', 'V', units='mV', color='#CDD6F4')
-        self._p_v.showGrid(x=True, y=True, alpha=0.2)
+        self._p_v.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_v.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._win.nextRow()
 
         # Gate variables — row 1
         self._p_g = self._win.addPlot(
-            title="<span style='color:#A6E3A1'>Gate Variables  m, h, n</span>")
+            title=self._title_html("Gate Variables  m, h, n", "#A6E3A1"))
         self._p_g.setLabel('left', 'probability  [0–1]', color='#CDD6F4')
-        self._p_g.showGrid(x=True, y=True, alpha=0.2)
+        self._p_g.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_g.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_g.setXLink(self._p_v)
         self._p_g.setYRange(-0.05, 1.05)
@@ -120,10 +140,10 @@ class OscilloscopeWidget(QWidget):
 
         # Currents — row 2
         self._p_i = self._win.addPlot(
-            title="<span style='color:#FAB387'>Ion Currents  (soma)</span>")
+            title=self._title_html("Ion Currents  (soma)", "#FAB387"))
         self._p_i.setLabel('left', 'I', units='µA/cm²', color='#CDD6F4')
         self._p_i.setLabel('bottom', 'Time', units='ms', color='#CDD6F4')
-        self._p_i.showGrid(x=True, y=True, alpha=0.2)
+        self._p_i.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_i.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_i.setXLink(self._p_v)
 
@@ -136,7 +156,7 @@ class OscilloscopeWidget(QWidget):
 
         # ── Checkbox panel ────────────────────────────────────────────
         cb_widget = QWidget()
-        cb_widget.setMaximumWidth(160)
+        cb_widget.setMaximumWidth(210)
         cb_widget.setStyleSheet("background:#1E1E2E;")
         cb_layout = QVBoxLayout(cb_widget)
         cb_layout.setContentsMargins(4, 4, 4, 4)
@@ -211,17 +231,58 @@ class OscilloscopeWidget(QWidget):
         vl2.addWidget(lbl_lw)
         vl2.addWidget(self._spin_line_width)
 
+        lbl_title = QLabel("Title Font (px)")
+        lbl_title.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        self._spin_title_px = QSpinBox()
+        self._spin_title_px.setRange(10, 24)
+        self._spin_title_px.setValue(self._title_font_px)
+        self._spin_title_px.valueChanged.connect(self._on_view_settings_changed)
+        vl2.addWidget(lbl_title)
+        vl2.addWidget(self._spin_title_px)
+
+        lbl_grid = QLabel("Grid Alpha")
+        lbl_grid.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        self._spin_grid_alpha = QDoubleSpinBox()
+        self._spin_grid_alpha.setRange(0.05, 0.60)
+        self._spin_grid_alpha.setSingleStep(0.05)
+        self._spin_grid_alpha.setDecimals(2)
+        self._spin_grid_alpha.setValue(self._grid_alpha)
+        self._spin_grid_alpha.valueChanged.connect(self._on_view_settings_changed)
+        vl2.addWidget(lbl_grid)
+        vl2.addWidget(self._spin_grid_alpha)
+
         self._cb_show_spike_markers = QCheckBox("Show spike markers")
         self._cb_show_spike_markers.setChecked(True)
         self._cb_show_spike_markers.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._cb_show_spike_markers.stateChanged.connect(self._on_view_settings_changed)
         vl2.addWidget(self._cb_show_spike_markers)
 
-        self._cb_show_delay = QCheckBox("Show soma→terminal delay")
+        self._cb_show_delay = QCheckBox("Show soma delay overlay")
         self._cb_show_delay.setChecked(True)
         self._cb_show_delay.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._cb_show_delay.stateChanged.connect(self._on_view_settings_changed)
         vl2.addWidget(self._cb_show_delay)
+
+        lbl_delay_target = QLabel("Delay Target")
+        lbl_delay_target.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        self._combo_delay_target = QComboBox()
+        self._combo_delay_target.addItems(
+            ["Terminal", "AIS", "Trunk Junction", "Custom Compartment"]
+        )
+        self._combo_delay_target.setCurrentText(self._delay_target_name)
+        self._combo_delay_target.currentTextChanged.connect(self._on_view_settings_changed)
+        vl2.addWidget(lbl_delay_target)
+        vl2.addWidget(self._combo_delay_target)
+
+        lbl_delay_comp = QLabel("Custom Comp Index")
+        lbl_delay_comp.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        self._spin_delay_comp = QSpinBox()
+        self._spin_delay_comp.setRange(1, 1)
+        self._spin_delay_comp.setValue(self._delay_custom_index)
+        self._spin_delay_comp.setEnabled(False)
+        self._spin_delay_comp.valueChanged.connect(self._on_view_settings_changed)
+        vl2.addWidget(lbl_delay_comp)
+        vl2.addWidget(self._spin_delay_comp)
 
         cb_layout.addWidget(grp_view)
         cb_layout.addStretch()
@@ -246,10 +307,27 @@ class OscilloscopeWidget(QWidget):
     def _on_view_settings_changed(self, *_):
         self._theme_name = self._combo_theme.currentText()
         self._line_width_scale = float(self._spin_line_width.value())
+        self._title_font_px = int(self._spin_title_px.value())
+        self._grid_alpha = float(self._spin_grid_alpha.value())
+        self._delay_target_name = self._combo_delay_target.currentText()
+        self._delay_custom_index = int(self._spin_delay_comp.value())
+        self._spin_delay_comp.setEnabled(
+            self._delay_target_name == "Custom Compartment"
+        )
+        self.delay_target_changed.emit(
+            self._delay_target_name,
+            self._delay_custom_index,
+        )
+        self._apply_grid_alpha()
         if self._last_result is not None:
             self.update_plots(self._last_result)
         elif self._last_mc_results is not None:
             self.update_plots_mc(self._last_mc_results)
+        else:
+            self._set_default_titles()
+
+    def get_delay_target_selection(self) -> tuple[str, int]:
+        return self._delay_target_name, self._delay_custom_index
 
     @staticmethod
     def _first_crossing_time(v: np.ndarray, t: np.ndarray, threshold: float) -> float:
@@ -257,6 +335,73 @@ class OscilloscopeWidget(QWidget):
         if len(idx) == 0:
             return float("nan")
         return float(t[idx[0] + 1])
+
+    def _resolve_delay_target(self, result):
+        n = int(result.n_comp)
+        mc = result.config.morphology
+        if n <= 1:
+            return None, "", "terminal"
+
+        target = self._delay_target_name
+        if target == "AIS":
+            if n > 1 and int(mc.N_ais) > 0:
+                return 1, "AIS", "ais"
+            return None, "", "ais"
+        if target == "Trunk Junction":
+            j = 1 + int(mc.N_ais) + int(mc.N_trunk)
+            if 0 <= j < n:
+                return j, "junction", "terminal"
+            return None, "", "terminal"
+        if target == "Custom Compartment":
+            idx = int(self._delay_custom_index)
+            idx = max(1, min(n - 1, idx))
+            return idx, f"comp[{idx}]", "terminal"
+        return n - 1, "terminal", "terminal"
+
+    def _sync_delay_controls_core(self, n: int, mc):
+        self._cb_show_delay.setEnabled(n > 1)
+        self._combo_delay_target.setEnabled(n > 1)
+        max_idx = max(1, n - 1)
+        self._spin_delay_comp.setRange(1, max_idx)
+        if self._spin_delay_comp.value() > max_idx:
+            self._spin_delay_comp.setValue(max_idx)
+        has_ais = n > 1 and int(mc.N_ais) > 0
+        j = 1 + int(mc.N_ais) + int(mc.N_trunk)
+        has_junction = 0 <= j < n
+        model = self._combo_delay_target.model()
+        for i in range(self._combo_delay_target.count()):
+            name = self._combo_delay_target.itemText(i)
+            enabled = True
+            if name == "AIS":
+                enabled = has_ais
+            elif name == "Trunk Junction":
+                enabled = has_junction
+            elif name == "Custom Compartment":
+                enabled = n > 1
+            if hasattr(model, "item"):
+                item = model.item(i)
+                if item is not None:
+                    item.setEnabled(enabled)
+        if self._delay_target_name == "AIS" and not has_ais:
+            self._combo_delay_target.setCurrentText("Terminal")
+        if self._delay_target_name == "Trunk Junction" and not has_junction:
+            self._combo_delay_target.setCurrentText("Terminal")
+        if self._delay_target_name == "Custom Compartment" and n <= 1:
+            self._combo_delay_target.setCurrentText("Terminal")
+        self._spin_delay_comp.setEnabled(
+            n > 1 and self._combo_delay_target.currentText() == "Custom Compartment"
+        )
+
+    def _sync_delay_controls(self, result):
+        self._sync_delay_controls_core(int(result.n_comp), result.config.morphology)
+
+    def sync_delay_controls_for_config(self, config):
+        mc = config.morphology
+        if bool(mc.single_comp):
+            n = 1
+        else:
+            n = int(1 + mc.N_ais + mc.N_trunk + mc.N_b1 + mc.N_b2)
+        self._sync_delay_controls_core(n, mc)
 
     # ─────────────────────────────────────────────────────────────────
     #  CLEAR
@@ -271,6 +416,8 @@ class OscilloscopeWidget(QWidget):
         self._p_v.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_g.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_i.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
+        self._apply_grid_alpha()
+        self._set_default_titles()
 
     # ─────────────────────────────────────────────────────────────────
     #  UPDATE — single result
@@ -279,6 +426,7 @@ class OscilloscopeWidget(QWidget):
         self._last_result = result
         self._last_mc_results = None
         self.clear()
+        self._sync_delay_controls(result)
         theme = PLOT_THEMES.get(self._theme_name, PLOT_THEMES["Default"])
         lw = self._line_width_scale
         t   = result.t
@@ -328,12 +476,16 @@ class OscilloscopeWidget(QWidget):
                 self._p_v.addItem(pg.InfiniteLine(pos=t_sp, angle=90, pen=spike_pen))
 
         delay_tag = ""
-        if self._cb_show_delay.isChecked() and n > 2:
+        if self._cb_show_delay.isChecked() and n > 1:
+            target_idx, target_label, target_color_key = self._resolve_delay_target(result)
             t_soma = self._first_crossing_time(result.v_soma, t, _THRESHOLD_MV)
-            t_term = self._first_crossing_time(result.v_all[-1, :], t, _THRESHOLD_MV)
-            if np.isfinite(t_soma) and np.isfinite(t_term) and t_term >= t_soma:
-                delay_ms = t_term - t_soma
-                delay_tag = f" | delay soma→terminal {delay_ms:.2f} ms"
+            if target_idx is not None:
+                t_target = self._first_crossing_time(result.v_all[target_idx, :], t, _THRESHOLD_MV)
+            else:
+                t_target = float("nan")
+            if np.isfinite(t_soma) and np.isfinite(t_target) and t_target >= t_soma:
+                delay_ms = t_target - t_soma
+                delay_tag = f" | delay soma->{target_label} {delay_ms:.2f} ms"
                 self._p_v.addItem(
                     pg.InfiniteLine(
                         pos=t_soma,
@@ -343,9 +495,9 @@ class OscilloscopeWidget(QWidget):
                 )
                 self._p_v.addItem(
                     pg.InfiniteLine(
-                        pos=t_term,
+                        pos=t_target,
                         angle=90,
-                        pen=pg.mkPen(theme["terminal"], width=max(1.0, 1.0 * lw), style=Qt.PenStyle.DashLine),
+                        pen=pg.mkPen(theme[target_color_key], width=max(1.0, 1.0 * lw), style=Qt.PenStyle.DashLine),
                     )
                 )
 
@@ -357,9 +509,7 @@ class OscilloscopeWidget(QWidget):
         else:
             title_tag = "no spikes"
         self._p_v.setTitle(
-            f"<span style='color:#89B4FA'>"
-            f"Membrane Potential  V(t)  |  {title_tag}{delay_tag}"
-            f"</span>"
+            self._title_html(f"Membrane Potential  V(t)  |  {title_tag}{delay_tag}", "#89B4FA")
         )
 
         # ── Gate dynamics ─────────────────────────────────────────────
@@ -400,8 +550,10 @@ class OscilloscopeWidget(QWidget):
 
         # ── Currents title with ATP estimate ──────────────────────────
         self._p_i.setTitle(
-            f"<span style='color:#FAB387'>Ion Currents (soma)  |  "
-            f"ATP ≈ {result.atp_estimate:.2e} nmol/cm²</span>"
+            self._title_html(
+                f"Ion Currents (soma)  |  ATP ≈ {result.atp_estimate:.2e} nmol/cm²",
+                "#FAB387",
+            )
         )
 
         self._p_v.autoRange()
@@ -463,17 +615,14 @@ class OscilloscopeWidget(QWidget):
         ))
 
         n = len(results_list)
-        self._p_v.setTitle(
-            f"<span style='color:#89B4FA'>Monte-Carlo: {n} trials — mean ± σ</span>"
-        )
-        self._p_i.setTitle(
-            f"<span style='color:#FAB387'>Monte-Carlo: {n} trials — mean ± σ</span>"
-        )
+        self._p_v.setTitle(self._title_html(f"Monte-Carlo: {n} trials — mean ± σ", "#89B4FA"))
+        self._p_i.setTitle(self._title_html(f"Monte-Carlo: {n} trials — mean ± σ", "#FAB387"))
         self._p_v.autoRange()
 
     # ─────────────────────────────────────────────────────────────────
     def _sync_checkboxes(self, result):
         """Show only checkboxes for channels / traces present in result."""
+        self._sync_delay_controls(result)
         for name, cb in self._cb_i.items():
             if name == 'Stim_filtered':
                 cb.setVisible(result.v_dendritic_filtered is not None)

@@ -23,6 +23,7 @@ ACTIVE_TESTS = [
     "tests/branches/test_cde_profiles_branch.py",
     "tests/branches/test_lyapunov_analysis_branch.py",
     "tests/branches/test_modulation_decomposition_branch.py",
+    "tests/branches/test_passport_ml_classification_branch.py",
     "tests/branches/test_pathology_mode_sweep_branch.py",
     "tests/branches/test_solver_validation_branch.py",
 ]
