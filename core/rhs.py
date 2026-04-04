@@ -1,6 +1,10 @@
 import numpy as np
 from numba import njit, float64, int32
 from .kinetics import *
+from .dual_stimulation import (
+    apply_primary_stimulus_current,
+    apply_secondary_stimulus_current,
+)
 
 # Константы | Constants
 F_CONST = 96485.33
@@ -95,11 +99,11 @@ def rhs_multicompartment(
     phi, t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, stim_comp, stim_mode,
-    use_dfilter, dfilter_attenuation, dfilter_tau_ms,
+    use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
     # Dual stimulation (secondary) - optional
     dual_stim_enabled,
     stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
-    dfilter_attenuation_2, dfilter_tau_ms_2
+    use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2
 ):
     """
     Высокопроизводительное ядро ОДУ v10.0.
@@ -176,66 +180,47 @@ def rhs_multicompartment(
             col = l_indices[j_idx]
             i_ax[i] += l_data[j_idx] * v[col]
 
-    # Optional dendritic filter dynamic state as extra ODE variable
-    v_filtered = 0.0
-    if use_dfilter == 1:
-        v_filtered = y[cursor]
+    # Optional dendritic-filter dynamic states as extra ODE variables
+    v_filtered_primary = 0.0
+    v_filtered_secondary = 0.0
+    if use_dfilter_primary == 1:
+        v_filtered_primary = y[cursor]
+        cursor += 1
+    if use_dfilter_secondary == 1:
+        v_filtered_secondary = y[cursor]
+        cursor += 1
 
-    # --- 4. Внешний стимул ---
+    # --- 4. External stimulation (primary + optional secondary) ---
     i_stim = np.zeros(n_comp)
     base_current = get_stim_current(t, stype, iext, t0, td, atau)
-    d_vfiltered_dt = 0.0
-
-    # stim_mode: 0=soma, 1=ais, 2=dendritic_filtered
-    if stim_mode == 0:
-        if 0 <= stim_comp < n_comp:
-            i_stim[stim_comp] = base_current
-    elif stim_mode == 1:
-        ais_comp = 1 if n_comp > 1 else 0
-        i_stim[ais_comp] = base_current
-    elif stim_mode == 2:
-        if use_dfilter == 1 and dfilter_tau_ms > 0.0:
-            # Apply amplitude attenuation FIRST, then temporal filtering
-            # This is the correct order: attenuation → filtering
-            attenuated_current = dfilter_attenuation * base_current
-            # v_filtered evolves towards attenuated_current (low-pass filter)
-            d_vfiltered_dt = (attenuated_current - v_filtered) / dfilter_tau_ms
-            # The current reaching soma is the filtered state
-            i_stim[0] = v_filtered
-        else:
-            # No filtering, just attenuate base current
-            i_stim[0] = dfilter_attenuation * base_current
-    else:
-        if 0 <= stim_comp < n_comp:
-            i_stim[stim_comp] = base_current
+    d_vfiltered_dt_primary = apply_primary_stimulus_current(
+        i_stim,
+        n_comp,
+        base_current,
+        stim_comp,
+        stim_mode,
+        use_dfilter_primary,
+        dfilter_attenuation,
+        dfilter_tau_ms,
+        v_filtered_primary,
+    )
+    d_vfiltered_dt_secondary = 0.0
 
     # --- 4b. Dual stimulation (secondary stimulus) ---
     # Apply secondary stimulus ONLY if dual_stim_enabled == 1
     if dual_stim_enabled == 1:
         base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2)
-        d_vfiltered_dt_2 = 0.0
-        
-        # stim_mode_2: 0=soma, 1=ais, 2=dendritic_filtered
-        if stim_mode_2 == 0:
-            if 0 <= stim_comp_2 < n_comp:
-                i_stim[stim_comp_2] += base_current_2  # ADD to existing current
-        elif stim_mode_2 == 1:
-            ais_comp = 1 if n_comp > 1 else 0
-            i_stim[ais_comp] += base_current_2  # ADD to existing current
-        elif stim_mode_2 == 2:
-            if dfilter_tau_ms_2 > 0.0:
-                # Dendritic filtering for secondary stimulus
-                # NOTE: This adds to soma current (i_stim[0])
-                attenuated_current_2 = dfilter_attenuation_2 * base_current_2
-                # For simplicity, apply direct attenuation (not stateful filtering for now)
-                # If we need stateful filtering, we'd need another state variable
-                i_stim[0] += attenuated_current_2
-            else:
-                # No filtering, just attenuate base current
-                i_stim[0] += dfilter_attenuation_2 * base_current_2
-        else:
-            if 0 <= stim_comp_2 < n_comp:
-                i_stim[stim_comp_2] += base_current_2  # ADD to existing current
+        d_vfiltered_dt_secondary = apply_secondary_stimulus_current(
+            i_stim,
+            n_comp,
+            base_current_2,
+            stim_comp_2,
+            stim_mode_2,
+            use_dfilter_secondary,
+            dfilter_attenuation_2,
+            dfilter_tau_ms_2,
+            v_filtered_secondary,
+        )
 
     # --- 5. Сборка производных dy/dt ---
     dydt = np.zeros_like(y)
@@ -285,7 +270,10 @@ def rhs_multicompartment(
         dydt[cursor : cursor + n_comp] = dca
         cursor += n_comp
 
-    if use_dfilter == 1:
-        dydt[cursor] = d_vfiltered_dt
+    if use_dfilter_primary == 1:
+        dydt[cursor] = d_vfiltered_dt_primary
+        cursor += 1
+    if use_dfilter_secondary == 1:
+        dydt[cursor] = d_vfiltered_dt_secondary
 
     return dydt

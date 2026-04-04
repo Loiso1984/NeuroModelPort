@@ -13,16 +13,18 @@ This registry separates **active validation tests** from **legacy exploratory sc
 - `tests/branches/test_cde_profiles_branch.py`
 - `tests/branches/test_lyapunov_analysis_branch.py`
 - `tests/branches/test_modulation_decomposition_branch.py`
+- `tests/branches/test_pathology_mode_sweep_branch.py`
+- `tests/branches/test_solver_validation_branch.py`
 
 These are the current source of truth for branch-gated physiology validation.
 
 ## Legacy Exploratory Scripts (Not Gate-Criteria)
 
-- `tests/branches/test_hcn_isolated_branch.py`
-- `tests/branches/test_ia_isolated_branch.py`
-- `tests/branches/test_preset_calibration_branch.py`
-- `tests/branches/test_fine_preset_calibration_branch.py`
-- `tests/branches/test_spike_detection_branch.py`
+- `tests/branches/legacy/test_hcn_isolated_branch.py`
+- `tests/branches/legacy/test_ia_isolated_branch.py`
+- `tests/branches/legacy/test_preset_calibration_branch.py`
+- `tests/branches/legacy/test_fine_preset_calibration_branch.py`
+- `tests/branches/legacy/test_spike_detection_branch.py`
 
 These scripts are kept for exploratory diagnostics and historical context.
 They contain older assumptions/targets and should not be used as pass/fail gate

@@ -49,16 +49,14 @@ def _solver_args_from_cfg(cfg: FullModelConfig):
     t_kelvin = cfg.env.T_celsius + 273.15
 
     stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
-    stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
-    use_dfilter = int(stim_mode == 2 and cfg.dendritic_filter.enabled)
-    if use_dfilter == 1:
-        y0 = np.concatenate([y0, np.array([0.0])])
 
-    attenuation = 1.0
-    if use_dfilter == 1 and cfg.dendritic_filter.space_constant_um > 0:
-        attenuation = np.exp(
-            -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
-        )
+    primary_stim_type = cfg.stim.stim_type
+    primary_iext = cfg.stim.Iext
+    primary_t0 = cfg.stim.pulse_start
+    primary_td = cfg.stim.pulse_dur
+    primary_atau = cfg.stim.alpha_tau
+    primary_stim_comp = cfg.stim.stim_comp
+    primary_location = cfg.stim_location.location
 
     dual_stim_enabled = 0
     stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2 = (
@@ -71,20 +69,48 @@ def _solver_args_from_cfg(cfg: FullModelConfig):
         0,
     )
     dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
+    use_dfilter_secondary = 0
     if cfg.dual_stimulation is not None and getattr(cfg.dual_stimulation, "enabled", False):
         dual_stim_enabled = 1
+        primary_stim_type = getattr(cfg.dual_stimulation, "primary_stim_type", primary_stim_type)
+        primary_iext = getattr(cfg.dual_stimulation, "primary_Iext", primary_iext)
+        primary_t0 = getattr(cfg.dual_stimulation, "primary_start", primary_t0)
+        primary_td = getattr(cfg.dual_stimulation, "primary_duration", primary_td)
+        primary_atau = getattr(cfg.dual_stimulation, "primary_alpha_tau", primary_atau)
+        primary_location = getattr(cfg.dual_stimulation, "primary_location", primary_location)
+        primary_stim_comp = 0
+
         stype_2 = s_map.get(cfg.dual_stimulation.secondary_stim_type, 0)
         iext_2 = cfg.dual_stimulation.secondary_Iext
         t0_2 = cfg.dual_stimulation.secondary_start
         td_2 = cfg.dual_stimulation.secondary_duration
         atau_2 = cfg.dual_stimulation.secondary_alpha_tau
         stim_mode_2 = stim_mode_map.get(cfg.dual_stimulation.secondary_location, 0)
+        dfilter_tau_ms_2 = cfg.dual_stimulation.secondary_tau_dendritic_ms
+        use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
         if stim_mode_2 == 2 and cfg.dual_stimulation.secondary_space_constant_um > 0:
             dfilter_attenuation_2 = np.exp(
                 -cfg.dual_stimulation.secondary_distance_um
                 / cfg.dual_stimulation.secondary_space_constant_um
             )
-            dfilter_tau_ms_2 = cfg.dual_stimulation.secondary_tau_dendritic_ms
+
+    stype = s_map.get(primary_stim_type, 0)
+    stim_mode = stim_mode_map.get(primary_location, 0)
+    use_dfilter = int(
+        stim_mode == 2
+        and cfg.dendritic_filter.enabled
+        and cfg.dendritic_filter.tau_dendritic_ms > 0.0
+    )
+    if use_dfilter == 1:
+        y0 = np.concatenate([y0, np.array([0.0])])
+    if use_dfilter_secondary == 1:
+        y0 = np.concatenate([y0, np.array([0.0])])
+
+    attenuation = 1.0
+    if stim_mode == 2 and cfg.dendritic_filter.space_constant_um > 0:
+        attenuation = np.exp(
+            -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
+        )
 
     args = (
         n_comp,
@@ -116,11 +142,11 @@ def _solver_args_from_cfg(cfg: FullModelConfig):
         cfg.calcium.tau_Ca,
         cfg.calcium.B_Ca,
         stype,
-        cfg.stim.Iext,
-        cfg.stim.pulse_start,
-        cfg.stim.pulse_dur,
-        cfg.stim.alpha_tau,
-        cfg.stim.stim_comp,
+        primary_iext,
+        primary_t0,
+        primary_td,
+        primary_atau,
+        primary_stim_comp,
         stim_mode,
         use_dfilter,
         attenuation,
@@ -133,6 +159,7 @@ def _solver_args_from_cfg(cfg: FullModelConfig):
         atau_2,
         stim_comp_2,
         stim_mode_2,
+        use_dfilter_secondary,
         dfilter_attenuation_2,
         dfilter_tau_ms_2,
     )

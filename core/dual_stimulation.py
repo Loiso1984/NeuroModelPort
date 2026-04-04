@@ -146,6 +146,84 @@ def get_dual_stim_current(
 
 
 @njit(cache=True)
+def apply_primary_stimulus_current(
+    i_stim: np.ndarray,
+    n_comp: int,
+    base_current: float,
+    stim_comp: int,
+    stim_mode: int,
+    use_dfilter_primary: int,
+    dfilter_attenuation: float,
+    dfilter_tau_ms: float,
+    v_filtered_primary: float,
+) -> float:
+    """
+    Apply primary stimulus current to compartment current vector in-place.
+
+    stim_mode:
+    0 = soma, 1 = AIS, 2 = dendritic_filtered
+    """
+    d_vfiltered_dt_primary = 0.0
+    if stim_mode == 0:
+        if 0 <= stim_comp < n_comp:
+            i_stim[stim_comp] = base_current
+    elif stim_mode == 1:
+        ais_comp = 1 if n_comp > 1 else 0
+        i_stim[ais_comp] = base_current
+    elif stim_mode == 2:
+        if use_dfilter_primary == 1 and dfilter_tau_ms > 0.0:
+            attenuated_current = dfilter_attenuation * base_current
+            d_vfiltered_dt_primary = (attenuated_current - v_filtered_primary) / dfilter_tau_ms
+            i_stim[0] = v_filtered_primary
+        else:
+            i_stim[0] = dfilter_attenuation * base_current
+    else:
+        if 0 <= stim_comp < n_comp:
+            i_stim[stim_comp] = base_current
+    return d_vfiltered_dt_primary
+
+
+@njit(cache=True)
+def apply_secondary_stimulus_current(
+    i_stim: np.ndarray,
+    n_comp: int,
+    base_current_2: float,
+    stim_comp_2: int,
+    stim_mode_2: int,
+    use_dfilter_secondary: int,
+    dfilter_attenuation_2: float,
+    dfilter_tau_ms_2: float,
+    v_filtered_secondary: float,
+) -> float:
+    """
+    Apply secondary stimulus current to compartment current vector in-place.
+
+    stim_mode_2:
+    0 = soma, 1 = AIS, 2 = dendritic_filtered
+    """
+    d_vfiltered_dt_secondary = 0.0
+    if stim_mode_2 == 0:
+        if 0 <= stim_comp_2 < n_comp:
+            i_stim[stim_comp_2] += base_current_2
+    elif stim_mode_2 == 1:
+        ais_comp = 1 if n_comp > 1 else 0
+        i_stim[ais_comp] += base_current_2
+    elif stim_mode_2 == 2:
+        if use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 0.0:
+            attenuated_current_2 = dfilter_attenuation_2 * base_current_2
+            d_vfiltered_dt_secondary = (
+                attenuated_current_2 - v_filtered_secondary
+            ) / dfilter_tau_ms_2
+            i_stim[0] += v_filtered_secondary
+        else:
+            i_stim[0] += dfilter_attenuation_2 * base_current_2
+    else:
+        if 0 <= stim_comp_2 < n_comp:
+            i_stim[stim_comp_2] += base_current_2
+    return d_vfiltered_dt_secondary
+
+
+@njit(cache=True)
 def apply_dual_stimulation(
     t: float,
     y: np.ndarray,

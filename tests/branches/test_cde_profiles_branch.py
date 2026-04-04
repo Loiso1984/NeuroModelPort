@@ -51,6 +51,29 @@ def _run_profile(preset: str, t_sim: float = 220.0, dt_eval: float = 0.2) -> dic
     }
 
 
+def _run_profile_scaled(
+    preset: str,
+    i_scale: float,
+    *,
+    t_sim: float = 150.0,
+    dt_eval: float = 0.25,
+) -> dict:
+    cfg = FullModelConfig()
+    apply_preset(cfg, preset)
+    cfg.stim.Iext = float(cfg.stim.Iext * i_scale)
+    cfg.stim.t_sim = t_sim
+    cfg.stim.dt_eval = dt_eval
+    cfg.stim.jacobian_mode = "sparse_fd"
+    res = NeuronSolver(cfg).run_single()
+    st = _spike_times(res.v_soma, res.t)
+    return {
+        "n_spikes": int(len(st)),
+        "v_peak": float(np.max(res.v_soma)),
+        "v_tail": float(np.mean(res.v_soma[-60:])),
+        "stable": bool(np.all(np.isfinite(res.v_soma))),
+    }
+
+
 def test_c_fs_profile():
     row = _run_profile("C: FS Interneuron (Wang-Buzsaki)")
     assert row["stable"], "C preset produced non-finite trace"
@@ -75,8 +98,49 @@ def test_e_purkinje_profile():
     assert 20.0 <= row["v_peak"] <= 45.0, f"E spike peak out of range: {row['v_peak']:.2f} mV"
 
 
+def test_cde_drive_sweep_stability():
+    presets = {
+        "C: FS Interneuron (Wang-Buzsaki)": [0.7, 1.0, 1.3],
+        "D: alpha-Motoneuron (Powers 2001)": [0.7, 1.0, 1.3],
+        "E: Cerebellar Purkinje (De Schutter)": [0.7, 1.0, 1.3],
+    }
+    rows = {}
+    for preset, scales in presets.items():
+        rows[preset] = [_run_profile_scaled(preset, s) for s in scales]
+        for r in rows[preset]:
+            assert r["stable"], f"{preset}: non-finite trace in drive sweep"
+            assert -140.0 < r["v_tail"] < 10.0, f"{preset}: tail out of guard range ({r['v_tail']:.2f} mV)"
+            assert -120.0 < r["v_peak"] < 65.0, f"{preset}: peak out of guard range ({r['v_peak']:.2f} mV)"
+
+    c_rows = rows["C: FS Interneuron (Wang-Buzsaki)"]
+    assert c_rows[2]["n_spikes"] >= c_rows[0]["n_spikes"], "C should not lose excitability with stronger drive"
+
+    d_rows = rows["D: alpha-Motoneuron (Powers 2001)"]
+    assert d_rows[2]["n_spikes"] >= d_rows[0]["n_spikes"] - 1, "D sweep should remain robust under stronger drive"
+
+    e_rows = rows["E: Cerebellar Purkinje (De Schutter)"]
+    assert e_rows[1]["n_spikes"] >= 6, "E baseline drive should remain clearly spiking"
+    assert e_rows[2]["n_spikes"] >= e_rows[1]["n_spikes"], "E should not weaken when drive increases"
+
+
+def test_e_moderate_low_drive_not_silent_at_37c():
+    row = _run_profile_scaled("E: Cerebellar Purkinje (De Schutter)", 0.8)
+    assert row["stable"], "E preset produced non-finite trace at moderate low drive"
+    assert row["n_spikes"] >= 6, (
+        "E preset should stay excitable at 37C under moderate low drive (0.8x), "
+        "not collapse into a silent island"
+    )
+    assert 15.0 <= row["v_peak"] <= 45.0, f"E low-drive spike peak out of guard range: {row['v_peak']:.2f} mV"
+
+
 def _run_as_script() -> int:
-    tests = [test_c_fs_profile, test_d_motoneuron_profile, test_e_purkinje_profile]
+    tests = [
+        test_c_fs_profile,
+        test_d_motoneuron_profile,
+        test_e_purkinje_profile,
+        test_cde_drive_sweep_stability,
+        test_e_moderate_low_drive_not_silent_at_37c,
+    ]
     passed = 0
     for fn in tests:
         try:

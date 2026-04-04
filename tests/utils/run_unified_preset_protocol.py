@@ -42,11 +42,17 @@ def _first_cross(v: np.ndarray, t: np.ndarray, threshold: float = 0.0) -> float:
 def _collect_single(cfg: FullModelConfig, name: str) -> dict:
     res = NeuronSolver(cfg).run_single()
     st = _spike_times(res.v_soma, res.t)
-    freq = float(1000.0 / np.mean(np.diff(st))) if len(st) > 1 else 0.0
+    freq_inst = float(1000.0 / np.mean(np.diff(st))) if len(st) > 1 else 0.0
+    total_dur_ms = float(res.t[-1] - res.t[0]) if len(res.t) > 1 else 0.0
+    freq_global = float(1000.0 * len(st) / total_dur_ms) if total_dur_ms > 0 else 0.0
+    active_dur_ms = float(st[-1] - st[0]) if len(st) > 1 else 0.0
+    freq_active = float(1000.0 * (len(st) - 1) / active_dur_ms) if active_dur_ms > 0 else 0.0
     row = {
         "preset": name,
         "n_spikes": int(len(st)),
-        "freq_hz": freq,
+        "freq_hz": freq_inst,
+        "freq_global_hz": freq_global,
+        "freq_active_window_hz": freq_active,
         "v_rest_tail_mV": float(np.mean(res.v_soma[-100:])),
         "v_peak_mV": float(np.max(res.v_soma)),
         "v_min_mV": float(np.min(res.v_soma)),
@@ -136,11 +142,17 @@ def main() -> int:
         cfg.stim.jacobian_mode = "sparse_fd"
         res = NeuronSolver(cfg).run_single()
         st = _spike_times(res.v_soma, res.t)
+        total_dur_ms = float(res.t[-1] - res.t[0]) if len(res.t) > 1 else 0.0
+        freq_global = float(1000.0 * len(st) / total_dur_ms) if total_dur_ms > 0 else 0.0
+        active_dur_ms = float(st[-1] - st[0]) if len(st) > 1 else 0.0
+        freq_active = float(1000.0 * (len(st) - 1) / active_dur_ms) if active_dur_ms > 0 else 0.0
         row = {
             "preset": f"O_mode={mode}",
             "mode_family": "O",
             "n_spikes": int(len(st)),
             "freq_hz": float(1000.0 / np.mean(np.diff(st))) if len(st) > 1 else 0.0,
+            "freq_global_hz": freq_global,
+            "freq_active_window_hz": freq_active,
             "v_rest_tail_mV": float(np.mean(res.v_soma[-100:])),
             "v_peak_mV": float(np.max(res.v_soma)),
             "v_min_mV": float(np.min(res.v_soma)),

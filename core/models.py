@@ -193,6 +193,35 @@ class SimulationParams(BaseModel):
 
 class AnalysisParams(BaseModel):
     """Analysis, bifurcation, Monte-Carlo, Sweep, S-D curve, Excitability map."""
+    # Spike detection controls (used by passport/analytics and GUI)
+    spike_detect_algorithm: Literal['peak_repolarization', 'threshold_crossing'] = Field(
+        default='peak_repolarization',
+        description="Spike detection algorithm: peak+repolarization or threshold-crossing"
+    )
+    spike_detect_threshold: float = Field(
+        default=-20.0,
+        description="Spike detection threshold (mV)"
+    )
+    spike_detect_prominence: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="Minimum peak prominence for peak-based detector (mV)"
+    )
+    spike_detect_baseline_threshold: float = Field(
+        default=-50.0,
+        description="Voltage that must be crossed during repolarization check (mV)"
+    )
+    spike_detect_repolarization_window_ms: float = Field(
+        default=20.0,
+        gt=0.0,
+        description="Repolarization validation window (ms)"
+    )
+    spike_detect_refractory_ms: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Minimum inter-spike interval for detector de-duplication (ms)"
+    )
+
     # Monte-Carlo
     run_mc:    bool = Field(default=False, description="Run parallel Monte-Carlo")
     mc_trials: int  = Field(default=50,   ge=1, description="Number of MC trials")
@@ -243,7 +272,7 @@ class AnalysisParams(BaseModel):
 class PresetModeParams(BaseModel):
     """Switchable physiology modes for selected presets."""
     k_mode: Literal['activated', 'baseline'] = Field(
-        default='activated',
+        default='baseline',
         description="Thalamic relay mode: activated (high drive) or baseline (low drive)"
     )
     alzheimer_mode: Literal['progressive', 'terminal'] = Field(

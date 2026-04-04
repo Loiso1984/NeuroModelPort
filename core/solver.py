@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import logging
 from scipy.integrate import solve_ivp
 from concurrent.futures import ProcessPoolExecutor
 
@@ -9,6 +10,10 @@ from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity
 from core.rhs import rhs_multicompartment, F_CONST, R_GAS
 from core.kinetics import z_inf_SK
+from core.validation import estimate_simulation_runtime, validate_simulation_config
+
+
+logger = logging.getLogger(__name__)
 
 
 class SimulationResult:
@@ -23,21 +28,43 @@ class SimulationResult:
         self.v_all  = y[0:n_comp, :]
         self.v_soma = self.v_all[0, :]
 
-        has_dfilter_state = (
-            config.stim_location.location == "dendritic_filtered" and
-            config.dendritic_filter.enabled
+        dual_cfg = getattr(config, "dual_stimulation", None)
+        dual_enabled = bool(dual_cfg is not None and getattr(dual_cfg, "enabled", False))
+
+        primary_location = (
+            getattr(dual_cfg, "primary_location", config.stim_location.location)
+            if dual_enabled
+            else config.stim_location.location
         )
+        has_primary_dfilter_state = (
+            primary_location == "dendritic_filtered"
+            and config.dendritic_filter.enabled
+            and config.dendritic_filter.tau_dendritic_ms > 0.0
+        )
+        has_secondary_dfilter_state = (
+            dual_enabled
+            and getattr(dual_cfg, "secondary_location", "soma") == "dendritic_filtered"
+            and getattr(dual_cfg, "secondary_tau_dendritic_ms", 0.0) > 0.0
+        )
+        filter_state_count = int(has_primary_dfilter_state) + int(has_secondary_dfilter_state)
 
         self.ca_i = None
         if config.calcium.dynamic_Ca:
-            if has_dfilter_state:
-                self.ca_i = y[-(n_comp + 1):-1, :]
+            if filter_state_count > 0:
+                self.ca_i = y[-(n_comp + filter_state_count):-filter_state_count, :]
             else:
                 self.ca_i = y[-n_comp:, :]
 
         self.v_dendritic_filtered = None
-        if has_dfilter_state:
-            self.v_dendritic_filtered = y[-1, :]
+        self.v_dendritic_filtered_secondary = None
+        if filter_state_count > 0:
+            tail_start = y.shape[0] - filter_state_count
+            cursor = tail_start
+            if has_primary_dfilter_state:
+                self.v_dendritic_filtered = y[cursor, :]
+                cursor += 1
+            if has_secondary_dfilter_state:
+                self.v_dendritic_filtered_secondary = y[cursor, :]
 
         self.currents:    dict  = {}
         self.atp_estimate: float = 0.0
@@ -57,37 +84,20 @@ class NeuronSolver:
     def run_single(self, custom_config: FullModelConfig = None) -> SimulationResult:
         """Run a single deterministic simulation (BDF integrator)."""
         cfg = custom_config or self.config
+        for msg in validate_simulation_config(cfg):
+            logger.warning("Simulation config warning: %s", msg)
         
         # ── Simulation complexity estimation ──
-        t_sim = cfg.stim.t_sim
-        dt_eval = cfg.stim.dt_eval
-        n_channels = sum([
-            1,  # Na
-            1,  # K
-            1,  # Leak
-            cfg.channels.enable_Ih,
-            cfg.channels.enable_ICa * 2,  # Ca has 2 gates
-            cfg.channels.enable_IA * 2,   # IA has 2 gates
-            cfg.channels.enable_SK
-        ])
-        n_comp = 1 if cfg.morphology.single_comp else (cfg.morphology.N_ais + cfg.morphology.N_trunk + cfg.morphology.N_b1 + cfg.morphology.N_b2 + 1)
-        
-        # Estimate time steps and complexity
-        n_steps = int(t_sim / dt_eval)
-        complexity = n_steps * n_comp * n_channels
-        
-        # Estimate simulation time (rough approximation based on typical performance)
-        # ~1000 steps/sec for simple models, ~100 steps/sec for complex multi-channel
-        est_time_sec = n_steps / (1000 if n_channels <= 3 else 100)
-        
-        # Warning for heavy simulations
-        if est_time_sec > 30:
-            print("WARNING: Heavy simulation detected:")
-            print(f"   Duration: {t_sim}ms, Steps: {n_steps:,}, Compartments: {n_comp}")
-            print(f"   Active channels: {n_channels} (Na+K+Leak{'+Ih' if cfg.channels.enable_Ih else ''}{'+ICa' if cfg.channels.enable_ICa else ''}{'+IA' if cfg.channels.enable_IA else ''}{'+SK' if cfg.channels.enable_SK else ''})")
-            print(f"   Estimated time: {est_time_sec:.1f}s")
-            print(f"   Jacobian mode: {cfg.stim.jacobian_mode}")
-            print(f"   Starting simulation...")
+        rt = estimate_simulation_runtime(cfg)
+        if rt["estimated_seconds"] > 30.0:
+            logger.warning(
+                "Heavy simulation detected: steps=%s, compartments=%s, channel-gates=%s, est=%.1fs, jac=%s",
+                f"{int(rt['n_steps']):,}",
+                int(rt["n_comp"]),
+                int(rt["n_channels"]),
+                rt["estimated_seconds"],
+                cfg.stim.jacobian_mode,
+            )
         
         import time
         t_start = time.time()
@@ -97,54 +107,76 @@ class NeuronSolver:
 
         y0 = self.registry.compute_initial_states(-65.0, cfg)
 
-        s_map    = {
+        s_map = {
             'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 3,
             'AMPA': 4, 'NMDA': 5, 'GABAA': 6, 'GABAB': 7,
             'Kainate': 8, 'Nicotinic': 9,
         }
-        stype    = s_map.get(cfg.stim.stim_type, 0)
         t_kelvin = cfg.env.T_celsius + 273.15
 
         stim_mode_map = {'soma': 0, 'ais': 1, 'dendritic_filtered': 2}
-        stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
-        use_dfilter = int(stim_mode == 2 and cfg.dendritic_filter.enabled)
-
-        if use_dfilter == 1:
-            y0 = np.concatenate([y0, np.array([0.0])])
-
-        attenuation = 1.0
-        if use_dfilter == 1 and cfg.dendritic_filter.space_constant_um > 0:
-            attenuation = np.exp(
-                -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
-            )
+        # --- Primary stimulus source ---
+        primary_stim_type = cfg.stim.stim_type
+        primary_iext = cfg.stim.Iext
+        primary_t0 = cfg.stim.pulse_start
+        primary_td = cfg.stim.pulse_dur
+        primary_atau = cfg.stim.alpha_tau
+        primary_stim_comp = cfg.stim.stim_comp
+        primary_location = cfg.stim_location.location
 
         # --- Dual stimulation detection and parameter preparation ---
         dual_stim_enabled = 0
-        stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2 = 0, 0.0, 0.0, 0.0, 0.0, 0, 0
+        dual_cfg = getattr(cfg, 'dual_stimulation', None)
+        if dual_cfg is not None and hasattr(dual_cfg, 'enabled') and dual_cfg.enabled:
+            dual_stim_enabled = 1
+            # When dual stimulation is enabled, primary parameters come from the dual config.
+            primary_stim_type = getattr(dual_cfg, "primary_stim_type", primary_stim_type)
+            primary_iext = getattr(dual_cfg, "primary_Iext", primary_iext)
+            primary_t0 = getattr(dual_cfg, "primary_start", primary_t0)
+            primary_td = getattr(dual_cfg, "primary_duration", primary_td)
+            primary_atau = getattr(dual_cfg, "primary_alpha_tau", primary_atau)
+            primary_location = getattr(dual_cfg, "primary_location", primary_location)
+            primary_stim_comp = 0
+
+        stype = s_map.get(primary_stim_type, 0)
+        stim_mode = stim_mode_map.get(primary_location, 0)
+        use_dfilter_primary = int(
+            stim_mode == 2
+            and cfg.dendritic_filter.enabled
+            and cfg.dendritic_filter.tau_dendritic_ms > 0.0
+        )
+        if use_dfilter_primary == 1:
+            y0 = np.concatenate([y0, np.array([0.0])])
+
+        dfilter_attenuation = 1.0
+        if stim_mode == 2 and cfg.dendritic_filter.space_constant_um > 0:
+            dfilter_attenuation = np.exp(
+                -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
+            )
+        dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
+
+        # Secondary stimulus defaults.
+        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 0.0
+        stim_comp_2, stim_mode_2 = 0, 0
+        use_dfilter_secondary = 0
         dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
-        
-        if hasattr(cfg, 'dual_stimulation') and cfg.dual_stimulation is not None:
-            dual_cfg = cfg.dual_stimulation
-            if hasattr(dual_cfg, 'enabled') and dual_cfg.enabled:
-                dual_stim_enabled = 1
-                
-                # Map secondary stimulus type
-                stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
-                iext_2 = dual_cfg.secondary_Iext
-                t0_2 = dual_cfg.secondary_start
-                td_2 = dual_cfg.secondary_duration
-                atau_2 = dual_cfg.secondary_alpha_tau
-                stim_comp_2 = 0  # Default to soma
-                
-                # Map secondary stimulus location
-                stim_mode_2 = stim_mode_map.get(dual_cfg.secondary_location, 0)
-                
-                # Dendritic filter for secondary stimulus (if dendritic_filtered)
-                if stim_mode_2 == 2 and dual_cfg.secondary_space_constant_um > 0:
-                    dfilter_attenuation_2 = np.exp(
-                        -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
-                    )
-                    dfilter_tau_ms_2 = dual_cfg.secondary_tau_dendritic_ms
+
+        if dual_stim_enabled == 1:
+            stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
+            iext_2 = dual_cfg.secondary_Iext
+            t0_2 = dual_cfg.secondary_start
+            td_2 = dual_cfg.secondary_duration
+            atau_2 = dual_cfg.secondary_alpha_tau
+            stim_comp_2 = 0
+            stim_mode_2 = stim_mode_map.get(dual_cfg.secondary_location, 0)
+            dfilter_tau_ms_2 = dual_cfg.secondary_tau_dendritic_ms
+            use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
+            if use_dfilter_secondary == 1:
+                y0 = np.concatenate([y0, np.array([0.0])])
+            if stim_mode_2 == 2 and dual_cfg.secondary_space_constant_um > 0:
+                dfilter_attenuation_2 = np.exp(
+                    -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
+                )
 
         args = (
             n_comp,
@@ -160,15 +192,14 @@ class NeuronSolver:
             cfg.env.phi, t_kelvin,
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca, cfg.calcium.B_Ca,
-            stype, cfg.stim.Iext,
-            cfg.stim.pulse_start, cfg.stim.pulse_dur,
-            cfg.stim.alpha_tau, cfg.stim.stim_comp, stim_mode,
-            use_dfilter, attenuation,
-            cfg.dendritic_filter.tau_dendritic_ms if use_dfilter == 1 else 0.0,
+            stype, primary_iext,
+            primary_t0, primary_td,
+            primary_atau, primary_stim_comp, stim_mode,
+            use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
             # Dual stimulation parameters (optional)
             dual_stim_enabled,
             stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
-            dfilter_attenuation_2, dfilter_tau_ms_2,
+            use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
         )
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
@@ -190,7 +221,8 @@ class NeuronSolver:
                 dyn_ca=cfg.calcium.dynamic_Ca,
                 l_indices=morph["L_indices"],
                 l_indptr=morph["L_indptr"],
-                use_dfilter=use_dfilter,
+                use_dfilter_primary=use_dfilter_primary,
+                use_dfilter_secondary=use_dfilter_secondary,
             )
         elif jacobian_mode == "analytic_sparse":
             jacobian_options["jac"] = analytic_sparse_jacobian
@@ -213,8 +245,8 @@ class NeuronSolver:
         
         # Report actual simulation time
         t_elapsed = time.time() - t_start
-        if est_time_sec > 30 or t_elapsed > 10:
-            print(f"   Completed in {t_elapsed:.1f}s")
+        if rt["estimated_seconds"] > 30.0 or t_elapsed > 10:
+            logger.info("   Completed in %.1fs", t_elapsed)
 
         if not sol.success:
             raise RuntimeError(f"Integrator failed: {sol.message}")

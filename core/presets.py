@@ -82,9 +82,10 @@ def _copy_defaults(target, source) -> None:
 def _apply_k_mode(cfg: FullModelConfig) -> None:
     """Apply thalamic relay mode variants."""
     if cfg.preset_modes.k_mode == "baseline":
-        # Baseline: lower-drive tonic relay mode.
-        cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 14.0
+        # Baseline: low-throughput relay mode with theta-like global rate envelope.
+        cfg.stim.stim_type = "alpha"
+        cfg.stim.alpha_tau = 8.0
+        cfg.stim.Iext = 24.0
         cfg.channels.gIh_max = 0.02
         cfg.channels.gCa_max = 0.06
     else:
@@ -272,11 +273,11 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.4   # IA for complex spike dynamics
         cfg.channels.E_A = -77.0    # K+ reversal potential
-        # Validated: 30 µA/cm² through dend filter (atten=0.33) → ~10 effective
-        # Produces ~17 spikes, 136 Hz tonic, Vmax ≈ 33 mV (Purkinje: 40-100 Hz in vivo)
+        # Tuned to preserve tonic Purkinje spiking and avoid a silent island
+        # at moderate low-drive screening points in the branch validation contour.
         cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 2.0
-        cfg.stim.Iext = 30.0
+        cfg.stim.Iext = 32.0
 
     # --- 6. ТАЛАМИЧЕСКИЙ РЕЛЕ-НЕЙРОН (Ih + ICa + Ca-dynamics) ---
     elif "Thalamic" in name:
@@ -301,6 +302,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.tau_Ca = 200.0
         cfg.calcium.B_Ca = 1e-5  # Calibrated conversion: avoids unphysiological Ca overload
         cfg.morphology.d_soma = 25e-4
+        cfg.stim.jacobian_mode = 'sparse_fd'
         # Validated: 30 µA/cm² through dend filter (atten=0.22) → ~6.7 effective
         # Produces ~21 spikes, 144 Hz, Vmax ≈ 41 mV with Ih + ICa + Ca dynamics
         cfg.stim.stim_type = 'const'
@@ -313,6 +315,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Stronger axial resistance increase to emphasize impaired conduction.
         cfg.morphology.Ra = 450.0  # Demyelination: 70 → 450 (axial resistance ↑)
         cfg.channels.gL = 1.2  # Increased leak: 0.3 → 1.2 (exposed membrane)
+        cfg.stim.jacobian_mode = 'sparse_fd'
         # Pathology signature: reduced spike amplitude (~21 vs ~34 mV) due to leak shunt
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.5
@@ -347,6 +350,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.gCa_max = 0.08  # Moderate ICa - PHYSIOLOGICAL range (was 0.8, too high)
         cfg.channels.enable_SK = True  # SK channel activated by calcium
         cfg.channels.gSK_max = 1.5  # Stronger SK for calcium-dependent adaptation
+        cfg.stim.jacobian_mode = 'sparse_fd'
         # Alpha stim: Shows reduced firing due to SK activation by calcium
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 2.0
@@ -365,6 +369,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.enable_ICa = True  # Unregulated Ca entry
         cfg.channels.gCa_max = 0.08  # Elevated ICa - PHYSIOLOGICAL range (was 1.2, too high)
         cfg.channels.enable_SK = False  # SK may not work under ATP depletion
+        cfg.stim.jacobian_mode = 'sparse_fd'
         # Pathology: depolarization block after 1-2 spikes due to ion imbalance + Ca overload
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.0

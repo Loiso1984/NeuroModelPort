@@ -20,7 +20,8 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
                   prominence: float = 10.0,
                   baseline_threshold: float = -50.0,
                   repolarization_window_ms: float = 20.0,
-                  refractory_ms: float = 1.0) -> tuple:
+                  refractory_ms: float = 1.0,
+                  algorithm: str = "peak_repolarization") -> tuple:
     """
     Spike detection: find peaks above threshold with repolarization check.
     
@@ -60,18 +61,38 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
     min_distance = max(1, int(round(refractory_ms / dt_ms)))
     repol_window_pts = max(1, int(round(repolarization_window_ms / dt_ms)))
 
-    peak_idx, _ = find_peaks(
-        V,
-        height=threshold,
-        prominence=max(prominence, 0.0),
-        distance=min_distance,
-    )
+    if algorithm == "threshold_crossing":
+        above = V >= threshold
+        crossings = np.where((~above[:-1]) & (above[1:]))[0] + 1
+        if len(crossings) == 0:
+            return np.array([], dtype=int), np.array([]), np.array([])
 
-    if len(peak_idx) == 0:
+        keep = [int(crossings[0])]
+        for i in range(1, len(crossings)):
+            if t[crossings[i]] - t[keep[-1]] >= refractory_ms:
+                keep.append(int(crossings[i]))
+        candidate_idx = np.array(keep, dtype=int)
+    else:
+        candidate_idx, _ = find_peaks(
+            V,
+            height=threshold,
+            prominence=max(prominence, 0.0),
+            distance=min_distance,
+        )
+
+    if len(candidate_idx) == 0:
         return np.array([], dtype=int), np.array([]), np.array([])
 
     valid = []
-    for pk in peak_idx:
+    for candidate in candidate_idx:
+        # For threshold-crossing mode convert crossing to local peak index.
+        if algorithm == "threshold_crossing":
+            local_end = min(len(V), candidate + repol_window_pts + 1)
+            if local_end <= candidate:
+                continue
+            pk = int(candidate + np.argmax(V[candidate:local_end]))
+        else:
+            pk = int(candidate)
         end = min(len(V), pk + repol_window_pts + 1)
         if np.min(V[pk:end]) < baseline_threshold:
             valid.append(int(pk))
@@ -106,12 +127,30 @@ def spike_threshold(V: np.ndarray, t: np.ndarray,
     return float(V[idx])
 
 
-def spike_halfwidth(V: np.ndarray, t: np.ndarray) -> float:
+def spike_halfwidth(
+    V: np.ndarray,
+    t: np.ndarray,
+    detect_threshold: float = -20.0,
+    detect_prominence: float = 10.0,
+    detect_baseline_threshold: float = -50.0,
+    detect_repolarization_window_ms: float = 20.0,
+    detect_refractory_ms: float = 1.0,
+    detect_algorithm: str = "peak_repolarization",
+) -> float:
     """
     Half-width at half-amplitude of the FIRST spike (ms).
     Standard electrophysiology measure of spike duration.
     """
-    peak_idx, _, _ = detect_spikes(V, t)
+    peak_idx, _, _ = detect_spikes(
+        V,
+        t,
+        threshold=detect_threshold,
+        prominence=detect_prominence,
+        baseline_threshold=detect_baseline_threshold,
+        repolarization_window_ms=detect_repolarization_window_ms,
+        refractory_ms=detect_refractory_ms,
+        algorithm=detect_algorithm,
+    )
     if len(peak_idx) == 0:
         return np.nan
 
@@ -651,7 +690,7 @@ def estimate_spike_modulation(
     This is a non-FFT readout from spike timing:
     - PLV / preferred phase
     - phase-conditioned firing rates
-    - deterministic circular-shift surrogate p-value
+    - deterministic surrogate p-value from resampled spike-time null
     """
     out = {
         "valid": False,
@@ -793,11 +832,41 @@ def full_analysis(result) -> dict:
     t   = result.t
     cfg = result.config
 
-    peak_idx, spike_times, spike_amps = detect_spikes(V, t)
+    ana = cfg.analysis
+    spike_detect_algorithm = getattr(ana, "spike_detect_algorithm", "peak_repolarization")
+    spike_detect_threshold = float(getattr(ana, "spike_detect_threshold", -20.0))
+    spike_detect_prominence = float(getattr(ana, "spike_detect_prominence", 10.0))
+    spike_detect_baseline_threshold = float(
+        getattr(ana, "spike_detect_baseline_threshold", -50.0)
+    )
+    spike_detect_repolarization_window_ms = float(
+        getattr(ana, "spike_detect_repolarization_window_ms", 20.0)
+    )
+    spike_detect_refractory_ms = float(getattr(ana, "spike_detect_refractory_ms", 1.0))
+
+    peak_idx, spike_times, spike_amps = detect_spikes(
+        V,
+        t,
+        threshold=spike_detect_threshold,
+        prominence=spike_detect_prominence,
+        baseline_threshold=spike_detect_baseline_threshold,
+        repolarization_window_ms=spike_detect_repolarization_window_ms,
+        refractory_ms=spike_detect_refractory_ms,
+        algorithm=spike_detect_algorithm,
+    )
     n_spikes = len(spike_times)
 
     V_thr = spike_threshold(V, t) if n_spikes > 0 else np.nan
-    hw    = spike_halfwidth(V, t)  if n_spikes > 0 else np.nan
+    hw    = spike_halfwidth(
+        V,
+        t,
+        detect_threshold=spike_detect_threshold,
+        detect_prominence=spike_detect_prominence,
+        detect_baseline_threshold=spike_detect_baseline_threshold,
+        detect_repolarization_window_ms=spike_detect_repolarization_window_ms,
+        detect_refractory_ms=spike_detect_refractory_ms,
+        detect_algorithm=spike_detect_algorithm,
+    ) if n_spikes > 0 else np.nan
     V_pk  = float(np.max(V))
     V_ahp = np.nan
     if n_spikes > 0 and len(peak_idx) > 0:
@@ -902,7 +971,6 @@ def full_analysis(result) -> dict:
         "lyapunov_class": "disabled",
         "lyapunov_valid_pairs": 0,
     }
-    ana = cfg.analysis
     if getattr(ana, "enable_lyapunov", False):
         lyap_raw = estimate_ftle_lle(
             V,
@@ -956,6 +1024,12 @@ def full_analysis(result) -> dict:
         'n_spikes':            n_spikes,
         'spike_times':         spike_times,
         'spike_amps':          spike_amps,
+        'spike_detect_algorithm': spike_detect_algorithm,
+        'spike_detect_threshold': spike_detect_threshold,
+        'spike_detect_prominence': spike_detect_prominence,
+        'spike_detect_baseline_threshold': spike_detect_baseline_threshold,
+        'spike_detect_repolarization_window_ms': spike_detect_repolarization_window_ms,
+        'spike_detect_refractory_ms': spike_detect_refractory_ms,
         'V_threshold':         V_thr,
         'V_peak':              V_pk,
         'V_ahp':               V_ahp,

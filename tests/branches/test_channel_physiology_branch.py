@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.presets import apply_preset, get_preset_names
+from core.kinetics import ar_Ih, br_Ih
 from core.rhs import nernst_ca_ion
 from core.solver import NeuronSolver
 from core.analysis import detect_spikes
@@ -119,6 +120,18 @@ def _estimate_rin(v: np.ndarray, t: np.ndarray, pulse_start: float, pulse_end: f
     return abs(dv / iext)
 
 
+def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.ndarray:
+    idx = np.where((v[:-1] < threshold) & (v[1:] >= threshold))[0] + 1
+    if len(idx) == 0:
+        return np.array([], dtype=float)
+    st = t[idx]
+    keep = [0]
+    for i in range(1, len(st)):
+        if st[i] - st[keep[-1]] >= 1.0:
+            keep.append(i)
+    return st[keep]
+
+
 def test_optional_conductances_propagate_to_morphology():
     cfg_k = FullModelConfig()
     apply_preset(cfg_k, "K: Thalamic Relay (Ih + ICa + Burst)")
@@ -174,12 +187,76 @@ def test_hcn_reduces_input_resistance():
     )
 
 
+def test_hcn_vhalf_activation_is_physiological():
+    v = np.linspace(-130.0, -30.0, 10001)
+    r_inf = ar_Ih(v) / (ar_Ih(v) + br_Ih(v))
+    i_half = int(np.argmin(np.abs(r_inf - 0.5)))
+    v_half = float(v[i_half])
+    # Typical HCN activation midpoint is in hyperpolarized range (~ -70 to -95 mV).
+    assert -95.0 <= v_half <= -60.0, f"HCN V1/2 out of expected range: {v_half:.2f} mV"
+
+
+def test_hcn_temperature_accelerates_sag_kinetics():
+    cfg_23 = _build_hcn_pulse_config(enable_hcn=True)
+    cfg_37 = _build_hcn_pulse_config(enable_hcn=True)
+    cfg_23.env.T_celsius = 23.0
+    cfg_37.env.T_celsius = 37.0
+
+    res_23 = NeuronSolver(cfg_23).run_single()
+    res_37 = NeuronSolver(cfg_37).run_single()
+
+    start = cfg_23.stim.pulse_start
+    end = cfg_23.stim.pulse_start + cfg_23.stim.pulse_dur
+    w23 = (res_23.t >= start) & (res_23.t <= end)
+    w37 = (res_37.t >= start) & (res_37.t <= end)
+
+    t_min_23 = float(res_23.t[w23][np.argmin(res_23.v_soma[w23])])
+    t_min_37 = float(res_37.t[w37][np.argmin(res_37.v_soma[w37])])
+    # Higher temperature should speed gating and shift sag minimum earlier in time.
+    assert t_min_37 < t_min_23 - 20.0, (
+        f"HCN sag not sufficiently faster at 37C: t_min_23={t_min_23:.2f}, t_min_37={t_min_37:.2f}"
+    )
+
+
 def test_ia_current_is_nonzero_when_enabled():
     cfg = _build_ia_probe_config()
     res = NeuronSolver(cfg).run_single()
     assert "IA" in res.currents
     ia_peak = float(np.max(np.abs(res.currents["IA"])))
     assert ia_peak > 1e-4, f"Expected non-zero IA current, got peak {ia_peak:.6g}"
+
+
+def test_ia_suppresses_repetitive_spiking_near_threshold():
+    cfg_off = _build_ia_probe_config()
+    cfg_on = _build_ia_probe_config()
+    cfg_off.channels.enable_IA = False
+    cfg_off.channels.gA_max = 0.0
+    # Near-threshold current where IA effect is pronounced in this reduced model.
+    cfg_off.stim.Iext = 8.0
+    cfg_on.stim.Iext = 8.0
+
+    res_off = NeuronSolver(cfg_off).run_single()
+    res_on = NeuronSolver(cfg_on).run_single()
+    n_off = len(_spike_times(res_off.v_soma, res_off.t))
+    n_on = len(_spike_times(res_on.v_soma, res_on.t))
+    assert n_on <= max(1, n_off - 4), (
+        f"IA should suppress repetitive near-threshold spiking: without={n_off}, with={n_on}"
+    )
+
+
+def test_ia_sweep_monotonic_reduction_trend():
+    spike_counts = []
+    for ga in [0.0, 0.2, 0.4, 0.6, 0.8]:
+        cfg = _build_ia_probe_config()
+        cfg.stim.Iext = 8.0
+        cfg.channels.enable_IA = ga > 0.0
+        cfg.channels.gA_max = ga
+        res = NeuronSolver(cfg).run_single()
+        spike_counts.append(len(_spike_times(res.v_soma, res.t)))
+    # Expect non-increasing trend with stronger IA under fixed drive.
+    assert all(spike_counts[i + 1] <= spike_counts[i] for i in range(len(spike_counts) - 1)), (
+        f"IA sweep should show non-increasing excitability trend, got {spike_counts}"
+    )
 
 
 def test_calcium_nernst_is_physiological_and_temp_sensitive():
@@ -319,7 +396,11 @@ def _run_as_script() -> int:
         test_optional_conductances_propagate_to_morphology,
         test_membrane_capacitance_propagates_to_morphology,
         test_hcn_reduces_input_resistance,
+        test_hcn_vhalf_activation_is_physiological,
+        test_hcn_temperature_accelerates_sag_kinetics,
         test_ia_current_is_nonzero_when_enabled,
+        test_ia_suppresses_repetitive_spiking_near_threshold,
+        test_ia_sweep_monotonic_reduction_trend,
         test_calcium_nernst_is_physiological_and_temp_sensitive,
         test_inward_ica_increases_intracellular_calcium,
         test_double_stimulation_disabled_by_default_for_all_presets,

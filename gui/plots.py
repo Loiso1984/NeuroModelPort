@@ -17,7 +17,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                                 QCheckBox, QGroupBox)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter, QPageSize, QPdfWriter
 
 # Colour scheme (matches analytics.py)
 CHAN_COLORS = {
@@ -354,3 +354,47 @@ class OscilloscopeWidget(QWidget):
                 cb.setVisible(result.n_comp > 1 and result.config.morphology.N_ais > 0)
             elif name == 'Terminal':
                 cb.setVisible(result.n_comp > 2)
+
+    def export_plot(self, path: str) -> tuple[bool, str]:
+        """
+        Export current oscilloscope widget view.
+
+        Supported:
+        - PNG/JPG/BMP (raster snapshot)
+        - SVG (vector via QSvgGenerator)
+        - PDF (vector-like Qt render to PDF page)
+        """
+        suffix = path.lower().rsplit(".", 1)[-1] if "." in path else ""
+        if suffix in {"png", "jpg", "jpeg", "bmp"}:
+            ok = self._win.grab().save(path)
+            return (ok, "" if ok else "Failed to save raster image.")
+
+        if suffix == "svg":
+            try:
+                from PySide6.QtSvg import QSvgGenerator
+            except Exception:
+                return False, "SVG export is unavailable (QtSvg module missing)."
+            gen = QSvgGenerator()
+            gen.setFileName(path)
+            gen.setSize(self._win.size())
+            gen.setViewBox(self._win.rect())
+            gen.setTitle("NeuroModelPort Oscilloscope")
+            painter = QPainter(gen)
+            try:
+                self._win.render(painter)
+            finally:
+                painter.end()
+            return True, ""
+
+        if suffix == "pdf":
+            writer = QPdfWriter(path)
+            writer.setResolution(300)
+            writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+            painter = QPainter(writer)
+            try:
+                self._win.render(painter)
+            finally:
+                painter.end()
+            return True, ""
+
+        return False, f"Unsupported format: {suffix}. Use PNG, SVG, or PDF."

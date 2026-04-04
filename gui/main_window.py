@@ -20,10 +20,12 @@ from PySide6.QtGui import QIcon, QAction
 from gui.locales import T
 from core.models import FullModelConfig
 from core.solver import NeuronSolver
+from core.errors import SimulationParameterError
 from core.presets import get_preset_names, apply_preset
 from core.advanced_sim import (SWEEP_PARAMS, run_sweep,
                                  run_sd_curve, run_excitability_map,
                                  run_euler_maruyama)
+from core.validation import validate_simulation_config
 from gui.widgets.form_generator import PydanticFormWidget
 from gui.plots import OscilloscopeWidget
 from gui.analytics import AnalyticsWidget
@@ -212,6 +214,19 @@ class MainWindow(QMainWindow):
 
         # ── Export button ─────────────────────────────────────────────
         self.btn_export = QPushButton("💾 Export CSV")
+        self.btn_export_plot = QPushButton("Export Plot")
+        self.btn_export_plot.setMinimumHeight(46)
+        self.btn_export_plot.setEnabled(False)
+        self.btn_export_plot.setStyleSheet("""
+            QPushButton {
+                background: #313244; color: #A6E3A1; border-radius: 6px;
+                border: 1px solid #45475A;
+            }
+            QPushButton:hover  { background: #3E3F5E; }
+            QPushButton:disabled { color: #555568; }
+        """)
+        self.btn_export_plot.clicked.connect(self.export_plot)
+
         self.btn_export.setMinimumHeight(46)
         self.btn_export.setEnabled(False)
         self.btn_export.setStyleSheet("""
@@ -243,6 +258,7 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.btn_sweep,  2)
         bar.addWidget(self.btn_sd,     2)
         bar.addWidget(self.btn_excmap, 2)
+        bar.addWidget(self.btn_export_plot, 2)
         bar.addWidget(self.btn_export, 2)
         bar.addStretch(1)
         bar.addWidget(self.lbl_preset)
@@ -406,6 +422,26 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Simulation Error", msg)
         self._status("Error.")
 
+    def _preflight_validate(self) -> bool:
+        """
+        Validate configuration before launching long simulation runs.
+
+        Hard errors stop execution, non-fatal warnings are surfaced in status bar.
+        """
+        try:
+            warnings = validate_simulation_config(self.config)
+        except SimulationParameterError as exc:
+            QMessageBox.critical(self, "Parameter Validation Error", str(exc))
+            self._status("Validation error.")
+            return False
+
+        if warnings:
+            preview = " | ".join(warnings[:2])
+            if len(warnings) > 2:
+                preview += " | ..."
+            self._status(f"Warnings: {preview}")
+        return True
+
     def _report_progress(self, i: int, n: int, val):
         """Update status bar with progress from long operations."""
         pct = int(100 * i / max(1, n))
@@ -421,6 +457,9 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
         try:
+            if not self._preflight_validate():
+                return
+
             # Sync dual stim config from widget to main config
             if self.dual_stim_widget.config.enabled:
                 self.config.dual_stimulation = self.dual_stim_widget.get_config()
@@ -444,6 +483,7 @@ class MainWindow(QMainWindow):
                 dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
                 self.topology.draw_neuron(self.config, dual_config=dual_cfg)
                 self.axon_biophysics.plot_axon_data(res, self.config)
+                self.btn_export_plot.setEnabled(True)
                 self.btn_export.setEnabled(True)
                 spike_n = len(res.t)
                 self._status(
@@ -480,6 +520,10 @@ class MainWindow(QMainWindow):
         self._status("Stochastic simulation (Euler-Maruyama)…")
         QApplication.processEvents()
 
+        if not self._preflight_validate():
+            self._lock_ui(False)
+            return
+
         # Sync dual stim config from widget to main config
         if self.dual_stim_widget.config.enabled:
             self.config.dual_stimulation = self.dual_stim_widget.get_config()
@@ -501,6 +545,7 @@ class MainWindow(QMainWindow):
         dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
         self.topology.draw_neuron(self.config, dual_config=dual_cfg)
         self.axon_biophysics.plot_axon_data(res, self.config)
+        self.btn_export_plot.setEnabled(True)
         self.btn_export.setEnabled(True)
         self._lock_ui(False)
         self._status("Stochastic run complete.")
@@ -514,6 +559,8 @@ class MainWindow(QMainWindow):
         if not hasattr(ana, 'sweep_param') or not ana.sweep_param:
             QMessageBox.warning(self, "Sweep",
                                 "Set sweep_param in the Analysis section first.")
+            return
+        if not self._preflight_validate():
             return
 
         import numpy as np
@@ -544,6 +591,9 @@ class MainWindow(QMainWindow):
     #  4. S-D CURVE
     # ─────────────────────────────────────────────────────────────────
     def run_sd_curve(self):
+        if not self._preflight_validate():
+            return
+
         self._lock_ui(True)
         self._status("Computing Strength-Duration curve (binary search)…")
         QApplication.processEvents()
@@ -571,6 +621,9 @@ class MainWindow(QMainWindow):
     #  5. EXCITABILITY MAP
     # ─────────────────────────────────────────────────────────────────
     def run_excmap(self):
+        if not self._preflight_validate():
+            return
+
         ana = self.config.analysis
         total = ana.excmap_NI * ana.excmap_ND
         self._lock_ui(True)
@@ -594,6 +647,28 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────
     #  EXPORT CSV
     # ─────────────────────────────────────────────────────────────────
+    def export_plot(self):
+        if not hasattr(self, '_last_result'):
+            QMessageBox.information(self, "Export Plot", "Run simulation first to export a plot.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Plot",
+            "neuro_plot.png",
+            "Image Files (*.png *.jpg *.jpeg *.bmp);;Vector Files (*.svg *.pdf);;All Files (*)"
+        )
+        if not path:
+            return
+
+        ok, err = self.oscilloscope.export_plot(path)
+        if not ok:
+            QMessageBox.critical(self, "Export Plot Error", err)
+            return
+
+        self._status(f"Plot exported: {path}")
+        QMessageBox.information(self, "Export Plot", f"Saved to:\n{path}")
+
     def export_csv(self):
         if not hasattr(self, '_last_result'):
             return
@@ -669,6 +744,10 @@ extended with multi-compartment morphology, optional ion channels, and advanced 
 </tr>
 <tr><td style="padding:4px;"><b>▶ RUN</b></td>
     <td>Standard deterministic simulation (BDF stiff ODE solver)</td></tr>
+<tr style="background:#1A1A2E;"><td style="padding:4px;"><b>Jacobian mode</b></td>
+    <td>Set <i>stim.jacobian_mode</i> in Parameters → Stimulation:
+        <i>dense_fd</i>, <i>sparse_fd</i>, or <i>analytic_sparse</i>.
+        Heavy presets typically run faster with sparse modes.</td></tr>
 <tr style="background:#1A1A2E;"><td style="padding:4px;"><b>🎲 STOCHASTIC</b></td>
     <td>Euler-Maruyama integrator with Langevin gate noise (Fox &amp; Lu 1994).
         Enable via <i>stoch_gating</i> flag or use <i>noise_sigma</i>.</td></tr>
@@ -701,6 +780,10 @@ extended with multi-compartment morphology, optional ion channels, and advanced 
   <li>Conduction velocity (multi-compartment mode)</li>
   <li>Energy: cumulative charge Q per channel, ATP estimate</li>
 </ul>
+<p style="color:#BAC2DE;">
+Spike detector settings are configurable in <b>Parameters → Analysis</b>:
+algorithm, threshold, prominence, baseline, refractory window and repolarization window.
+</p>
 
 <h2 style="color:#A6E3A1;">🔄 Phase Plane</h2>
 <p>Shows the AP trajectory in V–n space plus nullclines (dV/dt=0 and dn/dt=0).
@@ -710,9 +793,24 @@ Fixed points are where both nullclines intersect. Limit cycles = sustained firin
 <p>Multi-compartment cable model: Soma → AIS (high gNa density) → Trunk → Bifurcation → Branch 1/2.
 The Laplacian matrix couples adjacent compartments via axial conductance g_ax = d/(4·Ra·dx).</p>
 
+<h2 style="color:#A6E3A1;">🧪 Preset Modes (K / N / O)</h2>
+<p>Use <b>Parameters → Preset Modes</b> to switch validated stage/mode overlays:</p>
+<ul>
+  <li><b>K (Thalamic Relay)</b>: <i>baseline</i> (lower throughput) vs <i>activated</i> (higher relay output).</li>
+  <li><b>N (Alzheimer's)</b>: <i>progressive</i> usually shows early spikes with attenuation; <i>terminal</i> is markedly less excitable.</li>
+  <li><b>O (Hypoxia)</b>: <i>progressive</i> shows short early spiking then failure/attenuation; <i>terminal</i> approximates severe failure state.</li>
+</ul>
+<p style="color:#BAC2DE;">
+Default profile uses <b>K baseline</b>; switch to <b>activated</b> for high-throughput relay behavior.
+</p>
+<p style="color:#BAC2DE;">
+Interpret terminal modes as late-pathology behavior for analysis/education, not as healthy baseline physiology.
+</p>
+
 <h2 style="color:#A6E3A1;">💾 Export</h2>
 <p>After a run, click <b>💾 Export CSV</b> to save all traces (V, currents, gates, Ca) as a CSV file
-compatible with Excel, MATLAB, Python/pandas, etc.</p>
+compatible with Excel, MATLAB, Python/pandas, etc. Use <b>Export Plot</b> to save the current
+oscilloscope view as PNG, SVG, or PDF.</p>
 
 <hr style="border-color:#45475A;">
 <p style="color:#585B70; font-size:11px;">

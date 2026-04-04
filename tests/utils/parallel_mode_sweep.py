@@ -2,7 +2,7 @@
 Parallel sweep utility for pathology mode tuning.
 
 Focused on test-time acceleration:
-- multiprocessing across parameter cases,
+- thread/process executors across parameter cases,
 - checkpointed jsonl output,
 - resumable runs.
 """
@@ -14,8 +14,7 @@ import itertools
 import json
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
 
@@ -56,6 +55,7 @@ def _evaluate_hypoxia_case(case: dict) -> dict:
     cfg.stim.t_sim = case["t_sim"]
     cfg.stim.dt_eval = case["dt_eval"]
     cfg.stim.stim_type = "const"
+    cfg.stim.jacobian_mode = case.get("jacobian_mode", "sparse_fd")
 
     res = NeuronSolver(cfg).run_single()
     st = _spike_times_crossing(res.v_soma, res.t)
@@ -74,7 +74,7 @@ def _evaluate_hypoxia_case(case: dict) -> dict:
     }
 
 
-def _iter_hypoxia_cases(t_sim: float, dt_eval: float) -> Iterable[dict]:
+def _iter_hypoxia_cases(t_sim: float, dt_eval: float, jacobian_mode: str) -> Iterable[dict]:
     for ek, el, gl, iext, tau_ca, b_ca, gca in itertools.product(
         [-65.0, -60.0, -55.0, -50.0],
         [-52.0, -48.0, -45.0, -42.0],
@@ -94,6 +94,7 @@ def _iter_hypoxia_cases(t_sim: float, dt_eval: float) -> Iterable[dict]:
             "gCa_max": gca,
             "t_sim": t_sim,
             "dt_eval": dt_eval,
+            "jacobian_mode": jacobian_mode,
         }
 
 
@@ -124,7 +125,7 @@ def run_hypoxia_sweep(args: argparse.Namespace) -> int:
                 )
                 seen.add(key)
 
-    cases = list(_iter_hypoxia_cases(args.t_sim, args.dt_eval))
+    cases = list(_iter_hypoxia_cases(args.t_sim, args.dt_eval, args.jacobian_mode))
     if args.max_cases > 0:
         cases = cases[: args.max_cases]
 
@@ -140,16 +141,28 @@ def run_hypoxia_sweep(args: argparse.Namespace) -> int:
         return 0
 
     workers = args.workers if args.workers > 0 else max(1, (os.cpu_count() or 4) - 1)
-    print(f"Running {total} cases with {workers} workers...")
+    print(
+        f"Running {total} cases with {workers} workers "
+        f"({args.executor}, jacobian={args.jacobian_mode})..."
+    )
+
+    # Warmup once to avoid first-case JIT outlier in runtime.
+    warm = dict(cases[0])
+    warm["t_sim"] = min(20.0, warm["t_sim"])
+    warm["dt_eval"] = max(0.4, warm["dt_eval"])
+    _evaluate_hypoxia_case(warm)
 
     completed = 0
     top_records: list[dict] = []
     with out_path.open("a", encoding="utf-8") as out_f:
         executor = None
-        try:
-            executor = ProcessPoolExecutor(max_workers=workers)
-        except PermissionError:
-            print("ProcessPool unavailable (permission). Falling back to ThreadPoolExecutor.")
+        if args.executor == "process":
+            try:
+                executor = ProcessPoolExecutor(max_workers=workers)
+            except PermissionError:
+                print("ProcessPool unavailable (permission). Falling back to ThreadPoolExecutor.")
+                executor = ThreadPoolExecutor(max_workers=workers)
+        else:
             executor = ThreadPoolExecutor(max_workers=workers)
         with executor as ex:
             futures = [ex.submit(_evaluate_hypoxia_case, c) for c in cases]
@@ -180,9 +193,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Parallel pathology mode sweep")
     parser.add_argument("--target", choices=["hypoxia"], default="hypoxia")
     parser.add_argument("--workers", type=int, default=0)
+    parser.add_argument("--executor", choices=["thread", "process"], default="thread")
     parser.add_argument("--max-cases", type=int, default=0)
     parser.add_argument("--t-sim", type=float, default=260.0)
     parser.add_argument("--dt-eval", type=float, default=0.2)
+    parser.add_argument("--jacobian-mode", choices=["dense_fd", "sparse_fd", "analytic_sparse"], default="sparse_fd")
     parser.add_argument("--case-timeout-s", type=float, default=120.0)
     parser.add_argument("--progress-every", type=int, default=20)
     parser.add_argument("--resume", action="store_true")

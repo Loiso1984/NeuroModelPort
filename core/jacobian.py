@@ -30,7 +30,8 @@ def _state_slices(
     en_ica: bool,
     en_ia: bool,
     dyn_ca: bool,
-    use_dfilter: int,
+    use_dfilter_primary: int,
+    use_dfilter_secondary: int,
 ) -> tuple[dict[str, slice | int | None], int]:
     cursor = 0
     out: dict[str, slice | int | None] = {}
@@ -69,9 +70,14 @@ def _state_slices(
         out["ca"] = slice(cursor, cursor + n_comp)
         cursor += n_comp
 
-    out["dfilter"] = None
-    if use_dfilter == 1:
-        out["dfilter"] = cursor
+    out["dfilter_primary"] = None
+    if use_dfilter_primary == 1:
+        out["dfilter_primary"] = cursor
+        cursor += 1
+
+    out["dfilter_secondary"] = None
+    if use_dfilter_secondary == 1:
+        out["dfilter_secondary"] = cursor
         cursor += 1
 
     return out, cursor
@@ -90,9 +96,12 @@ def build_jacobian_sparsity(
     dyn_ca: bool,
     l_indices: np.ndarray,
     l_indptr: np.ndarray,
-    use_dfilter: int,
+    use_dfilter_primary: int,
+    use_dfilter_secondary: int,
 ) -> csr_matrix:
-    idx, n_state = _state_slices(n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter)
+    idx, n_state = _state_slices(
+        n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter_primary, use_dfilter_secondary
+    )
     sp = lil_matrix((n_state, n_state), dtype=float)
 
     v_slice = idx["v"]
@@ -105,7 +114,8 @@ def build_jacobian_sparsity(
     a_slice = idx["a"]
     b_slice = idx["b"]
     ca_slice = idx["ca"]
-    dfilter_idx = idx["dfilter"]
+    dfilter_primary_idx = idx["dfilter_primary"]
+    dfilter_secondary_idx = idx["dfilter_secondary"]
 
     for i in range(n_comp):
         v_row = v_slice.start + i
@@ -129,9 +139,12 @@ def build_jacobian_sparsity(
         if ca_slice is not None and (en_ica or en_sk):
             sp[v_row, ca_slice.start + i] = 1.0
 
-        # Optional soma dependency on dendritic-filter state.
-        if dfilter_idx is not None and i == 0:
-            sp[v_row, int(dfilter_idx)] = 1.0
+        # Optional soma dependency on dendritic-filter states.
+        if i == 0:
+            if dfilter_primary_idx is not None:
+                sp[v_row, int(dfilter_primary_idx)] = 1.0
+            if dfilter_secondary_idx is not None:
+                sp[v_row, int(dfilter_secondary_idx)] = 1.0
 
         # HH core gates.
         m_row = m_slice.start + i
@@ -171,8 +184,10 @@ def build_jacobian_sparsity(
                 sp[ca_row, s_slice.start + i] = 1.0
                 sp[ca_row, u_slice.start + i] = 1.0
 
-    if dfilter_idx is not None:
-        sp[int(dfilter_idx), int(dfilter_idx)] = 1.0
+    if dfilter_primary_idx is not None:
+        sp[int(dfilter_primary_idx), int(dfilter_primary_idx)] = 1.0
+    if dfilter_secondary_idx is not None:
+        sp[int(dfilter_secondary_idx), int(dfilter_secondary_idx)] = 1.0
 
     return sp.tocsr()
 
@@ -215,7 +230,7 @@ def analytic_sparse_jacobian(
     atau,
     stim_comp,
     stim_mode,
-    use_dfilter,
+    use_dfilter_primary,
     dfilter_attenuation,
     dfilter_tau_ms,
     dual_stim_enabled,
@@ -226,6 +241,7 @@ def analytic_sparse_jacobian(
     atau_2,
     stim_comp_2,
     stim_mode_2,
+    use_dfilter_secondary,
     dfilter_attenuation_2,
     dfilter_tau_ms_2,
 ):
@@ -249,7 +265,9 @@ def analytic_sparse_jacobian(
     del dfilter_attenuation_2
     del dfilter_tau_ms_2
 
-    idx, n_state = _state_slices(n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter)
+    idx, n_state = _state_slices(
+        n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter_primary, use_dfilter_secondary
+    )
     J = lil_matrix((n_state, n_state), dtype=float)
 
     v = y[idx["v"]]
@@ -385,6 +403,11 @@ def analytic_sparse_jacobian(
         J[v_row, idx["n"].start + i] += -d_iion_dn / cm
         if dyn_ca and idx["ca"] is not None:
             J[v_row, idx["ca"].start + i] += -d_iion_dca / cm
+        if i == 0:
+            if idx["dfilter_primary"] is not None:
+                J[v_row, int(idx["dfilter_primary"])] += 1.0 / cm
+            if idx["dfilter_secondary"] is not None:
+                J[v_row, int(idx["dfilter_secondary"])] += 1.0 / cm
 
     # Core HH gates
     for i in range(n_comp):
@@ -441,11 +464,17 @@ def analytic_sparse_jacobian(
                 d_dca += b_ca * (-dIca_dca[i])
             J[ca_row, ca_row] = d_dca
 
-    if idx["dfilter"] is not None:
-        dfilter_row = int(idx["dfilter"])
+    if idx["dfilter_primary"] is not None:
+        dfilter_row = int(idx["dfilter_primary"])
         if dfilter_tau_ms > 0.0:
             J[dfilter_row, dfilter_row] = -1.0 / dfilter_tau_ms
         else:
             J[dfilter_row, dfilter_row] = 0.0
+    if idx["dfilter_secondary"] is not None:
+        dfilter_row2 = int(idx["dfilter_secondary"])
+        if dfilter_tau_ms_2 > 0.0:
+            J[dfilter_row2, dfilter_row2] = -1.0 / dfilter_tau_ms_2
+        else:
+            J[dfilter_row2, dfilter_row2] = 0.0
 
     return J.tocsr()

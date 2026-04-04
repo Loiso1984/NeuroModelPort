@@ -97,6 +97,32 @@ def _configure_ax_interactive(ax, title: str = '', xlabel: str = '', ylabel: str
         spine.set_color('#666666')
 
 
+def _spike_detect_kwargs_from_analysis(ana) -> dict:
+    return {
+        "algorithm": getattr(ana, "spike_detect_algorithm", "peak_repolarization"),
+        "threshold": float(getattr(ana, "spike_detect_threshold", -20.0)),
+        "prominence": float(getattr(ana, "spike_detect_prominence", 10.0)),
+        "baseline_threshold": float(getattr(ana, "spike_detect_baseline_threshold", -50.0)),
+        "repolarization_window_ms": float(
+            getattr(ana, "spike_detect_repolarization_window_ms", 20.0)
+        ),
+        "refractory_ms": float(getattr(ana, "spike_detect_refractory_ms", 1.0)),
+    }
+
+
+def _spike_detect_kwargs_from_stats(stats: dict) -> dict:
+    return {
+        "algorithm": stats.get("spike_detect_algorithm", "peak_repolarization"),
+        "threshold": float(stats.get("spike_detect_threshold", -20.0)),
+        "prominence": float(stats.get("spike_detect_prominence", 10.0)),
+        "baseline_threshold": float(stats.get("spike_detect_baseline_threshold", -50.0)),
+        "repolarization_window_ms": float(
+            stats.get("spike_detect_repolarization_window_ms", 20.0)
+        ),
+        "refractory_ms": float(stats.get("spike_detect_refractory_ms", 1.0)),
+    }
+
+
 # ════════════════════════════════════════════════════════════════════
 class AnalyticsWidget(QTabWidget):
     """Main analytics widget — updated by MainWindow after each run."""
@@ -522,7 +548,7 @@ class AnalyticsWidget(QTabWidget):
         # Spike detection markers
         if stats['n_spikes'] > 0:
             from core.analysis import detect_spikes
-            pk_idx, _, _ = detect_spikes(V, t)
+            pk_idx, _, _ = detect_spikes(V, t, **_spike_detect_kwargs_from_stats(stats))
             ax.plot(V[pk_idx], n_t[pk_idx], 'r*', ms=12, zorder=6, label='Spike peaks')
 
         # Nullclines
@@ -728,7 +754,9 @@ class AnalyticsWidget(QTabWidget):
                 continue
             param_vals.append(val)
             ax1.plot(res.t, res.v_soma, color=cmap[i], lw=1, alpha=0.8)
-            pks, sp_t, sp_amp = detect_spikes(res.v_soma, res.t)
+            pks, sp_t, sp_amp = detect_spikes(
+                res.v_soma, res.t, **_spike_detect_kwargs_from_analysis(res.config.analysis)
+            )
             peaks.append(float(np.max(res.v_soma)))
             n_sps.append(len(pks))
             freqs.append(1000.0 / float(np.mean(np.diff(sp_t))) if len(sp_t) > 1 else 0.0)

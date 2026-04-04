@@ -116,20 +116,39 @@ def test_demyelination_preserves_soma_spike_but_impairs_axon_propagation():
 
 
 def test_k_modes_baseline_vs_activated():
-    _, _, st_base = _run_preset(
+    _, res_base, st_base = _run_preset(
         "K: Thalamic Relay (Ih + ICa + Burst)",
         t_sim=300.0,
         dt_eval=0.2,
         k_mode="baseline",
     )
-    _, _, st_act = _run_preset(
+    _, res_act, st_act = _run_preset(
         "K: Thalamic Relay (Ih + ICa + Burst)",
         t_sim=300.0,
         dt_eval=0.2,
         k_mode="activated",
     )
+    dur_base = float(res_base.t[-1] - res_base.t[0]) if len(res_base.t) > 1 else 0.0
+    dur_act = float(res_act.t[-1] - res_act.t[0]) if len(res_act.t) > 1 else 0.0
+    fg_base = float(1000.0 * len(st_base) / dur_base) if dur_base > 0 else 0.0
+    fg_act = float(1000.0 * len(st_act) / dur_act) if dur_act > 0 else 0.0
+
+    assert 4.0 <= fg_base <= 25.0, f"K baseline global frequency should stay low-throughput/theta-like, got {fg_base:.2f} Hz"
     assert len(st_act) >= len(st_base), "Activated thalamic mode should not be less excitable than baseline"
     assert len(st_act) >= 3, "Activated thalamic mode should produce robust relay output"
+    assert fg_act >= fg_base + 10.0, f"K activated should clearly exceed baseline throughput ({fg_base:.2f} -> {fg_act:.2f} Hz)"
+
+
+def test_k_default_mode_is_baseline_and_low_throughput():
+    cfg, res, st = _run_preset(
+        "K: Thalamic Relay (Ih + ICa + Burst)",
+        t_sim=300.0,
+        dt_eval=0.2,
+    )
+    assert cfg.preset_modes.k_mode == "baseline", "K default mode should be baseline"
+    dur = float(res.t[-1] - res.t[0]) if len(res.t) > 1 else 0.0
+    fg = float(1000.0 * len(st) / dur) if dur > 0 else 0.0
+    assert 4.0 <= fg <= 25.0, f"K default baseline throughput should remain low, got {fg:.2f} Hz"
 
 
 def test_alzheimer_progressive_vs_terminal_modes():
@@ -181,15 +200,32 @@ def test_detect_spikes_consistency_with_transition_counter():
     )
 
 
+def test_heavy_presets_default_to_sparse_jacobian_mode():
+    heavy = [
+        "F: Multiple Sclerosis (Demyelination)",
+        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "N: Alzheimer's (v10 Calcium Toxicity)",
+        "O: Hypoxia (v10 ATP-pump failure)",
+    ]
+    for preset in heavy:
+        cfg = FullModelConfig()
+        apply_preset(cfg, preset)
+        assert cfg.stim.jacobian_mode == "sparse_fd", (
+            f"{preset}: expected sparse_fd by default for heavy preset, got {cfg.stim.jacobian_mode}"
+        )
+
+
 def _run_as_script() -> int:
     tests = [
         test_spike_counting_is_transition_based,
         test_all_presets_run_without_numerical_break,
         test_demyelination_preserves_soma_spike_but_impairs_axon_propagation,
         test_k_modes_baseline_vs_activated,
+        test_k_default_mode_is_baseline_and_low_throughput,
         test_alzheimer_progressive_vs_terminal_modes,
         test_hypoxia_progressive_vs_terminal_modes,
         test_detect_spikes_consistency_with_transition_counter,
+        test_heavy_presets_default_to_sparse_jacobian_mode,
     ]
     passed = 0
     for fn in tests:

@@ -10,6 +10,7 @@ Key principles:
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import sys
 import time
@@ -22,6 +23,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.models import FullModelConfig
 from core.presets import apply_preset
 from core.solver import NeuronSolver
+
+
+def _run_parallel_cases(cases: list[dict], fn, workers: int, min_cases_parallel: int = 6) -> list[dict]:
+    """
+    Deterministic parallel map over cases.
+
+    Notes:
+    - Keeps output ordering identical to input ordering.
+    - Uses threads to avoid repeated process/JIT cold-start overhead.
+    """
+    if workers <= 1 or len(cases) < min_cases_parallel:
+        return [fn(c) for c in cases]
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(fn, cases))
 
 
 def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.ndarray:
@@ -273,8 +288,19 @@ def main() -> int:
     parser.add_argument("--final-dt", type=float, default=0.25)
     parser.add_argument("--quick-jacobian-mode", type=str, default="sparse_fd")
     parser.add_argument("--full-jacobian-mode", type=str, default="sparse_fd")
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--allow-parallel", action="store_true")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+    workers = max(1, int(args.workers))
+    if workers > 1 and not args.allow_parallel:
+        # Local benchmarks in this project consistently showed regressions from threaded execution
+        # on stiff multi-comp hypoxia searches due solver contention/overheads.
+        print(
+            f"[info] workers={workers} requested; forcing workers=1 "
+            "(use --allow-parallel to override)."
+        )
+        workers = 1
 
     out_dir = Path("_test_results")
     out_dir.mkdir(exist_ok=True)
@@ -303,33 +329,42 @@ def main() -> int:
                     seen.add(_case_key(row))
 
     coarse_cases = _coarse_cases()[: max(1, args.coarse_cases)]
+    if seen:
+        coarse_cases = [c for c in coarse_cases if _case_key(c) not in seen]
+
     t0 = time.time()
-    for i, case in enumerate(coarse_cases, start=1):
-        if _case_key(case) in seen:
-            continue
-        row = _screen_case(
+    coarse_total = len(coarse_cases)
+    if coarse_total == 0:
+        print("No new coarse rows computed (resume mode).")
+        return 0
+
+    def _coarse_fn(case: dict) -> dict:
+        return _screen_case(
             case,
             quick_t=args.quick_t,
             quick_dt=args.quick_dt,
             quick_jacobian_mode=args.quick_jacobian_mode,
         )
-        coarse_screen_rows.append(row)
+
+    coarse_screen_rows = _run_parallel_cases(coarse_cases, _coarse_fn, workers=workers)
+    for i, row in enumerate(coarse_screen_rows, start=1):
         _append_jsonl(checkpoint_file, {"phase": "coarse_screen", **row})
+        elapsed = time.time() - t0
+        eta = (elapsed / i) * (coarse_total - i) if i > 0 else 0.0
         print(
-            f"coarse-screen {i:02d}/{len(coarse_cases)} score={row['score']:.2f} "
+            f"coarse-screen {i:02d}/{coarse_total} score={row['score']:.2f} "
             f"sp={row['n_spikes']} first={row['first_half']} second={row['second_half']} "
-            f"vpk={row['v_peak_mV']:.1f} reject={row.get('screen_reject', False)}"
+            f"vpk={row['v_peak_mV']:.1f} reject={row.get('screen_reject', False)} "
+            f"eta={eta:.1f}s"
         )
 
     coarse_screen_sorted = sorted(coarse_screen_rows, key=lambda x: x["score"], reverse=True)
-    if len(coarse_screen_sorted) == 0:
-        print("No new coarse rows computed (resume mode).")
-        return 0
 
     coarse_full_candidates = [r for r in coarse_screen_sorted if not r.get("screen_reject", False)]
     coarse_full_candidates = coarse_full_candidates[: max(1, args.coarse_full_count)]
-    for i, row in enumerate(coarse_full_candidates, start=1):
-        case = {
+
+    def _to_case(row: dict) -> dict:
+        return {
             "EK": row["EK"],
             "EL": row["EL"],
             "gL": row["gL"],
@@ -338,20 +373,29 @@ def main() -> int:
             "B_Ca": row["B_Ca"],
             "gCa_max": row["gCa_max"],
         }
-        full = _simulate_case(
+
+    coarse_full_cases = [_to_case(r) for r in coarse_full_candidates]
+
+    def _coarse_full_fn(case: dict) -> dict:
+        return _simulate_case(
             case,
             args.full_t,
             args.full_dt,
             single_comp=False,
             jacobian_mode=args.full_jacobian_mode,
         )
-        full["quick_score"] = row["quick_score"]
+
+    # Full multi-comp solves are typically the bottleneck and often scale poorly with local threading.
+    # Keep this stage sequential for predictable throughput.
+    coarse_full_rows = _run_parallel_cases(coarse_full_cases, _coarse_full_fn, workers=1)
+    for i, (seed_row, full) in enumerate(zip(coarse_full_candidates, coarse_full_rows), start=1):
+        full["quick_score"] = seed_row["quick_score"]
         full["screen_reject"] = False
         full["score"] = _progressive_score(full)
         coarse_rows.append(full)
         _append_jsonl(checkpoint_file, {"phase": "coarse_full", **full})
         print(
-            f"coarse-full {i:02d}/{len(coarse_full_candidates)} score={full['score']:.2f} "
+            f"coarse-full {i:02d}/{len(coarse_full_rows)} score={full['score']:.2f} "
             f"sp={full['n_spikes']} first={full['first_half']} second={full['second_half']}"
         )
 
@@ -363,41 +407,55 @@ def main() -> int:
         local_cases = _refine_cases(seed)
         print(f"\nrefine seed {si}: score={seed['score']:.2f}, cases={len(local_cases)}")
         # quick-stage all local cases, run full only for top-N quick scores
-        quick_local = []
-        for case in local_cases:
-            q = _screen_case(
+        def _local_quick_fn(case: dict) -> dict:
+            return _screen_case(
                 case,
                 quick_t=args.quick_t,
                 quick_dt=args.quick_dt,
                 quick_jacobian_mode=args.quick_jacobian_mode,
             )
+
+        quick_rows = _run_parallel_cases(local_cases, _local_quick_fn, workers=workers)
+        quick_local = []
+        for case, q in zip(local_cases, quick_rows):
             quick_local.append((q["quick_score"], case, q))
         quick_local.sort(key=lambda x: x[0], reverse=True)
         top_local = quick_local[: max(1, args.max_refined_full)]
 
-        for j, (_qscore, case, qrow) in enumerate(top_local, start=1):
+        kept_local = []
+        for _qscore, case, qrow in top_local:
             if _case_key(case) in seen:
                 continue
+            kept_local.append((_qscore, case, qrow))
+
+        full_needed = [case for _qscore, case, qrow in kept_local if qrow["n_spikes"] > 0 and qrow["stable"]]
+        def _refine_full_fn(case: dict) -> dict:
+            return _simulate_case(
+                case,
+                args.full_t + 40.0,
+                args.full_dt,
+                single_comp=False,
+                jacobian_mode=args.full_jacobian_mode,
+            )
+        # Keep full multi-comp validation sequential; parallelism is best used on quick-screen stages.
+        full_results = _run_parallel_cases(full_needed, _refine_full_fn, workers=1)
+        full_iter = iter(full_results)
+
+        for j, (_qscore, case, qrow) in enumerate(kept_local, start=1):
             if qrow["n_spikes"] == 0 or not qrow["stable"]:
                 row = dict(qrow)
                 row["screen_reject"] = True
                 row["score"] = qrow["quick_score"] - 20.0
             else:
-                row = _simulate_case(
-                    case,
-                    args.full_t + 40.0,
-                    args.full_dt,
-                    single_comp=False,
-                    jacobian_mode=args.full_jacobian_mode,
-                )
+                row = next(full_iter)
                 row["quick_score"] = qrow["quick_score"]
                 row["screen_reject"] = False
                 row["score"] = _progressive_score(row)
             refined_rows.append(row)
             _append_jsonl(checkpoint_file, {"phase": f"refine_seed_{si}", **row})
-            if j % 4 == 0 or j == len(top_local):
+            if j % 4 == 0 or j == len(kept_local):
                 print(
-                    f"  refine {si}.{j:02d}/{len(top_local)} last_score={row['score']:.2f} "
+                    f"  refine {si}.{j:02d}/{len(kept_local)} last_score={row['score']:.2f} "
                     f"sp={row['n_spikes']} first={row['first_half']} second={row['second_half']} "
                     f"reject={row.get('screen_reject', False)}"
                 )
@@ -430,6 +488,7 @@ def main() -> int:
     out = {
         "config": {
             "coarse_cases": len(coarse_cases),
+            "workers": workers,
             "coarse_full_count": args.coarse_full_count,
             "seed_count": len(seeds),
             "max_refined_full": args.max_refined_full,
