@@ -8,6 +8,7 @@ import csv
 import copy
 import os
 from pathlib import Path
+import numpy as np
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -22,7 +23,7 @@ from gui.locales import T
 from core.models import FullModelConfig
 from core.solver import NeuronSolver
 from core.errors import SimulationParameterError
-from core.presets import get_preset_names, apply_preset
+from core.presets import get_preset_names, apply_preset, apply_synaptic_stimulus
 from core.advanced_sim import (SWEEP_PARAMS, run_sweep,
                                  run_sd_curve, run_excitability_map,
                                  run_euler_maruyama)
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self.config = FullModelConfig()
         self._current_preset_name = ""
         self._thread_pool = QThreadPool()
+        self._dual_stim_signal_connected = False
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -275,40 +277,41 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
 
         # ── Tab 0: Parameters ─────────────────────────────────────────
+        # Step 1: Setup
         self.tab_params = QWidget()
         self._build_params_tab()
         self.tabs.addTab(self.tab_params,   "1) Setup")
 
         # ── Tab 1: Dual Stimulation ───────────────────────────────────
+        # Step 2: Dual Stimulation
         self.dual_stim_widget = getattr(self, "dual_stim_widget", DualStimulationWidget())
-        # Keep a single connection even if this block executes again.
-        try:
-            self.dual_stim_widget.config_changed.disconnect(self._on_dual_stim_config_changed)
-        except Exception:
-            pass
-        self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
+        if not self._dual_stim_signal_connected:
+            self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
+            self._dual_stim_signal_connected = True
         self.tabs.addTab(self.dual_stim_widget, "2) Dual Stim")
 
-        # ── Tab 1: Oscilloscope ───────────────────────────────────────
+        # ── Tab 2: Oscilloscope ───────────────────────────────────────
+        # Step 3: Oscilloscope
         self.oscilloscope = OscilloscopeWidget()
         self.tabs.addTab(self.oscilloscope, "3) Oscilloscope")
 
-        # ── Tab 2: Analytics ──────────────────────────────────────────
+        # ── Tab 3: Analytics ──────────────────────────────────────────
+        # Step 4: Analytics
         self.analytics = AnalyticsWidget()
         self.tabs.addTab(self.analytics,    "4) Analytics")
 
-        # ── Tab 3: Topology ───────────────────────────────────────────
+        # ── Tab 4: Topology ───────────────────────────────────────────
+        # Step 5: Topology
         self.topology = TopologyWidget()
         self.tabs.addTab(self.topology,     "5) Topology")
 
-        # ── Tab 4: Axon Biophysics ───────────────────────────────────
+        # ── Tab 5: Axon Biophysics ───────────────────────────────────
+        # Step 6: Axon Biophysics
         self.axon_biophysics = AxonBiophysicsWidget()
         self.tabs.addTab(self.axon_biophysics, "6) Axon Biophysics")
 
-        # ── Tab 5: Dual Stimulation ──────────────────────────────────
-        # (moved above as step 2 in workflow order)
-
         # ── Tab 6: Guide ──────────────────────────────────────────────
+        # Step 7: Guide
         from PySide6.QtWidgets import QTextBrowser
         self.guide_browser = QTextBrowser()
         self.guide_browser.setOpenExternalLinks(True)
@@ -342,7 +345,11 @@ class MainWindow(QMainWindow):
         c_layout.setSpacing(10)
 
         # Forms
-        self.form_stim = PydanticFormWidget(self.config.stim, "Stimulation")
+        self.form_stim = PydanticFormWidget(
+            self.config.stim,
+            "Stimulation",
+            on_change=self._on_stim_field_changed,
+        )
         self.form_stim_loc = PydanticFormWidget(self.config.stim_location, "Stimulus Location")
         self.form_dfilter = PydanticFormWidget(self.config.dendritic_filter, "Dendritic Filter")
         self.form_preset_modes = PydanticFormWidget(
@@ -352,7 +359,11 @@ class MainWindow(QMainWindow):
         )
         self.form_chan = PydanticFormWidget(self.config.channels, "Ion Channels")
         self.form_calcium = PydanticFormWidget(self.config.calcium, "Calcium Dynamics")
-        self.form_morph = PydanticFormWidget(self.config.morphology, "Morphology")
+        self.form_morph = PydanticFormWidget(
+            self.config.morphology,
+            "Morphology",
+            on_change=self._on_morph_field_changed,
+        )
         self.form_env = PydanticFormWidget(self.config.env, "Environment")
         self.form_ana = PydanticFormWidget(self.config.analysis, "Analysis / Sweep / Map")
 
@@ -434,10 +445,79 @@ class MainWindow(QMainWindow):
                 "Priority: Dual Stim is OFF, so main Stimulation/Stimulus Location fields are active."
             )
 
+        stim_note = ""
+        if self.config.stim.stim_type == "const" and (
+            "interneuron" in p or "hippocampal ca1" in p or "purkinje" in p
+        ):
+            stim_note = (
+                " Const here represents tonic drive proxy (current-clamp style), "
+                "not a single synaptic event; switch stim_type to alpha/AMPA/NMDA for event-like input."
+            )
+
         if hasattr(self, "lbl_params_hint"):
-            self.lbl_params_hint.setText(f"{priority_note}  {mode_note}")
+            self.lbl_params_hint.setText(f"{priority_note}  {mode_note}{stim_note}")
         if hasattr(self, "lbl_dual_priority"):
             self.lbl_dual_priority.setText(priority_note)
+
+    def _sync_stim_type_controls(self):
+        """Show only stimulation parameters relevant for current stim_type."""
+        stype = str(getattr(self.config.stim, "stim_type", "const"))
+        stim_fields = self.form_stim.widgets_map
+        labels = self.form_stim.labels_map
+
+        alpha_like = {"alpha"}
+        synaptic_like = {"AMPA", "NMDA", "GABAA", "GABAB", "Kainate", "Nicotinic"}
+        pulse_like = {"pulse"}
+
+        show_pulse_start = stype in (alpha_like | synaptic_like | pulse_like)
+        show_pulse_dur = stype in pulse_like
+        show_alpha_tau = stype in alpha_like
+
+        visibility = {
+            "pulse_start": show_pulse_start,
+            "pulse_dur": show_pulse_dur,
+            "alpha_tau": show_alpha_tau,
+        }
+        for field_name, is_visible in visibility.items():
+            w = stim_fields.get(field_name)
+            l = labels.get(field_name)
+            if w is not None:
+                w.setVisible(is_visible)
+            if l is not None:
+                l.setVisible(is_visible)
+
+    def _recompute_absolute_iext(self):
+        """Update display-only absolute current from density and current soma size."""
+        d = float(self.config.morphology.d_soma)
+        area = np.pi * d * d
+        self.config.stim.Iext_absolute_nA = float(self.config.stim.Iext) * area * 1000.0
+
+    def _on_morph_field_changed(self, field_name: str, _value):
+        if field_name == "d_soma":
+            self._recompute_absolute_iext()
+            if "Iext_absolute_nA" in self.form_stim.widgets_map:
+                self.form_stim.refresh()
+
+    def _on_stim_field_changed(self, field_name: str, value):
+        if field_name == "stim_type":
+            stype = str(value)
+            syn_map = {
+                "AMPA": "SYN: AMPA-receptor (Fast Excitation, 1-3 ms)",
+                "NMDA": "SYN: NMDA-receptor (Slow Excitation, 50-100 ms)",
+                "GABAA": "SYN: GABA-A receptor (Fast Inhibition, 3-5 ms)",
+                "GABAB": "SYN: GABA-B receptor (Slow Inhibition, 100-300 ms)",
+                "Kainate": "SYN: Kainate-receptor (Intermediate, 10-15 ms)",
+                "Nicotinic": "SYN: Nicotinic ACh (Fast Excitation, 5-10 ms)",
+            }
+            syn_name = syn_map.get(stype)
+            if syn_name is not None:
+                apply_synaptic_stimulus(self.config, syn_name)
+            self._sync_stim_type_controls()
+            self.form_stim.refresh()
+        if field_name in {"Iext", "stim_type"}:
+            self._recompute_absolute_iext()
+            self.form_stim.refresh()
+        self._update_params_hint()
 
     def _sync_dual_stim_into_config(self) -> bool:
         """
@@ -481,6 +561,7 @@ class MainWindow(QMainWindow):
         else:
             self.form_stim.group_box.setTitle("Stimulation")
             self.form_stim_loc.group_box.setTitle("Stimulus Location")
+        self._sync_stim_type_controls()
         self._update_params_hint()
 
     def _sync_preset_mode_controls(self):
@@ -545,6 +626,9 @@ class MainWindow(QMainWindow):
                      self.form_calcium, self.form_stim, self.form_stim_loc,
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
+        self._recompute_absolute_iext()
+        self.form_stim.refresh()
+        self._sync_stim_type_controls()
         self._sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
 
@@ -658,7 +742,7 @@ class MainWindow(QMainWindow):
                 bif = solver.run_bifurcation()
                 self.analytics.update_bifurcation(bif, self.config.analysis.bif_param)
 
-            self.tabs.setCurrentIndex(1)
+            self.tabs.setCurrentWidget(self.oscilloscope)
 
         except Exception as e:
             QMessageBox.critical(self, "Simulation Error", str(e))
@@ -713,7 +797,7 @@ class MainWindow(QMainWindow):
         self.btn_export.setEnabled(True)
         self._lock_ui(False)
         self._status("Stochastic run complete.")
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentWidget(self.oscilloscope)
 
     # ─────────────────────────────────────────────────────────────────
     #  3. SWEEP
@@ -750,7 +834,7 @@ class MainWindow(QMainWindow):
         self.analytics.update_sweep(results, param_name)
         self._lock_ui(False)
         self._status(f"Sweep complete — {len(results)} steps.")
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentWidget(self.analytics)
 
     # ─────────────────────────────────────────────────────────────────
     #  4. S-D CURVE
@@ -784,7 +868,7 @@ class MainWindow(QMainWindow):
             f"S-D done — Rheobase={rh:.2f} µA/cm²  "
             f"Chronaxie={'—' if tc != tc else f'{tc:.2f} ms'}"
         )
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentWidget(self.analytics)
 
     # ─────────────────────────────────────────────────────────────────
     #  5. EXCITABILITY MAP
@@ -818,7 +902,7 @@ class MainWindow(QMainWindow):
         self.analytics.update_excmap(exc)
         self._lock_ui(False)
         self._status("Excitability map complete.")
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentWidget(self.analytics)
 
     # ─────────────────────────────────────────────────────────────────
     #  EXPORT CSV
@@ -907,9 +991,11 @@ extended with multi-compartment morphology, optional ion channels, and advanced 
 <h2 style="color:#A6E3A1;">▶ Quick Start</h2>
 <ol>
   <li>Select a <b>Preset</b> from the dropdown (e.g. <i>Squid Giant Axon</i>).</li>
-  <li>Adjust parameters in the <b>Parameters</b> tab if needed.</li>
+  <li>Adjust parameters in <b>1) Setup</b> (Run Setup / Model Biophysics / Advanced Analysis Tools).</li>
+  <li>If needed, enable and configure secondary stimulation in <b>2) Dual Stim</b>.
+      When Dual Stim is ON, dual primary fields override main stimulation fields.</li>
   <li>Click <b>▶ RUN SIMULATION</b> — results appear in Oscilloscope and Analytics.</li>
-  <li>Explore the Analytics tabs (Passport, Gates, Equilibrium, Phase Plane, Kymograph, Energy…)</li>
+  <li>Inspect traces in <b>3) Oscilloscope</b> and metrics in <b>4) Analytics</b>.</li>
 </ol>
 
 <h2 style="color:#A6E3A1;">🔬 Run Modes</h2>

@@ -230,6 +230,31 @@ Canonical verbatim source: `docs/MASTER_BACKLOG_CONTRACT.md`.
    - non-relevant `K/N/O` mode controls are hidden for non-target presets (not just disabled),
    - Guide updated with explicit notes:
      `F` is single-stage and Dual Stim overrides primary stimulation fields when enabled.
+54. Oscilloscope readability controls added:
+   - view panel now includes plot theme selector, line-width scaling, spike-marker toggle, and soma→terminal delay overlay toggle,
+   - top voltage title now includes soma→terminal delay when available.
+
+55. GUI-only validation directive captured:
+   - for pure GUI edits, default to lightweight validation (`py_compile` + focused smoke),
+   - full preset branch suites are not mandatory after GUI-only changes.
+56. Workflow tab-focus regression fixed:
+   - replaced stale hardcoded `setCurrentIndex(...)` transitions with explicit `setCurrentWidget(...)`,
+   - after run/stochastic, UI now reliably opens Oscilloscope tab,
+   - after sweep/S-D/excitability map, UI now reliably opens Analytics tab.
+57. Built-in Guide alignment with new workflow:
+   - updated Quick Start text to reference `1) Setup` and `2) Dual Stim`,
+   - added explicit note that Dual Stim ON overrides primary stimulation fields,
+   - clarified post-run navigation as `3) Oscilloscope` + `4) Analytics`.
+58. Dual-stim signal hookup noise fixed:
+   - replaced eager `disconnect/connect` cycle with one-time guarded signal connection,
+   - removed startup Qt warning risk during lightweight GUI smoke initialization.
+59. Oscilloscope Monte-Carlo view consistency pass:
+   - plot theme and line-width scaling now apply to MC cloud/mean/band and threshold line too,
+   - verified via lightweight offscreen widget smoke run.
+60. Stimulation-form context sync fix:
+   - stimulation fields are now context-sensitive by `stim_type` (no alpha-only clutter for `const/pulse`),
+   - selecting receptor modes (`AMPA/NMDA/GABAA/GABAB/Kainate/Nicotinic`) now auto-applies corresponding synaptic default parameters in GUI config,
+   - added explicit setup hint clarifying that `const` in selected physiological presets is tonic-drive proxy (not a single synaptic event).
 
 ## Preset Mode Requirements
 

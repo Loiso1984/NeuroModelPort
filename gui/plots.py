@@ -415,10 +415,26 @@ class OscilloscopeWidget(QWidget):
         self._last_result = None
         self._last_mc_results = results_list
         self.clear()
+        theme = PLOT_THEMES.get(self._theme_name, PLOT_THEMES["Default"])
         lw = self._line_width_scale
+
+        def _with_alpha(color_val, alpha):
+            if isinstance(color_val, str):
+                q = QColor(color_val)
+            elif isinstance(color_val, tuple):
+                q = QColor(*color_val[:3])
+            else:
+                q = QColor(180, 180, 180)
+            q.setAlpha(alpha)
+            return q
+
+        cloud_color = _with_alpha(theme["soma"], 40)
+        mean_color = theme["ais"]
+        band_color = _with_alpha(theme["ais"], 110)
+
         for res in results_list:
             self._p_v.plot(res.t, res.v_soma,
-                           pen=pg.mkPen((70, 130, 255, 40), width=1.0 * lw))
+                           pen=pg.mkPen(cloud_color, width=1.0 * lw))
 
         all_v  = np.array([r.v_soma for r in results_list])
         mean_v = np.mean(all_v, axis=0)
@@ -427,22 +443,22 @@ class OscilloscopeWidget(QWidget):
 
         # Mean ± std band
         self._p_v.plot(t, mean_v,
-                       pen=pg.mkPen('#FF5050', width=2.5 * lw), name="Mean V(t)")
+                       pen=pg.mkPen(mean_color, width=2.5 * lw), name="Mean V(t)")
         self._p_v.plot(t, mean_v + std_v,
-                       pen=pg.mkPen((200, 80, 80, 100), width=1.0 * lw,
+                       pen=pg.mkPen(band_color, width=1.0 * lw,
                                     style=Qt.PenStyle.DashLine),
                        name="Mean ± σ")
         self._p_v.plot(t, mean_v - std_v,
-                       pen=pg.mkPen((200, 80, 80, 100), width=1.0 * lw,
+                       pen=pg.mkPen(band_color, width=1.0 * lw,
                                     style=Qt.PenStyle.DashLine))
 
         # Threshold line
         self._p_v.addItem(pg.InfiniteLine(
             pos=_THRESHOLD_MV, angle=0,
-            pen=pg.mkPen(QColor('#F9E2AF'), width=max(1.0, 1.0 * lw),
+            pen=pg.mkPen(QColor(theme["threshold"]), width=max(1.0, 1.0 * lw),
                          style=Qt.PenStyle.DashLine),
             label=f'{_THRESHOLD_MV:+.0f} mV',
-            labelOpts={'position': 0.02, 'color': '#F9E2AF',
+            labelOpts={'position': 0.02, 'color': theme["threshold"],
                        'anchors': [(0, 1), (0, 1)]}
         ))
 
