@@ -61,12 +61,13 @@ def br_Ih(V):
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def as_Ca(V):
-    """ICa activation alpha (Huguenard 1992)"""
+    """ICa activation alpha (Huguenard 1992) - High Threshold L-type"""
     return 1.6 / (1.0 + np.exp(-0.072 * (V - 5.0)))
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def bs_Ca(V):
     """ICa activation beta (Huguenard 1992)"""
+    # dV = V + 8.9 ensures activation starts around -20 to -10 mV
     dV = V + 8.9
     if abs(dV) < 1e-7:
         return 0.1
@@ -74,7 +75,7 @@ def bs_Ca(V):
 
 @vectorize([float64(float64)], nopython=True, cache=True)
 def au_Ca(V):
-    """ICa inactivation alpha (Huguenard 1992)"""
+    """ICa inactivation alpha (Huguenard 1992) - Very slow inactivation"""
     return 0.000457 * np.exp(-(V + 13.0) / 50.0)
 
 @vectorize([float64(float64)], nopython=True, cache=True)
