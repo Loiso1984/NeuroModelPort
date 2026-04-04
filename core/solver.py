@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
-from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity
+from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import rhs_multicompartment, F_CONST, R_GAS
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
@@ -225,7 +225,19 @@ class NeuronSolver:
                 use_dfilter_secondary=use_dfilter_secondary,
             )
         elif jacobian_mode == "analytic_sparse":
-            jacobian_options["jac"] = analytic_sparse_jacobian
+            sparsity = build_jacobian_sparsity(
+                n_comp=n_comp,
+                en_ih=cfg.channels.enable_Ih,
+                en_ica=cfg.channels.enable_ICa,
+                en_ia=cfg.channels.enable_IA,
+                en_sk=cfg.channels.enable_SK,
+                dyn_ca=cfg.calcium.dynamic_Ca,
+                l_indices=morph["L_indices"],
+                l_indptr=morph["L_indptr"],
+                use_dfilter_primary=use_dfilter_primary,
+                use_dfilter_secondary=use_dfilter_secondary,
+            )
+            jacobian_options["jac"] = make_analytic_jacobian(sparsity)
         elif jacobian_mode != "dense_fd":
             raise ValueError(f"Unsupported jacobian_mode={jacobian_mode}")
         
