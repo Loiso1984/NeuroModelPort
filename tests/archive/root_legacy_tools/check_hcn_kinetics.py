@@ -51,3 +51,33 @@ def check_hcn_kinetics():
 
 if __name__ == "__main__":
     check_hcn_kinetics()
+import sys, os
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+import numpy as np
+import matplotlib.pyplot as plt
+from core.kinetics import ar_Ih, br_Ih
+
+def check_hcn_kinetics():
+    V = np.linspace(-120, 20, 200)
+    a = ar_Ih(V)
+    b = br_Ih(V)
+    
+    r_inf = a / (a + b)
+    tau_r = 1.0 / (a + b)
+    
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(V, r_inf)
+    plt.title("HCN r_inf (steady state)")
+    plt.grid(True)
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(V, tau_r)
+    plt.title("HCN tau_r (ms)")
+    plt.grid(True)
+    plt.show()
+
+if __name__ == "__main__":
+    check_hcn_kinetics()
