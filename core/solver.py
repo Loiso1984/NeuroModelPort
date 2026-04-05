@@ -214,8 +214,10 @@ class NeuronSolver:
             cfg.channels.enable_Ih, cfg.channels.enable_ICa,
             cfg.channels.enable_IA, cfg.channels.enable_SK,
             cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa,
+            cfg.channels.enable_IM,
             morph['gNa_v'], morph['gK_v'], morph['gL_v'],
             morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'],
+            morph['gIM_v'],
             cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL,
             cfg.channels.E_Ih, cfg.channels.E_A,
             morph['Cm_v'],
@@ -226,6 +228,7 @@ class NeuronSolver:
             cfg.env.phi_channel(cfg.env.Q10_Ca),
             cfg.env.phi_channel(cfg.env.Q10_IA),
             cfg.env.phi_channel(cfg.env.Q10_TCa),
+            cfg.env.phi_channel(cfg.env.Q10_IM),
             t_kelvin,
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca,
@@ -262,6 +265,7 @@ class NeuronSolver:
                 use_dfilter_primary=use_dfilter_primary,
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
+                en_im=cfg.channels.enable_IM,
             )
         elif jacobian_mode == "analytic_sparse":
             sparsity = build_jacobian_sparsity(
@@ -276,6 +280,7 @@ class NeuronSolver:
                 use_dfilter_primary=use_dfilter_primary,
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
+                en_im=cfg.channels.enable_IM,
             )
             jacobian_options["jac"] = make_analytic_jacobian(sparsity)
         elif jacobian_mode != "dense_fd":
@@ -359,6 +364,11 @@ class NeuronSolver:
                     e_ca = 120.0
             res.currents['ITCa'] = morph['gTCa_v'][0] * (p_t[0, :] ** 2) * q_t[0, :] * (v[0, :] - e_ca)
             cursor += 2 * n
+
+        if cfg.channels.enable_IM:
+            w_m = y[cursor:cursor + n, :]
+            res.currents['IM'] = morph['gIM_v'][0] * w_m[0, :] * (v[0, :] - cfg.channels.EK)
+            cursor += n
 
         if cfg.channels.enable_SK and res.ca_i is not None:
             z_act = z_inf_SK(res.ca_i[0, :])

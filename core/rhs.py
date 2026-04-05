@@ -87,14 +87,14 @@ def get_stim_current(t, stype, iext, t0, td, atau):
 def rhs_multicompartment(
     t, y, n_comp,
     # Флаги включения каналов
-    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca,
+    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
     # Векторы проводимостей (уже с учетом AIS-множителей)
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v,
+    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v,
     # Потенциалы реверсии
     ena, ek, el, eih, ea,
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
-    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca,
+    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im,
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, stim_comp, stim_mode,
@@ -139,6 +139,10 @@ def rhs_multicompartment(
         off_p = cursor
         cursor += n_comp
         off_q = cursor
+        cursor += n_comp
+    off_w = cursor   # M-type K activation
+    if en_im:
+        off_w = cursor
         cursor += n_comp
     off_ca = cursor
     if dyn_ca:
@@ -247,6 +251,11 @@ def rhs_multicompartment(
             z_act = z_inf_SK(ca_sk)
             i_ion += gsk_v[i] * z_act * (vi - ek)
 
+        # M-type K (slow non-inactivating, KCNQ2/3)
+        if en_im:
+            wi = y[off_w + i]
+            i_ion += gim_v[i] * wi * (vi - ek)
+
         # Axial coupling (sparse Laplacian row i)
         i_ax = 0.0
         for j_idx in range(l_indptr[i], l_indptr[i + 1]):
@@ -283,6 +292,10 @@ def rhs_multicompartment(
             qi = y[off_q + i]
             dydt[off_p + i] = phi_tca * (am_TCa(vi) * (1.0 - pi) - bm_TCa(vi) * pi)
             dydt[off_q + i] = phi_tca * (ah_TCa(vi) * (1.0 - qi) - bh_TCa(vi) * qi)
+
+        if en_im:
+            wi = y[off_w + i]
+            dydt[off_w + i] = phi_im * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
 
         # Calcium dynamics
         if dyn_ca:

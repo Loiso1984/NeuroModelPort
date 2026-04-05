@@ -80,6 +80,12 @@ class ChannelRegistry:
             ]
         ))
 
+        # 9. I_M (M-type K+, KCNQ2/3 — Yamada, Koch & Adams 1989)
+        self.channels.append(Channel(
+            name="IM", color=(0.0, 0.8, 0.4),
+            gates=[GateInfo('w', 1, aw_IM, bw_IM)]   # single activation, non-inactivating
+        ))
+
     def compute_initial_states(self, V0: float, config) -> np.ndarray:
         """
         Вычисляет стационарные значения всех гейтов при потенциале V0.
@@ -116,6 +122,10 @@ class ChannelRegistry:
             for alpha, beta in [(am_TCa, bm_TCa), (ah_TCa, bh_TCa)]:
                 a_val, b_val = alpha(V0), beta(V0)
                 y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        if config.channels.enable_IM:
+            a_val, b_val = aw_IM(V0), bw_IM(V0)
+            y0_list.append(np.full(N, a_val / (a_val + b_val)))
 
         # Динамика кальция
         if config.calcium.dynamic_Ca:

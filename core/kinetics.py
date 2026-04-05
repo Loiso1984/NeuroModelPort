@@ -176,3 +176,33 @@ def bh_TCa(V):
     else:
         tau_h = 28.0 + np.exp(-(Vs + 22.0) / 10.5)
     return (1.0 - h_inf) / tau_h
+
+
+# =====================================================================
+# I_M — M-type Potassium Current (KCNQ2/3, Kv7)
+# Yamada, Koch & Adams 1989 (Methods in Neuronal Modeling, Koch & Segev,
+# MIT Press, pp 97-133).  Single activation gate 'w', non-inactivating.
+# V½ = −35 mV, slope k = 10 mV.
+# τ_w given by 1/(α+β) with cosh-based denominator; τ_w(V½) ≈ 151 ms.
+# Reference temperature: ~23 °C.  Q10 ≈ 2.5 (Pan et al. 2006, J Physiol
+# 576:215-228 for KCNQ2/3 channels).
+# Reversal: E_K (same as delayed-rectifier K⁺).
+# =====================================================================
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def aw_IM(V):
+    """I_M activation alpha (Yamada, Koch & Adams 1989). V½ ≈ -35 mV."""
+    x = (V + 35.0) / 20.0
+    # cosh-based tau: tau_w = 1000 / (3.3 * 2 * cosh(x))
+    # alpha = w_inf / tau_w
+    w_inf = 1.0 / (1.0 + np.exp(-(V + 35.0) / 10.0))
+    tau_w = 1000.0 / (3.3 * (np.exp(x) + np.exp(-x)))
+    return w_inf / tau_w
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def bw_IM(V):
+    """I_M activation beta (Yamada, Koch & Adams 1989)."""
+    x = (V + 35.0) / 20.0
+    w_inf = 1.0 / (1.0 + np.exp(-(V + 35.0) / 10.0))
+    tau_w = 1000.0 / (3.3 * (np.exp(x) + np.exp(-x)))
+    return (1.0 - w_inf) / tau_w
