@@ -17,10 +17,11 @@ Architecture:
 """
 
 import numpy as np
-from typing import Tuple
+from typing import Tuple, TYPE_CHECKING
 from numba import njit, float64
 
-from .models import FullModelConfig
+if TYPE_CHECKING:
+    from .models import FullModelConfig
 
 
 class DualStimulationConfig:
@@ -232,6 +233,7 @@ def distributed_stimulus_current_for_comp(
     stim_mode: int,
     use_dfilter: int,
     dfilter_attenuation: float,
+    dfilter_tau_ms: float,
     v_filtered: float,
 ) -> float:
     """Return stimulus contribution for a single compartment without temp vectors.
@@ -249,7 +251,8 @@ def distributed_stimulus_current_for_comp(
     if stim_mode == 2:
         if comp_idx != 0:
             return 0.0
-        if use_dfilter == 1:
+        # tau <= 0 means filter is effectively disabled (pure attenuation path).
+        if use_dfilter == 1 and dfilter_tau_ms > 0.0:
             return v_filtered
         return dfilter_attenuation * base_current
     return base_current if (0 <= stim_comp < n_comp and comp_idx == stim_comp) else 0.0
@@ -388,7 +391,7 @@ def create_dual_stimulation_preset() -> DualStimulationConfig:
     return config
 
 
-def create_dual_stimulation_config_from_full(config: FullModelConfig) -> DualStimulationConfig:
+def create_dual_stimulation_config_from_full(config: "FullModelConfig") -> DualStimulationConfig:
     """
     Convert FullModelConfig to DualStimulationConfig for backward compatibility.
     """
