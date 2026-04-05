@@ -33,9 +33,11 @@ ACTIVE_TESTS = [
     "tests/branches/test_gui_fullscreen_analytics_branch.py",
     "tests/branches/test_gui_fullscreen_topology_branch.py",
     "tests/branches/test_gui_readability_controls_branch.py",
+    "tests/branches/test_gui_window_geometry_branch.py",
     "tests/branches/test_passport_ml_classification_branch.py",
     "tests/branches/test_pathology_mode_sweep_branch.py",
     "tests/branches/test_solver_validation_branch.py",
+    "tests/branches/test_impedance_zap_branch.py",
 ]
 
 

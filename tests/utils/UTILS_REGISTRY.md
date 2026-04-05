@@ -16,6 +16,9 @@ This registry separates active deterministic validators from legacy/compatibilit
 - `run_dual_stim_extended_report.py`
 - `hypoxia_deterministic_search.py`
 - `benchmark_jacobian_modes.py`
+- `run_impedance_zap_report.py`
+  - supports strict gate mode (`--strict`) and configurable analysis band (`--fmin/--fmax`).
+  - emits `guard_reasons` (per row) and `failed_case_ids` (artifact-level) for triage.
 
 ## Legacy / Compatibility Utilities
 
