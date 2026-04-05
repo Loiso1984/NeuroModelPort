@@ -87,14 +87,14 @@ def get_stim_current(t, stype, iext, t0, td, atau):
 def rhs_multicompartment(
     t, y, n_comp,
     # Флаги включения каналов
-    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
+    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
     # Векторы проводимостей (уже с учетом AIS-множителей)
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v,
+    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
     # Потенциалы реверсии
     ena, ek, el, eih, ea,
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
-    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im,
+    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, stim_comp, stim_mode,
@@ -143,6 +143,17 @@ def rhs_multicompartment(
     off_w = cursor   # M-type K activation
     if en_im:
         off_w = cursor
+        cursor += n_comp
+    off_x = cursor   # Persistent Na activation
+    if en_nap:
+        off_x = cursor
+        cursor += n_comp
+    off_y = cursor   # Resurgent Na activation
+    off_j = cursor   # Resurgent Na inactivation/block
+    if en_nar:
+        off_y = cursor
+        cursor += n_comp
+        off_j = cursor
         cursor += n_comp
     off_ca = cursor
     if dyn_ca:
@@ -256,6 +267,17 @@ def rhs_multicompartment(
             wi = y[off_w + i]
             i_ion += gim_v[i] * wi * (vi - ek)
 
+        # Persistent Na (subthreshold, non-inactivating)
+        if en_nap:
+            xi = y[off_x + i]
+            i_ion += gnap_v[i] * xi * (vi - ena)
+
+        # Resurgent Na (repolarization-activated window current)
+        if en_nar:
+            yi = y[off_y + i]
+            ji = y[off_j + i]
+            i_ion += gnar_v[i] * yi * ji * (vi - ena)
+
         # Axial coupling (sparse Laplacian row i)
         i_ax = 0.0
         for j_idx in range(l_indptr[i], l_indptr[i + 1]):
@@ -296,6 +318,16 @@ def rhs_multicompartment(
         if en_im:
             wi = y[off_w + i]
             dydt[off_w + i] = phi_im * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
+
+        if en_nap:
+            xi = y[off_x + i]
+            dydt[off_x + i] = phi_nap * (ax_NaP(vi) * (1.0 - xi) - bx_NaP(vi) * xi)
+
+        if en_nar:
+            yi = y[off_y + i]
+            ji = y[off_j + i]
+            dydt[off_y + i] = phi_nar * (ay_NaR(vi) * (1.0 - yi) - by_NaR(vi) * yi)
+            dydt[off_j + i] = phi_nar * (aj_NaR(vi) * (1.0 - ji) - bj_NaR(vi) * ji)
 
         # Calcium dynamics
         if dyn_ca:

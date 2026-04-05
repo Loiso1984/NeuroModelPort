@@ -68,6 +68,12 @@ class ChannelParams(BaseModel):
     enable_IM: bool  = Field(default=False, description="Enable M-type K⁺ current (KCNQ2/3, muscarinic-sensitive)")
     gIM_max:   float = Field(default=0.5,   description="Max M-type K conductance (mS/cm², Yamada 1989)")
 
+    enable_NaP: bool  = Field(default=False, description="Enable persistent Na⁺ current (subthreshold, non-inactivating)")
+    gNaP_max:   float = Field(default=0.1,   description="Max persistent Na conductance (mS/cm², Magistretti 1999)")
+
+    enable_NaR: bool  = Field(default=False, description="Enable resurgent Na⁺ current (repolarization-activated, Raman-Bean)")
+    gNaR_max:   float = Field(default=0.2,   description="Max resurgent Na conductance (mS/cm², Raman & Bean 2001)")
+
 
 class CalciumParams(BaseModel):
     """Intracellular calcium dynamics."""
@@ -99,6 +105,10 @@ class EnvironmentParams(BaseModel):
     Q10_TCa:   float = Field(default=3.9,              description="Q10 for T-type Ca channel (m,h gates)")
     # M-type K (KCNQ2/3): Pan et al. 2006, J Physiol 576:215 (Q10 ~ 2.5)
     Q10_IM:    float = Field(default=2.5,              description="Q10 for M-type K channel (w gate)")
+    # Persistent Na: same family as transient Na (Q10 ~ 2.2)
+    Q10_NaP:   float = Field(default=2.2,              description="Q10 for persistent Na channel (x gate)")
+    # Resurgent Na: Raman & Bean 2001 — same Na channel family (Q10 ~ 2.2)
+    Q10_NaR:   float = Field(default=2.2,              description="Q10 for resurgent Na channel (y,j gates)")
 
     @property
     def phi(self) -> float:

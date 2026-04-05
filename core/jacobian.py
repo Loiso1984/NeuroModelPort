@@ -8,6 +8,7 @@ from .kinetics import (
     ab_IA,
     ah,
     ah_TCa,
+    aj_NaR,
     am,
     am_TCa,
     an,
@@ -15,10 +16,13 @@ from .kinetics import (
     as_Ca,
     au_Ca,
     aw_IM,
+    ax_NaP,
+    ay_NaR,
     ba_IA,
     bb_IA,
     bh,
     bh_TCa,
+    bj_NaR,
     bm,
     bm_TCa,
     bn,
@@ -26,6 +30,8 @@ from .kinetics import (
     bs_Ca,
     bu_Ca,
     bw_IM,
+    bx_NaP,
+    by_NaR,
 )
 from .rhs import F_CONST, R_GAS
 
@@ -40,6 +46,8 @@ def _state_slices(
     use_dfilter_secondary: int,
     en_itca: bool = False,
     en_im: bool = False,
+    en_nap: bool = False,
+    en_nar: bool = False,
 ) -> tuple[dict[str, slice | int | None], int]:
     cursor = 0
     out: dict[str, slice | int | None] = {}
@@ -86,6 +94,19 @@ def _state_slices(
         out["w"] = slice(cursor, cursor + n_comp)
         cursor += n_comp
 
+    out["x"] = None  # Persistent Na activation
+    if en_nap:
+        out["x"] = slice(cursor, cursor + n_comp)
+        cursor += n_comp
+
+    out["y_nr"] = None  # Resurgent Na activation
+    out["j_nr"] = None  # Resurgent Na inactivation/block
+    if en_nar:
+        out["y_nr"] = slice(cursor, cursor + n_comp)
+        cursor += n_comp
+        out["j_nr"] = slice(cursor, cursor + n_comp)
+        cursor += n_comp
+
     out["ca"] = None
     if dyn_ca:
         out["ca"] = slice(cursor, cursor + n_comp)
@@ -121,10 +142,12 @@ def build_jacobian_sparsity(
     use_dfilter_secondary: int,
     en_itca: bool = False,
     en_im: bool = False,
+    en_nap: bool = False,
+    en_nar: bool = False,
 ) -> csr_matrix:
     idx, n_state = _state_slices(
         n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter_primary, use_dfilter_secondary,
-        en_itca=en_itca, en_im=en_im,
+        en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
     )
     sp = lil_matrix((n_state, n_state), dtype=float)
 
@@ -140,6 +163,9 @@ def build_jacobian_sparsity(
     p_slice = idx["p"]
     q_slice = idx["q"]
     w_slice = idx["w"]
+    x_slice = idx["x"]
+    y_nr_slice = idx["y_nr"]
+    j_nr_slice = idx["j_nr"]
     ca_slice = idx["ca"]
     dfilter_primary_idx = idx["dfilter_primary"]
     dfilter_secondary_idx = idx["dfilter_secondary"]
@@ -168,6 +194,11 @@ def build_jacobian_sparsity(
             sp[v_row, q_slice.start + i] = 1.0
         if w_slice is not None:
             sp[v_row, w_slice.start + i] = 1.0
+        if x_slice is not None:
+            sp[v_row, x_slice.start + i] = 1.0
+        if y_nr_slice is not None:
+            sp[v_row, y_nr_slice.start + i] = 1.0
+            sp[v_row, j_nr_slice.start + i] = 1.0
         if ca_slice is not None and (en_ica or en_sk or en_itca):
             sp[v_row, ca_slice.start + i] = 1.0
 
@@ -221,6 +252,19 @@ def build_jacobian_sparsity(
             sp[w_row, v_row] = 1.0
             sp[w_row, w_row] = 1.0
 
+        if x_slice is not None:
+            x_row = x_slice.start + i
+            sp[x_row, v_row] = 1.0
+            sp[x_row, x_row] = 1.0
+
+        if y_nr_slice is not None:
+            y_row = y_nr_slice.start + i
+            j_row = j_nr_slice.start + i
+            sp[y_row, v_row] = 1.0
+            sp[y_row, y_row] = 1.0
+            sp[j_row, v_row] = 1.0
+            sp[j_row, j_row] = 1.0
+
         if ca_slice is not None:
             ca_row = ca_slice.start + i
             sp[ca_row, ca_row] = 1.0
@@ -271,11 +315,11 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
     def jac_fn(
         t, y, n_comp,
-        en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
-        gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v,
+        en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
+        gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
         ena, ek, el, eih, ea,
         cm_v, l_data, l_indices, l_indptr,
-        phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im,
+        phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
         t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
         stype, iext, t0, td, atau, stim_comp, stim_mode,
         use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
@@ -288,7 +332,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
         idx, n_state = _state_slices(
             n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter_primary, use_dfilter_secondary,
-            en_itca=en_itca, en_im=en_im,
+            en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
         )
 
         v = y[idx["v"]]
@@ -301,6 +345,9 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         a = y[idx["a"]] if idx["a"] is not None else np.zeros(n_comp)
         b = y[idx["b"]] if idx["b"] is not None else np.zeros(n_comp)
         w_g = y[idx["w"]] if idx["w"] is not None else np.zeros(n_comp)
+        x_g = y[idx["x"]] if idx["x"] is not None else np.zeros(n_comp)
+        y_nr = y[idx["y_nr"]] if idx["y_nr"] is not None else np.zeros(n_comp)
+        j_nr = y[idx["j_nr"]] if idx["j_nr"] is not None else np.zeros(n_comp)
         ca_i = y[idx["ca"]] if idx["ca"] is not None else np.full(n_comp, ca_rest)
 
         k_nernst = (R_GAS * t_kelvin / (2.0 * F_CONST)) * 1000.0
@@ -335,6 +382,14 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         if en_im:
             awm_v = aw_IM(v);  bwm_v = bw_IM(v)
             dawm_v = _rate_derivative(aw_IM, v); dbwm_v = _rate_derivative(bw_IM, v)
+        if en_nap:
+            axp_v = ax_NaP(v);  bxp_v = bx_NaP(v)
+            daxp_v = _rate_derivative(ax_NaP, v); dbxp_v = _rate_derivative(bx_NaP, v)
+        if en_nar:
+            ayr_v = ay_NaR(v);  byr_v = by_NaR(v)
+            ajr_v = aj_NaR(v);  bjr_v = bj_NaR(v)
+            dayr_v = _rate_derivative(ay_NaR, v); dbyr_v = _rate_derivative(by_NaR, v)
+            dajr_v = _rate_derivative(aj_NaR, v); dbjr_v = _rate_derivative(bj_NaR, v)
 
         for i in range(n_comp):
             v_row = idx["v"].start + i
@@ -418,6 +473,15 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 d_iion_dv += gim_v[i] * w_g[i]
                 _add(v_row, idx["w"].start + i, -(gim_v[i] * (v[i] - ek)) / cm)
 
+            if en_nap and idx["x"] is not None:
+                d_iion_dv += gnap_v[i] * x_g[i]
+                _add(v_row, idx["x"].start + i, -(gnap_v[i] * (v[i] - ena)) / cm)
+
+            if en_nar and idx["y_nr"] is not None:
+                d_iion_dv += gnar_v[i] * y_nr[i] * j_nr[i]
+                _add(v_row, idx["y_nr"].start + i, -(gnar_v[i] * j_nr[i] * (v[i] - ena)) / cm)
+                _add(v_row, idx["j_nr"].start + i, -(gnar_v[i] * y_nr[i] * (v[i] - ena)) / cm)
+
             _add(v_row, idx["v"].start + i, -d_iion_dv / cm)
             _add(v_row, idx["m"].start + i, -d_iion_dm / cm)
             _add(v_row, idx["h"].start + i, -d_iion_dh / cm)
@@ -476,6 +540,19 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 _set(w_row, v_col, phi_im * (dawm_v[i] * (1.0 - w_g[i]) - dbwm_v[i] * w_g[i]))
                 _set(w_row, w_row, -phi_im * (awm_v[i] + bwm_v[i]))
 
+            if en_nap and idx["x"] is not None:
+                x_row = idx["x"].start + i
+                _set(x_row, v_col, phi_nap * (daxp_v[i] * (1.0 - x_g[i]) - dbxp_v[i] * x_g[i]))
+                _set(x_row, x_row, -phi_nap * (axp_v[i] + bxp_v[i]))
+
+            if en_nar and idx["y_nr"] is not None:
+                y_row = idx["y_nr"].start + i
+                j_row = idx["j_nr"].start + i
+                _set(y_row, v_col, phi_nar * (dayr_v[i] * (1.0 - y_nr[i]) - dbyr_v[i] * y_nr[i]))
+                _set(y_row, y_row, -phi_nar * (ayr_v[i] + byr_v[i]))
+                _set(j_row, v_col, phi_nar * (dajr_v[i] * (1.0 - j_nr[i]) - dbjr_v[i] * j_nr[i]))
+                _set(j_row, j_row, -phi_nar * (ajr_v[i] + bjr_v[i]))
+
             if dyn_ca and idx["ca"] is not None:
                 ca_row = idx["ca"].start + i
                 d_dca = -1.0 / tau_ca
@@ -507,18 +584,19 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 def analytic_sparse_jacobian(*args, **kwargs):
     """Fallback: creates lil_matrix each call. Use make_analytic_jacobian instead."""
     # Extract enough args to build slices
-    (t, y, n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im) = args[:10]
-    use_dfp = args[40] if len(args) > 40 else 0
-    use_dfs = args[51] if len(args) > 51 else 0
+    (t, y, n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
+     en_nap, en_nar) = args[:12]
+    use_dfp = args[44] if len(args) > 44 else 0
+    use_dfs = args[55] if len(args) > 55 else 0
     idx, n_state = _state_slices(
         n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfp, use_dfs,
-        en_itca=en_itca, en_im=en_im,
+        en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
     )
     sp = build_jacobian_sparsity(
         n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca,
-        args[25], args[26],  # l_indices, l_indptr
+        args[29], args[30],  # l_indices, l_indptr
         use_dfp, use_dfs,
-        en_itca=en_itca, en_im=en_im,
+        en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
     )
     fn = make_analytic_jacobian(sp)
     return fn(*args)

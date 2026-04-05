@@ -206,3 +206,82 @@ def bw_IM(V):
     w_inf = 1.0 / (1.0 + np.exp(-(V + 35.0) / 10.0))
     tau_w = 1000.0 / (3.3 * (np.exp(x) + np.exp(-x)))
     return (1.0 - w_inf) / tau_w
+
+
+# =====================================================================
+# I_NaP — Persistent Sodium Current (non-inactivating)
+# Magistretti & Alonso 1999 (J Gen Physiol 114:491-509); Pospischil
+# et al. 2008 (Biol Cybern 99:427-441).
+# Single activation gate 'x', power 1.  No inactivation.
+# V½ = −52 mV, k = 5 mV.  Very fast kinetics (τ ≈ 0.3 ms at V½).
+# Reference temperature: ~23 °C.  Q10 ≈ 2.2 (same family as Na).
+# Reversal: E_Na.
+# Default g_NaP ≈ 0.1 mS/cm² (cortical pyramidal, Pospischil 2008).
+# =====================================================================
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def ax_NaP(V):
+    """I_NaP activation alpha (Magistretti & Alonso 1999). V½ ≈ -52 mV."""
+    x_inf = 1.0 / (1.0 + np.exp(-(V + 52.0) / 5.0))
+    c = (V + 52.0) / 15.0
+    tau_x = 0.15 + 1.0 / (3.3 * (np.exp(c) + np.exp(-c)))
+    return x_inf / tau_x
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def bx_NaP(V):
+    """I_NaP activation beta (Magistretti & Alonso 1999)."""
+    x_inf = 1.0 / (1.0 + np.exp(-(V + 52.0) / 5.0))
+    c = (V + 52.0) / 15.0
+    tau_x = 0.15 + 1.0 / (3.3 * (np.exp(c) + np.exp(-c)))
+    return (1.0 - x_inf) / tau_x
+
+
+# =====================================================================
+# I_NaR — Resurgent Sodium Current (phenomenological HH adaptation)
+# Based on Raman & Bean 2001 (Biophys J 80:729-737).
+# Full resurgent Na requires a Markov blocking-particle model; this is
+# a simplified two-gate HH approximation capturing the essential
+# behavior: window current that peaks ~-40 mV during spike repolarization.
+#
+# Gate 'y' (activation):  V½ = −48 mV, k = 6 mV, τ ~ 3 ms at V½
+# Gate 'j' (inactivation/block): V½ = −33 mV, k = 4 mV, τ ~ 18 ms
+# Resurgent dynamics: during the spike falling phase, y remains high
+# (fast activation) while j slowly recovers from block, producing a
+# transient inward current burst.
+#
+# Reference temperature: ~23 °C.  Q10 ≈ 2.2.
+# Reversal: E_Na.
+# Default g_NaR ≈ 0.2 mS/cm² (Purkinje/FS interneurons).
+# =====================================================================
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def ay_NaR(V):
+    """I_NaR activation alpha (Raman & Bean 2001 adaptation). V½ ≈ -48 mV."""
+    y_inf = 1.0 / (1.0 + np.exp(-(V + 48.0) / 6.0))
+    c = (V + 48.0) / 15.0
+    tau_y = 0.5 + 2.5 / (np.exp(c) + np.exp(-c))
+    return y_inf / tau_y
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def by_NaR(V):
+    """I_NaR activation beta."""
+    y_inf = 1.0 / (1.0 + np.exp(-(V + 48.0) / 6.0))
+    c = (V + 48.0) / 15.0
+    tau_y = 0.5 + 2.5 / (np.exp(c) + np.exp(-c))
+    return (1.0 - y_inf) / tau_y
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def aj_NaR(V):
+    """I_NaR inactivation/block alpha (steep). V½ ≈ -33 mV."""
+    j_inf = 1.0 / (1.0 + np.exp((V + 33.0) / 4.0))
+    c = (V + 33.0) / 10.0
+    tau_j = 3.0 + 15.0 / (np.exp(c) + np.exp(-c))
+    return j_inf / tau_j
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def bj_NaR(V):
+    """I_NaR inactivation/block beta."""
+    j_inf = 1.0 / (1.0 + np.exp((V + 33.0) / 4.0))
+    c = (V + 33.0) / 10.0
+    tau_j = 3.0 + 15.0 / (np.exp(c) + np.exp(-c))
+    return (1.0 - j_inf) / tau_j

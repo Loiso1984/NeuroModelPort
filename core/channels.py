@@ -86,6 +86,21 @@ class ChannelRegistry:
             gates=[GateInfo('w', 1, aw_IM, bw_IM)]   # single activation, non-inactivating
         ))
 
+        # 10. I_NaP (Persistent Na+ — Magistretti & Alonso 1999)
+        self.channels.append(Channel(
+            name="NaP", color=(1.0, 0.4, 0.4),
+            gates=[GateInfo('x', 1, ax_NaP, bx_NaP)]  # single activation, no inactivation
+        ))
+
+        # 11. I_NaR (Resurgent Na+ — Raman & Bean 2001, phenomenological)
+        self.channels.append(Channel(
+            name="NaR", color=(0.8, 0.2, 0.6),
+            gates=[
+                GateInfo('y', 1, ay_NaR, by_NaR),   # activation
+                GateInfo('j', 1, aj_NaR, bj_NaR)    # inactivation/block
+            ]
+        ))
+
     def compute_initial_states(self, V0: float, config) -> np.ndarray:
         """
         Вычисляет стационарные значения всех гейтов при потенциале V0.
@@ -126,6 +141,15 @@ class ChannelRegistry:
         if config.channels.enable_IM:
             a_val, b_val = aw_IM(V0), bw_IM(V0)
             y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        if config.channels.enable_NaP:
+            a_val, b_val = ax_NaP(V0), bx_NaP(V0)
+            y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        if config.channels.enable_NaR:
+            for alpha, beta in [(ay_NaR, by_NaR), (aj_NaR, bj_NaR)]:
+                a_val, b_val = alpha(V0), beta(V0)
+                y0_list.append(np.full(N, a_val / (a_val + b_val)))
 
         # Динамика кальция
         if config.calcium.dynamic_Ca:

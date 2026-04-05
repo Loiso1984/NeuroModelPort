@@ -214,10 +214,10 @@ class NeuronSolver:
             cfg.channels.enable_Ih, cfg.channels.enable_ICa,
             cfg.channels.enable_IA, cfg.channels.enable_SK,
             cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa,
-            cfg.channels.enable_IM,
+            cfg.channels.enable_IM, cfg.channels.enable_NaP, cfg.channels.enable_NaR,
             morph['gNa_v'], morph['gK_v'], morph['gL_v'],
             morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'],
-            morph['gIM_v'],
+            morph['gIM_v'], morph['gNaP_v'], morph['gNaR_v'],
             cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL,
             cfg.channels.E_Ih, cfg.channels.E_A,
             morph['Cm_v'],
@@ -229,6 +229,8 @@ class NeuronSolver:
             cfg.env.phi_channel(cfg.env.Q10_IA),
             cfg.env.phi_channel(cfg.env.Q10_TCa),
             cfg.env.phi_channel(cfg.env.Q10_IM),
+            cfg.env.phi_channel(cfg.env.Q10_NaP),
+            cfg.env.phi_channel(cfg.env.Q10_NaR),
             t_kelvin,
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca,
@@ -266,6 +268,8 @@ class NeuronSolver:
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
                 en_im=cfg.channels.enable_IM,
+                en_nap=cfg.channels.enable_NaP,
+                en_nar=cfg.channels.enable_NaR,
             )
         elif jacobian_mode == "analytic_sparse":
             sparsity = build_jacobian_sparsity(
@@ -281,6 +285,8 @@ class NeuronSolver:
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
                 en_im=cfg.channels.enable_IM,
+                en_nap=cfg.channels.enable_NaP,
+                en_nar=cfg.channels.enable_NaR,
             )
             jacobian_options["jac"] = make_analytic_jacobian(sparsity)
         elif jacobian_mode != "dense_fd":
@@ -369,6 +375,17 @@ class NeuronSolver:
             w_m = y[cursor:cursor + n, :]
             res.currents['IM'] = morph['gIM_v'][0] * w_m[0, :] * (v[0, :] - cfg.channels.EK)
             cursor += n
+
+        if cfg.channels.enable_NaP:
+            x_p = y[cursor:cursor + n, :]
+            res.currents['NaP'] = morph['gNaP_v'][0] * x_p[0, :] * (v[0, :] - cfg.channels.ENa)
+            cursor += n
+
+        if cfg.channels.enable_NaR:
+            y_r = y[cursor:cursor + n, :]
+            j_r = y[cursor + n:cursor + 2*n, :]
+            res.currents['NaR'] = morph['gNaR_v'][0] * y_r[0, :] * j_r[0, :] * (v[0, :] - cfg.channels.ENa)
+            cursor += 2 * n
 
         if cfg.channels.enable_SK and res.ca_i is not None:
             z_act = z_inf_SK(res.ca_i[0, :])
