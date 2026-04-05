@@ -42,7 +42,7 @@ def get_preset_names():
         "I: In Vitro Slice (Mammalian 23°C)",
         "J: C-Fiber (Pain / Unmyelinated)",
         "K: Thalamic Relay (Ih + IT + Burst)",
-        "L: Hippocampal CA1 (Theta rhythm)",
+        "L: Hippocampal CA1 Pyramidal (Adapting)",
         "M: Epilepsy (v10 SCN1A mutation)",
         "N: Alzheimer's (v10 Calcium Toxicity)",
         "O: Hypoxia (v10 ATP-pump failure)",
@@ -399,30 +399,34 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.alpha_tau = 1.0
         cfg.stim.Iext = 300.0
 
-    # --- 12. ГИППОКАМП CA1 (THETA RHYTHM - Ih PACEMAKER) ---
+    # --- 12. ГИППОКАМП CA1 (АДАПТИВНЫЙ ПИРАМИДНЫЙ) ---
     elif "Hippocampal CA1" in name:
-        # Single-compartment CA1 preset for stable baseline validation of
-        # intrinsic theta-related conductances in this reduced model.
+        # CA1 pyramidal neuron: regular-spiking adapting type.
+        # Theta rhythm (4-12 Hz) is a NETWORK phenomenon driven by medial
+        # septum input, not an intrinsic single-cell property.
+        # Reference: Magee 1998, J Neurosci 18:7613; Storm 1990, J Physiol 421:529
         cfg.morphology.single_comp = True
-        cfg.stim_location.location = "dendritic_filtered"
-        # gNa=100 for proper spike amplitude through dendritic filter
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 100.0, 8.0, 0.03
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 56.0, 8.0, 0.03
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -85.0, -68.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
+        # Ih: provides subthreshold resonance in theta band (Magee 1998)
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.02
+        # IA: physiological density for spike-frequency adaptation
+        # (Storm 1990: gA ~0.3-0.5 mS/cm² somatic; NOT the unphysiological 10.0)
         cfg.channels.enable_IA = True
-        cfg.channels.gA_max = 0.8  # IA tuned for intrinsic theta-band pacing
+        cfg.channels.gA_max = 0.4
         cfg.channels.enable_SK = False
         cfg.channels.enable_ICa = False
-        cfg.channels.gCa_max = 0.0
         cfg.calcium.dynamic_Ca = False
         cfg.morphology.d_soma = 20e-4
-        # Validated: const 15 µA/cm² through dend filter → ~21 spikes, 141 Hz, Vmax ≈ 42 mV
-        # Theta rhythm (4-12 Hz) requires network oscillatory input; const stim shows tonic mode
+        # Tonic const stimulus shows adapting regular-spiking pattern.
+        # For theta-band output, use alpha-train stimulation at 6 Hz externally.
         cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 2.0
-        cfg.stim.Iext = 3.0
+        cfg.stim.Iext = 5.0
 
     # --- 13. АНЕСТЕЗИЯ (ЛИДОКАИН) ---
     elif "Anesthesia" in name:
