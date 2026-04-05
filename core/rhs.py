@@ -27,8 +27,8 @@ def _biexp_waveform(t, t0, tau_rise, tau_decay):
     norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
     return (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
 
-@njit(float64(float64, int32, float64, float64, float64, float64), cache=True)
-def get_stim_current(t, stype, iext, t0, td, atau):
+@njit(float64(float64, int32, float64, float64, float64, float64, float64, float64), cache=True)
+def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     """Stimulus waveform for all types.
 
     For synaptic types (stype >= 4): returns CONDUCTANCE waveform g(t)
@@ -54,6 +54,13 @@ def get_stim_current(t, stype, iext, t0, td, atau):
         return abs(iext) * _biexp_waveform(t, t0, 1.5, 12.0)
     elif stype == 9:  # Nicotinic ACh (conductance-based)
         return abs(iext) * _biexp_waveform(t, t0, 3.0, 25.0)
+    elif stype == 10:  # ZAP/Chirp current (frequency sweep)
+        if td <= 0.0 or t < t0 or t > (t0 + td):
+            return 0.0
+        dt = t - t0  # ms
+        k_hz_per_ms = (zap_f1_hz - zap_f0_hz) / td
+        phase = 2.0 * np.pi * ((zap_f0_hz * dt / 1000.0) + 0.5 * (k_hz_per_ms * dt * dt / 1000.0))
+        return iext * np.sin(phase)
     # Default: const (stype == 0)
     return iext
 
@@ -119,11 +126,11 @@ def rhs_multicompartment(
     phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
     # Стимуляция (primary)
-    stype, iext, t0, td, atau, event_times_arr, n_events, stim_comp, stim_mode,
+    stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
     use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
     # Dual stimulation (secondary) - optional
     dual_stim_enabled,
-    stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
+    stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, stim_comp_2, stim_mode_2,
     use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2
 ):
     """
@@ -203,7 +210,7 @@ def rhs_multicompartment(
     if n_events > 0 and is_conductance_based:
         base_current = get_event_driven_conductance(t, stype, iext, event_times_arr, n_events)
     else:
-        base_current = get_stim_current(t, stype, iext, t0, td, atau)
+        base_current = get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz)
     e_syn = _get_syn_reversal(stype) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
@@ -232,7 +239,7 @@ def rhs_multicompartment(
         is_cond_2 = (stype_2 >= 4)
         e_syn_2 = _get_syn_reversal(stype_2) if is_cond_2 else 0.0
         is_nmda_2 = (stype_2 == 5)
-        base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2)
+        base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2)
         d_vfiltered_dt_secondary = apply_secondary_stimulus_current(
             i_stim_2 if is_cond_2 else i_stim,
             n_comp, base_current_2,

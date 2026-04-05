@@ -34,6 +34,7 @@ from .kinetics import (
     by_NaR,
 )
 from .rhs import F_CONST, R_GAS
+from .rhs_contract import RHS_ARG_INDEX
 
 
 def _state_slices(
@@ -336,10 +337,10 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         cm_v, l_data, l_indices, l_indptr,
         phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
         t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
-        stype, iext, t0, td, atau, event_times_arr, n_events, stim_comp, stim_mode,
+        stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
         use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
         dual_stim_enabled,
-        stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
+        stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, stim_comp_2, stim_mode_2,
         use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
     ):
         # Zero all entries
@@ -607,15 +608,17 @@ def analytic_sparse_jacobian(*args, **kwargs):
     # Extract enough args to build slices
     (t, y, n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
      en_nap, en_nar) = args[:12]
-    use_dfp = args[57] if len(args) > 57 else 0   # use_dfilter_primary position (after Stage 6.3)
-    use_dfs = args[68] if len(args) > 68 else 0   # use_dfilter_secondary position (after Stage 6.3)
+    idx_dfp = RHS_ARG_INDEX["use_dfilter_primary"]
+    idx_dfs = RHS_ARG_INDEX["use_dfilter_secondary"]
+    use_dfp = args[idx_dfp] if len(args) > idx_dfp else 0
+    use_dfs = args[idx_dfs] if len(args) > idx_dfs else 0
     idx, n_state = _state_slices(
         n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfp, use_dfs,
         en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar, en_sk=en_sk,
     )
     sp = build_jacobian_sparsity(
         n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca,
-        args[29], args[30],  # l_indices, l_indptr
+        args[RHS_ARG_INDEX["l_indices"]], args[RHS_ARG_INDEX["l_indptr"]],
         use_dfp, use_dfs,
         en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
     )

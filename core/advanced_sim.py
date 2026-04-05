@@ -270,7 +270,7 @@ def run_euler_maruyama(config: FullModelConfig,
     n_steps = len(t_pts)
     sqrt_dt = np.sqrt(dt)
 
-    s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0}
+    s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10}
     stype = s_map.get(cfg.stim.stim_type, 0)
 
     # Pre-allocate only what we need for downsampling
@@ -333,10 +333,14 @@ def run_euler_maruyama(config: FullModelConfig,
         I_stim  = np.zeros(n_comp)
         sc      = cfg.stim.stim_comp
         if 0 <= sc < n_comp:
-            I_stim[sc] = get_stim_current(t, stype, cfg.stim.Iext,
-                                           cfg.stim.pulse_start,
-                                           cfg.stim.pulse_dur,
-                                           cfg.stim.alpha_tau)
+            I_stim[sc] = get_stim_current(
+                t, stype, cfg.stim.Iext,
+                cfg.stim.pulse_start,
+                cfg.stim.pulse_dur,
+                cfg.stim.alpha_tau,
+                float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+                float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+            )
 
         # ── kinetics ────────────────────────────────────────────────
         am_v = am(V);  bm_v = bm(V)

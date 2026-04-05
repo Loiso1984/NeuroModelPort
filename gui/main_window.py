@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QPushButton, QLabel, QComboBox, QStatusBar,
     QScrollArea, QMessageBox, QApplication, QFileDialog,
-    QGroupBox, QToolBar, QProgressDialog
+    QGroupBox, QToolBar, QProgressDialog, QLayout
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QRunnable, QThreadPool
 from PySide6.QtGui import QIcon, QAction
@@ -125,6 +125,9 @@ class MainWindow(QMainWindow):
         self._main_layout = QVBoxLayout(central)
         self._main_layout.setContentsMargins(6, 6, 6, 6)
         self._main_layout.setSpacing(6)
+        self._main_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        central.setMinimumSize(0, 0)
+        self.setMinimumSize(900, 650)
 
         self._setup_top_bar()
         self._setup_tabs()
@@ -308,6 +311,7 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────
     def _setup_tabs(self):
         self.tabs = QTabWidget()
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # ── Tab 0: Parameters ─────────────────────────────────────────
         # Step 1: Setup
@@ -379,10 +383,13 @@ class MainWindow(QMainWindow):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustIgnored)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         scroll.setStyleSheet("QScrollArea { border: none; }")
 
         content = QWidget()
+        content.setMinimumSize(0, 0)
         c_layout = QVBoxLayout(content)
         c_layout.setSpacing(10)
 
@@ -419,7 +426,11 @@ class MainWindow(QMainWindow):
             on_change=self._on_morph_field_changed,
         )
         self.form_env = PydanticFormWidget(self.config.env, "Environment")
-        self.form_ana = PydanticFormWidget(self.config.analysis, "Analysis / Sweep / Map")
+        self.form_ana = PydanticFormWidget(
+            self.config.analysis,
+            "Analysis / Sweep / Map",
+            hidden_fields={"enable_lyapunov"},
+        )
 
         # Group 1: run setup (user-edited first)
         grp_setup = QGroupBox("Run Setup (Edit First)")
@@ -553,15 +564,20 @@ class MainWindow(QMainWindow):
         alpha_like = {"alpha"}
         synaptic_like = {"AMPA", "NMDA", "GABAA", "GABAB", "Kainate", "Nicotinic"}
         pulse_like = {"pulse"}
+        zap_like = {"zap"}
 
-        show_pulse_start = stype in (alpha_like | synaptic_like | pulse_like)
-        show_pulse_dur = stype in pulse_like
+        show_pulse_start = stype in (alpha_like | synaptic_like | pulse_like | zap_like)
+        show_pulse_dur = stype in (pulse_like | zap_like)
         show_alpha_tau = stype in (alpha_like | synaptic_like)
+
+        show_zap = stype in zap_like
 
         visibility = {
             "pulse_start": show_pulse_start,
             "pulse_dur": show_pulse_dur,
             "alpha_tau": show_alpha_tau,
+            "zap_f0_hz": show_zap,
+            "zap_f1_hz": show_zap,
         }
         for field_name, is_visible in visibility.items():
             w = stim_fields.get(field_name)
@@ -571,11 +587,13 @@ class MainWindow(QMainWindow):
             if l is not None:
                 l.setVisible(is_visible)
 
-    def _recompute_absolute_iext(self):
-        """Update display-only absolute current from density and current soma size."""
-        d = float(self.config.morphology.d_soma)
-        area = np.pi * d * d
-        self.config.stim.Iext_absolute_nA = float(self.config.stim.Iext) * area * 1000.0
+    def _recompute_absolute_iext(self) -> float:
+        """Compute display-only absolute current from canonical density source."""
+        i_abs = float(self.config.Iext_absolute_nA)
+        # Backward-compatible: if a display widget exists, keep it visually synced.
+        if "Iext_absolute_nA" in self.form_stim.widgets_map:
+            self._set_stim_form_value("Iext_absolute_nA", i_abs)
+        return i_abs
 
     def _set_stim_form_value(self, field_name: str, value):
         """Set stim-form widget value without emitting change callbacks."""
@@ -608,17 +626,16 @@ class MainWindow(QMainWindow):
         self._set_stim_form_value("pulse_dur", float(dc.primary_duration))
         self._set_stim_form_value("alpha_tau", float(dc.primary_alpha_tau))
 
-        d = float(self.config.morphology.d_soma)
-        area = np.pi * d * d
-        i_abs = float(dc.primary_Iext) * area * 1000.0
-        self._set_stim_form_value("Iext_absolute_nA", i_abs)
+        if "Iext_absolute_nA" in self.form_stim.widgets_map:
+            d = float(self.config.morphology.d_soma)
+            area = np.pi * d * d
+            i_abs = float(dc.primary_Iext) * area * 1000.0
+            self._set_stim_form_value("Iext_absolute_nA", i_abs)
 
     def _on_morph_field_changed(self, field_name: str, _value):
         self.oscilloscope.sync_delay_controls_for_config(self.config)
         if field_name == "d_soma":
             self._recompute_absolute_iext()
-            if "Iext_absolute_nA" in self.form_stim.widgets_map:
-                self.form_stim.refresh()
         self._refresh_topology_preview()
 
     def _on_stim_field_changed(self, field_name: str, value):
@@ -796,7 +813,6 @@ class MainWindow(QMainWindow):
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
         self._recompute_absolute_iext()
-        self.form_stim.refresh()
         self._sync_stim_type_controls()
         self._sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()

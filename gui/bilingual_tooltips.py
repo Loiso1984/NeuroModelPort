@@ -125,8 +125,8 @@ SCIENTIFIC_TOOLTIPS = {
         'ru': 'Амплитуда стимула (мкА/см²). Плотность тока для инъекции.'
     },
     'stimulus_type': {
-        'en': 'Stimulus waveform: const / pulse / alpha (synapse) / OU noise.',
-        'ru': 'Тип стимула: const / pulse / alpha (ВПСП) / шум OU.'
+        'en': 'Stimulus waveform: const / pulse / alpha / OU noise / synaptic receptors / zap chirp.',
+        'ru': 'Тип стимула: const / pulse / alpha / шум OU / синаптические рецепторы / ZAP-чирп.'
     },
     'stimulus_location': {
         'en': 'Compartment index to inject current into (0 = soma).',
