@@ -1296,6 +1296,7 @@ def full_analysis(result) -> dict:
         'lambda_um':           lam_um,
         'Q_per_channel':       Q_per_channel,
         'atp_nmol_cm2':        result.atp_estimate,
+        'atp_breakdown':       result.atp_breakdown,
         # ── NEW: Advanced firing analysis ──
         'isi_mean_ms':         isi_mean,
         'isi_std_ms':          isi_std,

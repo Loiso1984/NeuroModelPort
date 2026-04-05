@@ -18,7 +18,6 @@ class MorphologyParams(BaseModel):
     gIh_ais_mult: float = Field(default=1.0,           description="gIh multiplier in AIS")
     gCa_ais_mult: float = Field(default=2.0,           description="gCa multiplier in AIS")
     gA_ais_mult:  float = Field(default=3.0,           description="gA multiplier in AIS")
-    gM_ais_mult:  float = Field(default=1.0,           description="gM multiplier in AIS")
 
     # Axon trunk
     N_trunk: int   = Field(default=35, ge=0, description="Number of trunk segments")
@@ -62,12 +61,19 @@ class ChannelParams(BaseModel):
 
     enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated K⁺, spike adaptation)")
     gSK_max:   float = Field(default=2.0,  description="Max SK conductance (mS/cm²)")
+    tau_SK:    float = Field(default=10.0,  description="SK gate time constant (ms, Hirschberg 1998: 5-50 ms)")
 
     enable_ITCa: bool  = Field(default=False, description="Enable T-type Ca²⁺ current (low-threshold, CaV3.x)")
     gTCa_max:    float = Field(default=2.0,  description="Max T-type Ca conductance (mS/cm², Destexhe 1998)")
 
-    enable_IM: bool  = Field(default=False, description="Enable M-current (KCNQ/Kv7, spike-frequency adaptation)")
-    gM_max:    float = Field(default=0.02, description="Max M-current conductance (mS/cm², Yamada/Koch/Adams 1989)")
+    enable_IM: bool  = Field(default=False, description="Enable M-type K⁺ current (KCNQ2/3, muscarinic-sensitive)")
+    gIM_max:   float = Field(default=0.5,   description="Max M-type K conductance (mS/cm², Yamada 1989)")
+
+    enable_NaP: bool  = Field(default=False, description="Enable persistent Na⁺ current (subthreshold, non-inactivating)")
+    gNaP_max:   float = Field(default=0.1,   description="Max persistent Na conductance (mS/cm², Magistretti 1999)")
+
+    enable_NaR: bool  = Field(default=False, description="Enable resurgent Na⁺ current (repolarization-activated, Raman-Bean)")
+    gNaR_max:   float = Field(default=0.2,   description="Max resurgent Na conductance (mS/cm², Raman & Bean 2001)")
 
 
 class CalciumParams(BaseModel):
@@ -98,8 +104,19 @@ class EnvironmentParams(BaseModel):
     # T-type Ca: Destexhe 1998, J Neurosci 18:3574 — Q10_m=5.0, Q10_h=3.0 at 24°C ref.
     # Using geometric mean ~3.9 for combined gate scaling in single-phi model.
     Q10_TCa:   float = Field(default=3.9,              description="Q10 for T-type Ca channel (m,h gates)")
-    # I_M: Yamada, Koch & Adams 1989; Destexhe IM.mod (Q10 = 2.3, ref 36°C)
-    Q10_M:     float = Field(default=2.3,              description="Q10 for M-current (w gate)")
+    # M-type K (KCNQ2/3): Pan et al. 2006, J Physiol 576:215 (Q10 ~ 2.5)
+    Q10_IM:    float = Field(default=2.5,              description="Q10 for M-type K channel (w gate)")
+    # Persistent Na: same family as transient Na (Q10 ~ 2.2)
+    Q10_NaP:   float = Field(default=2.2,              description="Q10 for persistent Na channel (x gate)")
+    # Resurgent Na: Raman & Bean 2001 — same Na channel family (Q10 ~ 2.2)
+    Q10_NaR:   float = Field(default=2.2,              description="Q10 for resurgent Na channel (y,j gates)")
+    # NMDA Mg²⁺ block: Jahr & Stevens 1990, J Neurosci 10:1830
+    Mg_ext:    float = Field(default=1.0,              description="Extracellular [Mg²⁺] (mM, for NMDA block)")
+    # Thermal gradient: soma–dendrite temperature offset (°C).
+    # Positive = dendrites warmer than soma (rare), negative = cooler (typical for in vitro slices).
+    # Bhattacharyya et al. 2008 (J Neurophysiol 100:927) measured ~0.5–1.5°C axial gradients.
+    T_dend_offset: float = Field(default=0.0, ge=-15.0, le=15.0,
+                                  description="Dendrite–soma temperature offset (°C, positive=dendrites warmer)")
 
     @property
     def phi(self) -> float:
@@ -107,8 +124,22 @@ class EnvironmentParams(BaseModel):
         return self.Q10 ** ((self.T_celsius - self.T_ref) / 10.0)
 
     def phi_channel(self, q10: float) -> float:
-        """Per-channel temperature scaling: q10^((T - T_ref)/10)."""
+        """Per-channel temperature scaling at soma temperature: q10^((T_soma - T_ref)/10)."""
         return q10 ** ((self.T_celsius - self.T_ref) / 10.0)
+
+    def build_phi_vector(self, q10: float, n_comp: int) -> 'np.ndarray':
+        """Per-compartment temperature scaling vector (length n_comp).
+
+        When T_dend_offset == 0 (uniform temperature), all elements equal phi_channel(q10).
+        Otherwise, temperature is linearly interpolated from T_celsius (soma, i=0) to
+        T_celsius + T_dend_offset (distal, i=n_comp-1).
+        """
+        import numpy as np
+        if n_comp == 1 or self.T_dend_offset == 0.0:
+            return np.full(n_comp, self.phi_channel(q10))
+        frac = np.linspace(0.0, 1.0, n_comp)
+        T_comp = self.T_celsius + frac * self.T_dend_offset
+        return q10 ** ((T_comp - self.T_ref) / 10.0)
 
 
 class DendriticFilterParams(BaseModel):
@@ -212,6 +243,18 @@ class SimulationParams(BaseModel):
     pulse_dur:   float  = Field(default=1.0,         description="Pulse duration (ms)")
     alpha_tau:   float  = Field(default=2.0,         description="Alpha-synapse time constant (ms)")
     stim_comp:   int    = Field(default=0,           description="Compartment index to inject current")
+    # Event-driven synaptic queue (Stage 6.3, preparation for network connectivity)
+    # Each entry is a spike-arrival timestamp in ms. When non-empty and stim_type is
+    # a conductance-based synapse (AMPA/NMDA/GABAA/GABAB/Kainate/Nicotinic), the
+    # conductance waveforms are summed for every event, overriding pulse_start.
+    event_times: List[float] = Field(
+        default_factory=list,
+        description=(
+            "Synaptic event queue: spike-arrival timestamps (ms). "
+            "When non-empty with AMPA/NMDA/GABA stim types, "
+            "conductance waveforms are summed for each event (overrides pulse_start)."
+        )
+    )
 
     # Stochastic
     stoch_gating: bool  = Field(default=False, description="Langevin gate noise (Euler-Maruyama solver)")

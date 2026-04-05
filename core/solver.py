@@ -68,6 +68,7 @@ class SimulationResult:
 
         self.currents:    dict  = {}
         self.atp_estimate: float = 0.0
+        self.atp_breakdown: dict = {}  # {Na_pump, Ca_pump, baseline, total}
 
         # Morphology dict stored for post-analysis (current balance, etc.)
         self.morph: dict = {}
@@ -213,27 +214,36 @@ class NeuronSolver:
             n_comp,
             cfg.channels.enable_Ih, cfg.channels.enable_ICa,
             cfg.channels.enable_IA, cfg.channels.enable_SK,
-            cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa, cfg.channels.enable_IM,
+            cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa,
+            cfg.channels.enable_IM, cfg.channels.enable_NaP, cfg.channels.enable_NaR,
             morph['gNa_v'], morph['gK_v'], morph['gL_v'],
-            morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'], morph['gM_v'],
+            morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'],
+            morph['gIM_v'], morph['gNaP_v'], morph['gNaR_v'],
             cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL,
             cfg.channels.E_Ih, cfg.channels.E_A,
             morph['Cm_v'],
             morph['L_data'], morph['L_indices'], morph['L_indptr'],
-            cfg.env.phi_channel(cfg.env.Q10_Na),
-            cfg.env.phi_channel(cfg.env.Q10_K),
-            cfg.env.phi_channel(cfg.env.Q10_Ih),
-            cfg.env.phi_channel(cfg.env.Q10_Ca),
-            cfg.env.phi_channel(cfg.env.Q10_IA),
-            cfg.env.phi_channel(cfg.env.Q10_TCa),
-            cfg.env.phi_channel(cfg.env.Q10_M),
+            cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
             t_kelvin,
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca,
             self._build_b_ca_vector(cfg, morph),
+            cfg.env.Mg_ext,
+            cfg.channels.tau_SK,
             stype, primary_iext,
             primary_t0, primary_td,
-            primary_atau, primary_stim_comp, stim_mode,
+            primary_atau,
+            np.array(cfg.stim.event_times or [], dtype=np.float64),
+            int(len(cfg.stim.event_times or [])),
+            primary_stim_comp, stim_mode,
             use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
             # Dual stimulation parameters (optional)
             dual_stim_enabled,
@@ -264,6 +274,8 @@ class NeuronSolver:
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
                 en_im=cfg.channels.enable_IM,
+                en_nap=cfg.channels.enable_NaP,
+                en_nar=cfg.channels.enable_NaR,
             )
         elif jacobian_mode == "analytic_sparse":
             sparsity = build_jacobian_sparsity(
@@ -279,6 +291,8 @@ class NeuronSolver:
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
                 en_im=cfg.channels.enable_IM,
+                en_nap=cfg.channels.enable_NaP,
+                en_nar=cfg.channels.enable_NaR,
             )
             jacobian_options["jac"] = make_analytic_jacobian(sparsity)
         elif jacobian_mode != "dense_fd":
@@ -349,11 +363,6 @@ class NeuronSolver:
             res.currents['IA'] = morph['gA_v'][0] * a[0, :] * b[0, :] * (v[0, :] - cfg.channels.E_A)
             cursor += 2 * n
 
-        if cfg.channels.enable_IM:
-            w = y[cursor:cursor + n, :]
-            res.currents['IM'] = morph['gM_v'][0] * w[0, :] * (v[0, :] - cfg.channels.EK)
-            cursor += n
-
         if cfg.channels.enable_ITCa:
             p_t = y[cursor:cursor + n, :]
             q_t = y[cursor + n:cursor + 2*n, :]
@@ -368,14 +377,63 @@ class NeuronSolver:
             res.currents['ITCa'] = morph['gTCa_v'][0] * (p_t[0, :] ** 2) * q_t[0, :] * (v[0, :] - e_ca)
             cursor += 2 * n
 
-        if cfg.channels.enable_SK and res.ca_i is not None:
-            z_act = z_inf_SK(res.ca_i[0, :])
-            res.currents['SK'] = morph['gSK_v'][0] * z_act * (v[0, :] - cfg.channels.EK)
+        if cfg.channels.enable_IM:
+            w_m = y[cursor:cursor + n, :]
+            res.currents['IM'] = morph['gIM_v'][0] * w_m[0, :] * (v[0, :] - cfg.channels.EK)
+            cursor += n
 
-        # ATP estimate: Q_Na [nC/cm²] → nmol ATP/cm²
+        if cfg.channels.enable_NaP:
+            x_p = y[cursor:cursor + n, :]
+            res.currents['NaP'] = morph['gNaP_v'][0] * x_p[0, :] * (v[0, :] - cfg.channels.ENa)
+            cursor += n
+
+        if cfg.channels.enable_NaR:
+            y_r = y[cursor:cursor + n, :]
+            j_r = y[cursor + n:cursor + 2*n, :]
+            res.currents['NaR'] = morph['gNaR_v'][0] * y_r[0, :] * j_r[0, :] * (v[0, :] - cfg.channels.ENa)
+            cursor += 2 * n
+
+        if cfg.channels.enable_SK:
+            z_sk = y[cursor:cursor + n, :]
+            res.currents['SK'] = morph['gSK_v'][0] * z_sk[0, :] * (v[0, :] - cfg.channels.EK)
+            cursor += n
+
+        # ── ATP consumption estimate ──────────────────────────────────
+        # Na+/K+-ATPase: 3 Na+ pumped per ATP hydrolysis (Skou 1957).
+        # Ca²+-ATPase (PMCA): 1 Ca²+ pumped per ATP (Bhatt et al. 2005).
+        # Baseline pump: resting Na+/K+-ATPase ≈ 50% of neuronal ATP even
+        # without spiking (Attwell & Laughlin 2001, J Cereb Blood Flow Metab).
         dt = cfg.stim.dt_eval
+        F = 96485.33  # Faraday constant [C/mol]
+
+        # 1. Na+ pump cost: |Q_Na| / (3·F)  [µC/cm²·ms → mol → nmol ATP/cm²]
         q_na = float(np.sum(np.abs(res.currents['Na']))) * dt
-        res.atp_estimate = (q_na * 1e-9) / (3.0 * 96485.33) * 1e9
+        if 'NaP' in res.currents:
+            q_na += float(np.sum(np.abs(res.currents['NaP']))) * dt
+        if 'NaR' in res.currents:
+            q_na += float(np.sum(np.abs(res.currents['NaR']))) * dt
+        atp_na = (q_na * 1e-9) / (3.0 * F) * 1e9  # nmol/cm²
+
+        # 2. Ca²+ pump cost: |Q_Ca| / (1·2F)  [divalent ion, z=2]
+        atp_ca = 0.0
+        for ca_key in ('ICa', 'ITCa'):
+            if ca_key in res.currents:
+                q_ca = float(np.sum(np.abs(res.currents[ca_key]))) * dt
+                atp_ca += (q_ca * 1e-9) / (1.0 * 2.0 * F) * 1e9
+
+        # 3. Baseline Na+/K+-ATPase resting cost
+        # ~0.4 nmol ATP/(cm²·s) for a resting neuron (Attwell & Laughlin 2001)
+        t_sim_s = cfg.stim.t_sim * 1e-3
+        atp_baseline = 0.4 * t_sim_s  # nmol/cm²
+
+        atp_total = atp_na + atp_ca + atp_baseline
+        res.atp_estimate = atp_total
+        res.atp_breakdown = {
+            'Na_pump': atp_na,
+            'Ca_pump': atp_ca,
+            'baseline': atp_baseline,
+            'total': atp_total,
+        }
 
     # ─────────────────────────────────────────────────────────────────
     def run_monte_carlo(self) -> list:

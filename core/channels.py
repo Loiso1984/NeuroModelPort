@@ -68,7 +68,7 @@ class ChannelRegistry:
         ))
         
         # 7. SK (Ca2+-activated K+)
-        # No standard alpha/beta gates — z depends on [Ca], handled separately in RHS.
+        # Gate z_sk: ODE-based with tau_SK (Hirschberg 1998), z_inf depends on [Ca²⁺]
         self.channels.append(Channel(name="SK", color=(0.9, 0.1, 0.9)))
 
         # 8. I_M (Muscarinic K+, KCNQ/Kv7 — Yamada/Koch/Adams 1989)
@@ -83,6 +83,27 @@ class ChannelRegistry:
             gates=[
                 GateInfo('p', 2, am_TCa, bm_TCa),   # activation (m² in paper, 'p' to avoid confusion with Na m)
                 GateInfo('q', 1, ah_TCa, bh_TCa)     # inactivation
+            ]
+        ))
+
+        # 9. I_M (M-type K+, KCNQ2/3 — Yamada, Koch & Adams 1989)
+        self.channels.append(Channel(
+            name="IM", color=(0.0, 0.8, 0.4),
+            gates=[GateInfo('w', 1, aw_IM, bw_IM)]   # single activation, non-inactivating
+        ))
+
+        # 10. I_NaP (Persistent Na+ — Magistretti & Alonso 1999)
+        self.channels.append(Channel(
+            name="NaP", color=(1.0, 0.4, 0.4),
+            gates=[GateInfo('x', 1, ax_NaP, bx_NaP)]  # single activation, no inactivation
+        ))
+
+        # 11. I_NaR (Resurgent Na+ — Raman & Bean 2001, phenomenological)
+        self.channels.append(Channel(
+            name="NaR", color=(0.8, 0.2, 0.6),
+            gates=[
+                GateInfo('y', 1, ay_NaR, by_NaR),   # activation
+                GateInfo('j', 1, aj_NaR, bj_NaR)    # inactivation/block
             ]
         ))
 
@@ -126,6 +147,24 @@ class ChannelRegistry:
             for alpha, beta in [(am_TCa, bm_TCa), (ah_TCa, bh_TCa)]:
                 a_val, b_val = alpha(V0), beta(V0)
                 y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        if config.channels.enable_IM:
+            a_val, b_val = aw_IM(V0), bw_IM(V0)
+            y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        if config.channels.enable_NaP:
+            a_val, b_val = ax_NaP(V0), bx_NaP(V0)
+            y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        if config.channels.enable_NaR:
+            for alpha, beta in [(ay_NaR, by_NaR), (aj_NaR, bj_NaR)]:
+                a_val, b_val = alpha(V0), beta(V0)
+                y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        # SK gate z_sk: initialise at steady-state z_inf(Ca_rest)
+        if config.channels.enable_SK:
+            z0 = z_inf_SK(config.calcium.Ca_rest)
+            y0_list.append(np.full(N, z0))
 
         # Динамика кальция
         if config.calcium.dynamic_Ca:

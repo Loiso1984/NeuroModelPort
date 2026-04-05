@@ -82,7 +82,9 @@ class MorphologyBuilder:
         gA_v   = np.zeros(N_comp, dtype=np.float64)
         gSK_v  = np.zeros(N_comp, dtype=np.float64)
         gTCa_v = np.zeros(N_comp, dtype=np.float64)
-        gM_v   = np.zeros(N_comp, dtype=np.float64)
+        gIM_v  = np.zeros(N_comp, dtype=np.float64)
+        gNaP_v = np.zeros(N_comp, dtype=np.float64)
+        gNaR_v = np.zeros(N_comp, dtype=np.float64)
 
         if cc.enable_Ih:
             gIh_v.fill(cc.gIh_max)
@@ -95,7 +97,11 @@ class MorphologyBuilder:
         if cc.enable_ITCa:
             gTCa_v.fill(cc.gTCa_max)
         if cc.enable_IM:
-            gM_v.fill(cc.gM_max)
+            gIM_v.fill(cc.gIM_max)
+        if cc.enable_NaP:
+            gNaP_v.fill(cc.gNaP_max)
+        if cc.enable_NaR:
+            gNaR_v.fill(cc.gNaR_max)
         
         # Membrane capacitance [µF/cm²]
         Cm_v = np.full(N_comp, cc.Cm, dtype=np.float64)
@@ -109,7 +115,11 @@ class MorphologyBuilder:
             gCa_v[ais_slice]  *= mc.gCa_ais_mult
             gA_v[ais_slice]   *= mc.gA_ais_mult
             gTCa_v[ais_slice] *= mc.gCa_ais_mult  # T-type uses same AIS mult as L-type
-            gM_v[ais_slice]   *= mc.gM_ais_mult
+            # M-type: primarily somatic/dendritic, no AIS boost (Shah 2008, J Neurosci)
+            # gIM_v[ais_slice] *= 1.0  — intentionally no multiplier
+            # Persistent & Resurgent Na: same AIS enrichment as transient Na
+            gNaP_v[ais_slice] *= mc.gNa_ais_mult
+            gNaR_v[ais_slice] *= mc.gNa_ais_mult
 
         # 3. Матрица Лапласа (LIL формат для быстрого заполнения) | 3. Laplacian matrix (LIL format for fast filling)
         L_matrix = lil_matrix((N_comp, N_comp), dtype=np.float64)
@@ -159,7 +169,8 @@ class MorphologyBuilder:
             'areas': areas,
             'diameters': diameters,
             'gNa_v': gNa_v, 'gK_v': gK_v, 'gL_v': gL_v,
-            'gIh_v': gIh_v, 'gCa_v': gCa_v, 'gA_v': gA_v, 'gSK_v': gSK_v, 'gTCa_v': gTCa_v, 'gM_v': gM_v,
+            'gIh_v': gIh_v, 'gCa_v': gCa_v, 'gA_v': gA_v, 'gSK_v': gSK_v, 'gTCa_v': gTCa_v,
+            'gIM_v': gIM_v, 'gNaP_v': gNaP_v, 'gNaR_v': gNaR_v,
             'Cm_v': Cm_v,
             'L_data': L_csr.data,
             'L_indices': L_csr.indices,

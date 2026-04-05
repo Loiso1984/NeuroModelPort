@@ -32,6 +32,10 @@ def estimate_simulation_runtime(cfg: FullModelConfig) -> Dict[str, float]:
         + 2 * int(bool(cfg.channels.enable_ICa))
         + 2 * int(bool(cfg.channels.enable_IA))
         + int(bool(cfg.channels.enable_SK))
+        + 2 * int(bool(cfg.channels.enable_ITCa))
+        + int(bool(cfg.channels.enable_IM))
+        + int(bool(cfg.channels.enable_NaP))
+        + 2 * int(bool(cfg.channels.enable_NaR))
     )
 
     if n_comp == 1 and n_channels <= 3:
@@ -98,10 +102,18 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
         raise SimulationParameterError("Ih is enabled but gIh_max <= 0.")
     if cfg.channels.enable_ICa and cfg.channels.gCa_max <= 0.0:
         raise SimulationParameterError("ICa is enabled but gCa_max <= 0.")
+    if cfg.channels.enable_ITCa and cfg.channels.gTCa_max <= 0.0:
+        raise SimulationParameterError("ITCa is enabled but gTCa_max <= 0.")
     if cfg.channels.enable_IA and cfg.channels.gA_max <= 0.0:
         raise SimulationParameterError("IA is enabled but gA_max <= 0.")
     if cfg.channels.enable_SK and cfg.channels.gSK_max <= 0.0:
         raise SimulationParameterError("SK is enabled but gSK_max <= 0.")
+    if cfg.channels.enable_IM and cfg.channels.gIM_max <= 0.0:
+        raise SimulationParameterError("IM is enabled but gIM_max <= 0.")
+    if cfg.channels.enable_NaP and cfg.channels.gNaP_max <= 0.0:
+        raise SimulationParameterError("NaP is enabled but gNaP_max <= 0.")
+    if cfg.channels.enable_NaR and cfg.channels.gNaR_max <= 0.0:
+        raise SimulationParameterError("NaR is enabled but gNaR_max <= 0.")
 
     dual = getattr(cfg, "dual_stimulation", None)
     if dual is not None and getattr(dual, "enabled", False):

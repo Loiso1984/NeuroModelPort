@@ -81,9 +81,10 @@ class Translator:
             'B_Ca':      'Current-to-concentration factor (mM / (µA/cm² · ms)).',
 
             # ── Environment descriptions ─────────────────────────────
-            'T_celsius': 'Experiment temperature (°C). Scales all kinetics via Q10.',
-            'T_ref':     'Reference temperature for channel kinetics (°C).',
-            'Q10':       'Q10 coefficient. Rate doubles per 10°C if Q10 = 2.',
+            'T_celsius':     'Experiment temperature (°C). Scales all kinetics via Q10.',
+            'T_ref':         'Reference temperature for channel kinetics (°C).',
+            'Q10':           'Q10 coefficient. Rate doubles per 10°C if Q10 = 2.',
+            'T_dend_offset': 'Dendrite–soma temperature difference (°C). Positive = dendrites warmer. Creates linear axial gradient.',
 
             # ── Simulation descriptions ──────────────────────────────
             't_sim':       'Total simulation time (ms).',
@@ -94,6 +95,7 @@ class Translator:
             'pulse_dur':   'Pulse duration (ms).',
             'alpha_tau':   'Alpha-synapse time constant (ms). Peak at t = τ after onset.',
             'stim_comp':   'Compartment index to inject current into (0 = soma).',
+            'event_times': 'Synaptic event queue (ms). Comma-separated timestamps; e.g. "10,25,40". Overrides pulse_start for AMPA/NMDA/GABA types.',
             'stoch_gating':'Langevin gate noise via Euler-Maruyama (Fox & Lu 1994). Use 🎲 button.',
             'noise_sigma': 'Additive white noise amplitude σ (µA/cm²). Added to dV/dt.',
 
@@ -206,9 +208,10 @@ class Translator:
             'B_Ca':      'Конверсия тока в концентрацию (мМ / (мкА/см² · мс)).',
 
             # ── Среда ────────────────────────────────────────────────
-            'T_celsius': 'Температура эксперимента (°C). Масштабирует кинетику через Q10.',
-            'T_ref':     'Референсная температура каналов (°C).',
-            'Q10':       'Коэффициент Q10. При Q10=3 скорость растёт в 3 раза за 10°C.',
+            'T_celsius':     'Температура эксперимента (°C). Масштабирует кинетику через Q10.',
+            'T_ref':         'Референсная температура каналов (°C).',
+            'Q10':           'Коэффициент Q10. При Q10=3 скорость растёт в 3 раза за 10°C.',
+            'T_dend_offset': 'Разница температур дендриты–сома (°C). Плюс = дендриты теплее. Линейный аксиальный градиент.',
 
             # ── Симуляция ────────────────────────────────────────────
             't_sim':       'Длительность симуляции (мс).',
@@ -219,6 +222,7 @@ class Translator:
             'pulse_dur':   'Длительность импульса (мс).',
             'alpha_tau':   'Постоянная времени alpha-синапса (мс). Пик при t = τ.',
             'stim_comp':   'Компартмент стимуляции (0 = сома).',
+            'event_times': 'Очередь синаптических событий (мс). Временные метки через запятую: "10,25,40". Замещает pulse_start для AMPA/NMDA/GABA.',
             'stoch_gating':'Шум Ланжевена в гейтах (Эйлер-Маруяма). Кнопка 🎲.',
             'noise_sigma': 'Амплитуда белого шума на мембрану σ (мкА/см²).',
 
@@ -294,11 +298,15 @@ class Translator:
                 "H: Severe Hyperkalemia (High EK)": "H: Severe Hyperkalemia (High EK)",
                 "I: In Vitro Slice (Mammalian 23°C)": "I: In Vitro Slice (Mammalian 23°C)",
                 "J: C-Fiber (Pain / Unmyelinated)": "J: C-Fiber (Pain / Unmyelinated)",
-                "K: Thalamic Relay (Ih + ICa + Burst)": "K: Thalamic Relay (Ih + ICa + Burst)",
-                "L: Hippocampal CA1 (Theta rhythm)": "L: Hippocampal CA1 (Theta rhythm)",
+                "K: Thalamic Relay (Ih + IT + Burst)": "K: Thalamic Relay (Ih + IT + Burst)",
+                "L: Hippocampal CA1 Pyramidal (Adapting)": "L: Hippocampal CA1 Pyramidal (Adapting)",
                 "M: Epilepsy (v10 SCN1A mutation)": "M: Epilepsy (v10 SCN1A mutation)",
                 "N: Alzheimer's (v10 Calcium Toxicity)": "N: Alzheimer's (v10 Calcium Toxicity)",
                 "O: Hypoxia (v10 ATP-pump failure)": "O: Hypoxia (v10 ATP-pump failure)",
+                "P: Thalamic Reticular Nucleus (TRN Spindles)": "P: Thalamic Reticular Nucleus (TRN Spindles)",
+                "Q: Striatal Spiny Projection (SPN)": "Q: Striatal Spiny Projection (SPN)",
+                "R: Cholinergic Neuromodulation (ACh)": "R: Cholinergic Neuromodulation (ACh)",
+                "S: Pathology: Dravet Syndrome (SCN1A LOF)": "S: Pathology: Dravet Syndrome (SCN1A LOF)",
             },
             'RU': {
                 "A: Squid Giant Axon (HH 1952)": "A: Гигантский аксон кальмара (ХХ 1952)",
@@ -311,11 +319,15 @@ class Translator:
                 "H: Severe Hyperkalemia (High EK)": "H: Тяжелая гиперкалиемия (высокий EK)",
                 "I: In Vitro Slice (Mammalian 23°C)": "I: Срез in vitro (млекопитающие 23°C)",
                 "J: C-Fiber (Pain / Unmyelinated)": "J: C-волокно (боль / безмиелиновое)",
-                "K: Thalamic Relay (Ih + ICa + Burst)": "K: Таламическое реле (Ih + ICa + пачки)",
-                "L: Hippocampal CA1 (Theta rhythm)": "L: Гиппокамп CA1 (тета-ритм)",
+                "K: Thalamic Relay (Ih + IT + Burst)": "K: Таламическое реле (Ih + IT + пачки)",
+                "L: Hippocampal CA1 Pyramidal (Adapting)": "L: Гиппокамп CA1 пирамидный (адаптивный)",
                 "M: Epilepsy (v10 SCN1A mutation)": "M: Эпилепсия (мутация SCN1A v10)",
                 "N: Alzheimer's (v10 Calcium Toxicity)": "N: Болезнь Альцгеймера (токсичность кальция v10)",
                 "O: Hypoxia (v10 ATP-pump failure)": "O: Гипоксия (отказ АТФ-насоса v10)",
+                "P: Thalamic Reticular Nucleus (TRN Spindles)": "P: Ретикулярное ядро таламуса (TRN веретёна)",
+                "Q: Striatal Spiny Projection (SPN)": "Q: Шиповатый проекционный нейрон (SPN)",
+                "R: Cholinergic Neuromodulation (ACh)": "R: Холинергическая нейромодуляция (ACh)",
+                "S: Pathology: Dravet Syndrome (SCN1A LOF)": "S: Патология: Синдром Драве (SCN1A LOF)",
             }
         }
         return preset_translations.get(self.lang, {}).get(preset_name, preset_name)
