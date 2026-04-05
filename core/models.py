@@ -62,6 +62,9 @@ class ChannelParams(BaseModel):
     enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated K⁺, spike adaptation)")
     gSK_max:   float = Field(default=2.0,  description="Max SK conductance (mS/cm²)")
 
+    enable_ITCa: bool  = Field(default=False, description="Enable T-type Ca²⁺ current (low-threshold, CaV3.x)")
+    gTCa_max:    float = Field(default=2.0,  description="Max T-type Ca conductance (mS/cm², Destexhe 1998)")
+
 
 class CalciumParams(BaseModel):
     """Intracellular calcium dynamics."""
@@ -88,6 +91,9 @@ class EnvironmentParams(BaseModel):
     Q10_Ca:    float = Field(default=2.5,              description="Q10 for Ca channels (s,u gates)")
     # IA: Huguenard et al 1991, J Neurophysiol 65:1271 (Q10 ~ 2.8-3.5)
     Q10_IA:    float = Field(default=3.0,              description="Q10 for A-type K channel (a,b gates)")
+    # T-type Ca: Destexhe 1998, J Neurosci 18:3574 — Q10_m=5.0, Q10_h=3.0 at 24°C ref.
+    # Using geometric mean ~3.9 for combined gate scaling in single-phi model.
+    Q10_TCa:   float = Field(default=3.9,              description="Q10 for T-type Ca channel (m,h gates)")
 
     @property
     def phi(self) -> float:

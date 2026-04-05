@@ -87,14 +87,14 @@ def get_stim_current(t, stype, iext, t0, td, atau):
 def rhs_multicompartment(
     t, y, n_comp,
     # Флаги включения каналов
-    en_ih, en_ica, en_ia, en_sk, dyn_ca,
+    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca,
     # Векторы проводимостей (уже с учетом AIS-множителей)
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v,
+    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v,
     # Потенциалы реверсии
     ena, ek, el, eih, ea,
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
-    phi_na, phi_k, phi_ih, phi_ca, phi_ia,
+    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca,
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, stim_comp, stim_mode,
@@ -132,6 +132,13 @@ def rhs_multicompartment(
         off_a = cursor
         cursor += n_comp
         off_b = cursor
+        cursor += n_comp
+    off_p = cursor   # T-type Ca activation
+    off_q = cursor   # T-type Ca inactivation
+    if en_itca:
+        off_p = cursor
+        cursor += n_comp
+        off_q = cursor
         cursor += n_comp
     off_ca = cursor
     if dyn_ca:
@@ -216,6 +223,22 @@ def rhs_multicompartment(
             bi = y[off_b + i]
             i_ion += ga_v[i] * ai * bi * (vi - ea)
 
+        # T-type Ca (low-threshold, Destexhe 1998)
+        if en_itca:
+            pi = y[off_p + i]
+            qi = y[off_q + i]
+            if dyn_ca:
+                if not en_ica:  # eca_i not yet computed
+                    ca_i_val = y[off_ca + i]
+                    eca_i = nernst_ca_ion(ca_i_val, ca_ext, t_kelvin)
+            else:
+                if not en_ica:
+                    eca_i = 120.0
+            i_tca = gtca_v[i] * (pi * pi) * qi * (vi - eca_i)
+            i_ion += i_tca
+            if i_tca < 0.0:
+                i_ca_influx += -i_tca
+
         if en_sk:
             if dyn_ca:
                 ca_sk = y[off_ca + i]
@@ -254,6 +277,12 @@ def rhs_multicompartment(
             bi = y[off_b + i]
             dydt[off_a + i] = phi_ia * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
             dydt[off_b + i] = phi_ia * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
+
+        if en_itca:
+            pi = y[off_p + i]
+            qi = y[off_q + i]
+            dydt[off_p + i] = phi_tca * (am_TCa(vi) * (1.0 - pi) - bm_TCa(vi) * pi)
+            dydt[off_q + i] = phi_tca * (ah_TCa(vi) * (1.0 - qi) - bh_TCa(vi) * qi)
 
         # Calcium dynamics
         if dyn_ca:

@@ -213,9 +213,9 @@ class NeuronSolver:
             n_comp,
             cfg.channels.enable_Ih, cfg.channels.enable_ICa,
             cfg.channels.enable_IA, cfg.channels.enable_SK,
-            cfg.calcium.dynamic_Ca,
+            cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa,
             morph['gNa_v'], morph['gK_v'], morph['gL_v'],
-            morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'],
+            morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'],
             cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL,
             cfg.channels.E_Ih, cfg.channels.E_A,
             morph['Cm_v'],
@@ -225,6 +225,7 @@ class NeuronSolver:
             cfg.env.phi_channel(cfg.env.Q10_Ih),
             cfg.env.phi_channel(cfg.env.Q10_Ca),
             cfg.env.phi_channel(cfg.env.Q10_IA),
+            cfg.env.phi_channel(cfg.env.Q10_TCa),
             t_kelvin,
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca,
@@ -260,6 +261,7 @@ class NeuronSolver:
                 l_indptr=morph["L_indptr"],
                 use_dfilter_primary=use_dfilter_primary,
                 use_dfilter_secondary=use_dfilter_secondary,
+                en_itca=cfg.channels.enable_ITCa,
             )
         elif jacobian_mode == "analytic_sparse":
             sparsity = build_jacobian_sparsity(
@@ -273,6 +275,7 @@ class NeuronSolver:
                 l_indptr=morph["L_indptr"],
                 use_dfilter_primary=use_dfilter_primary,
                 use_dfilter_secondary=use_dfilter_secondary,
+                en_itca=cfg.channels.enable_ITCa,
             )
             jacobian_options["jac"] = make_analytic_jacobian(sparsity)
         elif jacobian_mode != "dense_fd":
@@ -341,6 +344,20 @@ class NeuronSolver:
             a = y[cursor:cursor + n, :]
             b = y[cursor + n:cursor + 2*n, :]
             res.currents['IA'] = morph['gA_v'][0] * a[0, :] * b[0, :] * (v[0, :] - cfg.channels.E_A)
+            cursor += 2 * n
+
+        if cfg.channels.enable_ITCa:
+            p_t = y[cursor:cursor + n, :]
+            q_t = y[cursor + n:cursor + 2*n, :]
+            if not cfg.channels.enable_ICa:
+                # e_ca not yet computed — compute here
+                if cfg.calcium.dynamic_Ca and res.ca_i is not None:
+                    t_kelvin = cfg.env.T_celsius + 273.15
+                    ca_soma = np.maximum(res.ca_i[0, :], 1e-9)
+                    e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_soma) * 1000.0
+                else:
+                    e_ca = 120.0
+            res.currents['ITCa'] = morph['gTCa_v'][0] * (p_t[0, :] ** 2) * q_t[0, :] * (v[0, :] - e_ca)
             cursor += 2 * n
 
         if cfg.channels.enable_SK and res.ca_i is not None:

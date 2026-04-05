@@ -123,5 +123,56 @@ def z_inf_SK(Ca_i):
     """
     Kd = 0.0004
     # Защита от отрицательного кальция при жестких шагах интегратора | Protection against negative calcium during stiff integrator steps
-    ca_safe = max(Ca_i, 1e-9) 
+    ca_safe = max(Ca_i, 1e-9)
     return 1.0 / (1.0 + (Kd / ca_safe)**4)
+
+
+# =====================================================================
+# I_T — Low-Threshold Transient Ca²⁺ Current (T-type, CaV3.x)
+# Destexhe et al. 1998 (J Neurosci 18:3574); Huguenard & McCormick 1992.
+# Gating: m²h (m = activation, h = inactivation).
+# Kinetics use Boltzmann inf/tau converted to alpha/beta for HH formalism:
+#   alpha = inf / tau,  beta = (1 - inf) / tau
+# Reference temperature: 24°C. Q10_m = 5.0, Q10_h = 3.0 (Destexhe 1998).
+# Screening charge shift = +2 mV for 2 mM external Ca²⁺.
+# =====================================================================
+
+_IT_SHIFT = 2.0  # Screening charge shift for 2 mM Ca_ext (Destexhe 1998)
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def am_TCa(V):
+    """I_T activation alpha (Destexhe 1998). V½ ≈ -57 mV."""
+    Vs = V + _IT_SHIFT
+    m_inf = 1.0 / (1.0 + np.exp(-(Vs + 57.0) / 6.2))
+    tau_m = 0.612 + 1.0 / (np.exp(-(Vs + 132.0) / 16.7) + np.exp((Vs + 16.8) / 18.2))
+    return m_inf / tau_m
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def bm_TCa(V):
+    """I_T activation beta (Destexhe 1998)."""
+    Vs = V + _IT_SHIFT
+    m_inf = 1.0 / (1.0 + np.exp(-(Vs + 57.0) / 6.2))
+    tau_m = 0.612 + 1.0 / (np.exp(-(Vs + 132.0) / 16.7) + np.exp((Vs + 16.8) / 18.2))
+    return (1.0 - m_inf) / tau_m
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def ah_TCa(V):
+    """I_T inactivation alpha (Destexhe 1998). V½ ≈ -81 mV. Slow recovery."""
+    Vs = V + _IT_SHIFT
+    h_inf = 1.0 / (1.0 + np.exp((Vs + 81.0) / 4.0))
+    if Vs < -80.0:
+        tau_h = np.exp((Vs + 467.0) / 66.6)
+    else:
+        tau_h = 28.0 + np.exp(-(Vs + 22.0) / 10.5)
+    return h_inf / tau_h
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def bh_TCa(V):
+    """I_T inactivation beta (Destexhe 1998)."""
+    Vs = V + _IT_SHIFT
+    h_inf = 1.0 / (1.0 + np.exp((Vs + 81.0) / 4.0))
+    if Vs < -80.0:
+        tau_h = np.exp((Vs + 467.0) / 66.6)
+    else:
+        tau_h = 28.0 + np.exp(-(Vs + 22.0) / 10.5)
+    return (1.0 - h_inf) / tau_h

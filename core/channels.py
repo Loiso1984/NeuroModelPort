@@ -67,10 +67,18 @@ class ChannelRegistry:
             ]
         ))
         
-        # 7. НОВОЕ: SK (Ca2+-activated K+)
-        # Заметьте, у него нет стандартных alpha/beta гейтов по напряжению,
-        # его гейт z зависит от [Ca], поэтому мы обработаем его отдельно в RHS.
+        # 7. SK (Ca2+-activated K+)
+        # No standard alpha/beta gates — z depends on [Ca], handled separately in RHS.
         self.channels.append(Channel(name="SK", color=(0.9, 0.1, 0.9)))
+
+        # 8. I_T (T-type Ca2+, low-threshold, CaV3.x — Destexhe 1998)
+        self.channels.append(Channel(
+            name="ITCa", is_Ca=True, color=(1.0, 0.8, 0.0),
+            gates=[
+                GateInfo('p', 2, am_TCa, bm_TCa),   # activation (m² in paper, 'p' to avoid confusion with Na m)
+                GateInfo('q', 1, ah_TCa, bh_TCa)     # inactivation
+            ]
+        ))
 
     def compute_initial_states(self, V0: float, config) -> np.ndarray:
         """
@@ -103,7 +111,12 @@ class ChannelRegistry:
             for alpha, beta in [(aa_IA, ba_IA), (ab_IA, bb_IA)]:
                 a_val, b_val = alpha(V0), beta(V0)
                 y0_list.append(np.full(N, a_val / (a_val + b_val)))
-                
+
+        if config.channels.enable_ITCa:
+            for alpha, beta in [(am_TCa, bm_TCa), (ah_TCa, bh_TCa)]:
+                a_val, b_val = alpha(V0), beta(V0)
+                y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
         # Динамика кальция
         if config.calcium.dynamic_Ca:
             y0_list.append(np.full(N, config.calcium.Ca_rest))

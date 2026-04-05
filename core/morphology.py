@@ -77,11 +77,12 @@ class MorphologyBuilder:
         gK_v  = np.full(N_comp, cc.gK_max, dtype=np.float64)
         gL_v  = np.full(N_comp, cc.gL, dtype=np.float64)
         
-        gIh_v = np.zeros(N_comp, dtype=np.float64)
-        gCa_v = np.zeros(N_comp, dtype=np.float64)
-        gA_v  = np.zeros(N_comp, dtype=np.float64)
-        gSK_v = np.zeros(N_comp, dtype=np.float64)
-        
+        gIh_v  = np.zeros(N_comp, dtype=np.float64)
+        gCa_v  = np.zeros(N_comp, dtype=np.float64)
+        gA_v   = np.zeros(N_comp, dtype=np.float64)
+        gSK_v  = np.zeros(N_comp, dtype=np.float64)
+        gTCa_v = np.zeros(N_comp, dtype=np.float64)
+
         if cc.enable_Ih:
             gIh_v.fill(cc.gIh_max)
         if cc.enable_ICa:
@@ -90,6 +91,8 @@ class MorphologyBuilder:
             gA_v.fill(cc.gA_max)
         if cc.enable_SK:
             gSK_v.fill(cc.gSK_max)
+        if cc.enable_ITCa:
+            gTCa_v.fill(cc.gTCa_max)
         
         # Membrane capacitance [µF/cm²]
         Cm_v = np.full(N_comp, cc.Cm, dtype=np.float64)
@@ -100,8 +103,9 @@ class MorphologyBuilder:
             gNa_v[ais_slice] *= mc.gNa_ais_mult
             gK_v[ais_slice]  *= mc.gK_ais_mult
             gIh_v[ais_slice] *= mc.gIh_ais_mult
-            gCa_v[ais_slice] *= mc.gCa_ais_mult
-            gA_v[ais_slice]  *= mc.gA_ais_mult
+            gCa_v[ais_slice]  *= mc.gCa_ais_mult
+            gA_v[ais_slice]   *= mc.gA_ais_mult
+            gTCa_v[ais_slice] *= mc.gCa_ais_mult  # T-type uses same AIS mult as L-type
 
         # 3. Матрица Лапласа (LIL формат для быстрого заполнения) | 3. Laplacian matrix (LIL format for fast filling)
         L_matrix = lil_matrix((N_comp, N_comp), dtype=np.float64)
@@ -151,7 +155,7 @@ class MorphologyBuilder:
             'areas': areas,
             'diameters': diameters,
             'gNa_v': gNa_v, 'gK_v': gK_v, 'gL_v': gL_v,
-            'gIh_v': gIh_v, 'gCa_v': gCa_v, 'gA_v': gA_v, 'gSK_v': gSK_v,
+            'gIh_v': gIh_v, 'gCa_v': gCa_v, 'gA_v': gA_v, 'gSK_v': gSK_v, 'gTCa_v': gTCa_v,
             'Cm_v': Cm_v,
             'L_data': L_csr.data,
             'L_indices': L_csr.indices,
