@@ -236,6 +236,8 @@ class NeuronSolver:
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca,
             self._build_b_ca_vector(cfg, morph),
+            cfg.env.Mg_ext,
+            cfg.channels.tau_SK,
             stype, primary_iext,
             primary_t0, primary_td,
             primary_atau, primary_stim_comp, stim_mode,
@@ -388,9 +390,10 @@ class NeuronSolver:
             res.currents['NaR'] = morph['gNaR_v'][0] * y_r[0, :] * j_r[0, :] * (v[0, :] - cfg.channels.ENa)
             cursor += 2 * n
 
-        if cfg.channels.enable_SK and res.ca_i is not None:
-            z_act = z_inf_SK(res.ca_i[0, :])
-            res.currents['SK'] = morph['gSK_v'][0] * z_act * (v[0, :] - cfg.channels.EK)
+        if cfg.channels.enable_SK:
+            z_sk = y[cursor:cursor + n, :]
+            res.currents['SK'] = morph['gSK_v'][0] * z_sk[0, :] * (v[0, :] - cfg.channels.EK)
+            cursor += n
 
         # ── ATP consumption estimate ──────────────────────────────────
         # Na+/K+-ATPase: 3 Na+ pumped per ATP hydrolysis (Skou 1957).

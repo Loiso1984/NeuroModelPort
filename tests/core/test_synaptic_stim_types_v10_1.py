@@ -41,5 +41,8 @@ def test_inhibitory_vs_excitatory_sign_effect():
     cfg.stim.stim_type = "GABAA"
     v_gabaa = NeuronSolver(cfg).run_single().v_soma
 
-    assert float(np.max(v_ampa)) > float(np.max(v_gabaa))
+    # With conductance-based synapses, compare late-phase mean voltage.
+    # AMPA (excitatory, E_syn=0 mV) should depolarise; GABA-A (E_syn=-75 mV) should hyperpolarise.
+    late = -500  # last 500 samples
+    assert float(np.mean(v_ampa[late:])) > float(np.mean(v_gabaa[late:]))
 

@@ -61,6 +61,7 @@ class ChannelParams(BaseModel):
 
     enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated K⁺, spike adaptation)")
     gSK_max:   float = Field(default=2.0,  description="Max SK conductance (mS/cm²)")
+    tau_SK:    float = Field(default=10.0,  description="SK gate time constant (ms, Hirschberg 1998: 5-50 ms)")
 
     enable_ITCa: bool  = Field(default=False, description="Enable T-type Ca²⁺ current (low-threshold, CaV3.x)")
     gTCa_max:    float = Field(default=2.0,  description="Max T-type Ca conductance (mS/cm², Destexhe 1998)")
@@ -109,6 +110,8 @@ class EnvironmentParams(BaseModel):
     Q10_NaP:   float = Field(default=2.2,              description="Q10 for persistent Na channel (x gate)")
     # Resurgent Na: Raman & Bean 2001 — same Na channel family (Q10 ~ 2.2)
     Q10_NaR:   float = Field(default=2.2,              description="Q10 for resurgent Na channel (y,j gates)")
+    # NMDA Mg²⁺ block: Jahr & Stevens 1990, J Neurosci 10:1830
+    Mg_ext:    float = Field(default=1.0,              description="Extracellular [Mg²⁺] (mM, for NMDA block)")
 
     @property
     def phi(self) -> float:

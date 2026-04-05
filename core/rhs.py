@@ -17,71 +17,64 @@ def nernst_ca_ion(ca_i, ca_ext, t_kelvin):
     ca_i_safe = max(ca_i, 1e-9)
     return (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(ca_ext / ca_i_safe) * 1000.0
 
+@njit(float64(float64, float64, float64, float64), cache=True)
+def _biexp_waveform(t, t0, tau_rise, tau_decay):
+    """Normalised dual-exponential waveform, peak = 1.0 at t_peak."""
+    if t < t0:
+        return 0.0
+    dt = t - t0
+    t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
+    norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
+    return (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
+
 @njit(float64(float64, int32, float64, float64, float64, float64), cache=True)
 def get_stim_current(t, stype, iext, t0, td, atau):
-    """Математика всех типов стимулов v10. | Mathematics of all stimulus types v10."""
-    if stype == 1: # pulse
+    """Stimulus waveform for all types.
+
+    For synaptic types (stype >= 4): returns CONDUCTANCE waveform g(t)
+    scaled by |iext| (= g_max in mS/cm²). The RHS multiplies by (V - E_syn).
+    For const/pulse/alpha: returns current directly (µA/cm²).
+    """
+    if stype == 1:  # pulse
         return iext if t0 <= t <= t0 + td else 0.0
-    elif stype == 2: # alpha (EPSC)
-        if t < t0: return 0.0
+    elif stype == 2:  # alpha (EPSC) — current-based
+        if t < t0:
+            return 0.0
         dt = (t - t0) / atau
         return iext * dt * np.exp(1.0 - dt)
-    elif stype == 4:  # AMPA (fast excitatory)
-        if t < t0:
-            return 0.0
-        dt = t - t0
-        tau_rise = 0.5
-        tau_decay = 3.0
-        t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-        norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-        return abs(iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    elif stype == 5:  # NMDA (slow excitatory)
-        if t < t0:
-            return 0.0
-        dt = t - t0
-        tau_rise = 5.0
-        tau_decay = 80.0
-        t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-        norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-        return abs(iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    elif stype == 6:  # GABA-A (fast inhibitory)
-        if t < t0:
-            return 0.0
-        dt = t - t0
-        tau_rise = 1.0
-        tau_decay = 7.0
-        t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-        norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-        return -abs(iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    elif stype == 7:  # GABA-B (slow inhibitory)
-        if t < t0:
-            return 0.0
-        dt = t - t0
-        tau_rise = 50.0
-        tau_decay = 300.0
-        t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-        norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-        return -abs(iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    elif stype == 8:  # Kainate (intermediate excitation)
-        if t < t0:
-            return 0.0
-        dt = t - t0
-        tau_rise = 1.5
-        tau_decay = 12.0
-        t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-        norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-        return abs(iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    elif stype == 9:  # Nicotinic ACh (fast excitation, slightly slower than AMPA)
-        if t < t0:
-            return 0.0
-        dt = t - t0
-        tau_rise = 3.0
-        tau_decay = 25.0
-        t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-        norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-        return abs(iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    # По умолчанию const (0) | Default const (0)
+    elif stype == 4:  # AMPA (conductance-based)
+        return abs(iext) * _biexp_waveform(t, t0, 0.5, 3.0)
+    elif stype == 5:  # NMDA (conductance-based, Mg block applied in RHS)
+        return abs(iext) * _biexp_waveform(t, t0, 5.0, 80.0)
+    elif stype == 6:  # GABA-A (conductance-based)
+        return abs(iext) * _biexp_waveform(t, t0, 1.0, 7.0)
+    elif stype == 7:  # GABA-B (conductance-based)
+        return abs(iext) * _biexp_waveform(t, t0, 50.0, 300.0)
+    elif stype == 8:  # Kainate (conductance-based)
+        return abs(iext) * _biexp_waveform(t, t0, 1.5, 12.0)
+    elif stype == 9:  # Nicotinic ACh (conductance-based)
+        return abs(iext) * _biexp_waveform(t, t0, 3.0, 25.0)
+    # Default: const (stype == 0)
     return iext
+
+@njit(float64(float64, float64), cache=True)
+def nmda_mg_block(V, Mg_ext):
+    """Voltage-dependent Mg²⁺ block of NMDA receptors.
+
+    B(V) = 1 / (1 + [Mg²⁺]/3.57 * exp(-0.062 * V))
+    Reference: Jahr & Stevens 1990, J Neurosci 10:1830
+    """
+    return 1.0 / (1.0 + (Mg_ext / 3.57) * np.exp(-0.062 * V))
+
+@njit(float64(int32), cache=True)
+def _get_syn_reversal(stype):
+    """Return synaptic reversal potential for conductance-based types."""
+    if stype == 6:   # GABA-A (Cl⁻, Bormann 1988)
+        return -75.0
+    elif stype == 7:  # GABA-B (K⁺ via GIRK, Lüscher 1997)
+        return -95.0
+    # Excitatory: AMPA(4), NMDA(5), Kainate(8), Nicotinic(9) — cation, ~0 mV
+    return 0.0
 
 @njit(cache=True)
 def rhs_multicompartment(
@@ -95,7 +88,7 @@ def rhs_multicompartment(
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
     phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
-    t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
+    t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, stim_comp, stim_mode,
     use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
@@ -155,6 +148,10 @@ def rhs_multicompartment(
         cursor += n_comp
         off_j = cursor
         cursor += n_comp
+    off_zsk = cursor   # SK gate (delayed kinetics)
+    if en_sk:
+        off_zsk = cursor
+        cursor += n_comp
     off_ca = cursor
     if dyn_ca:
         cursor += n_comp
@@ -168,9 +165,14 @@ def rhs_multicompartment(
         cursor += 1
 
     # --- Stimulus: compute once, apply to target compartments ---
-    # We use i_stim array because stimulus targets specific compartments
+    # For stype >= 4 (synaptic): base_current is conductance g(t) [mS/cm²]
+    # and will be multiplied by (V - E_syn) per-compartment in the main loop.
+    # For stype < 4 (const/pulse/alpha): base_current is raw current [µA/cm²].
+    is_conductance_based = (stype >= 4)
     i_stim = np.zeros(n_comp)
     base_current = get_stim_current(t, stype, iext, t0, td, atau)
+    e_syn = _get_syn_reversal(stype) if is_conductance_based else 0.0
+    is_nmda = (stype == 5)
 
     v_filtered_primary = 0.0
     if use_dfilter_primary == 1:
@@ -186,11 +188,21 @@ def rhs_multicompartment(
         use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
         v_filtered_primary,
     )
+    # For conductance-based: i_stim will hold g_syn values after distribution.
+    # We need a separate array for dual stim conductance to keep them independent.
+    i_stim_2 = np.zeros(n_comp)
+    is_cond_2 = False
+    e_syn_2 = 0.0
+    is_nmda_2 = False
     d_vfiltered_dt_secondary = 0.0
     if dual_stim_enabled == 1:
+        is_cond_2 = (stype_2 >= 4)
+        e_syn_2 = _get_syn_reversal(stype_2) if is_cond_2 else 0.0
+        is_nmda_2 = (stype_2 == 5)
         base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2)
         d_vfiltered_dt_secondary = apply_secondary_stimulus_current(
-            i_stim, n_comp, base_current_2,
+            i_stim_2 if is_cond_2 else i_stim,
+            n_comp, base_current_2,
             stim_comp_2, stim_mode_2,
             use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
             v_filtered_secondary,
@@ -255,12 +267,8 @@ def rhs_multicompartment(
                 i_ca_influx += -i_tca
 
         if en_sk:
-            if dyn_ca:
-                ca_sk = y[off_ca + i]
-            else:
-                ca_sk = ca_rest
-            z_act = z_inf_SK(ca_sk)
-            i_ion += gsk_v[i] * z_act * (vi - ek)
+            zi = y[off_zsk + i]  # SK gate state variable (ODE-based)
+            i_ion += gsk_v[i] * zi * (vi - ek)
 
         # M-type K (slow non-inactivating, KCNQ2/3)
         if en_im:
@@ -284,8 +292,30 @@ def rhs_multicompartment(
             col = l_indices[j_idx]
             i_ax += l_data[j_idx] * y[off_v + col]
 
+        # Synaptic current: conductance-based or current-based
+        i_syn = 0.0
+        if is_conductance_based:
+            g_syn = i_stim[i]  # distributed conductance [mS/cm²]
+            if is_nmda:
+                g_syn *= nmda_mg_block(vi, mg_ext)
+            i_syn = g_syn * (vi - e_syn)  # outward convention: positive = depolarizing at V < E_syn
+            # Flip sign: g*(V-E) is positive when V>E (outward for excitatory)
+            # We need inward current for excitation → subtract from i_ion
+            i_stim_eff = -i_syn
+        else:
+            i_stim_eff = i_stim[i]
+        # Dual stim contribution
+        if dual_stim_enabled == 1:
+            if is_cond_2:
+                g2 = i_stim_2[i]
+                if is_nmda_2:
+                    g2 *= nmda_mg_block(vi, mg_ext)
+                i_stim_eff -= g2 * (vi - e_syn_2)
+            else:
+                i_stim_eff += i_stim_2[i]
+
         # dV/dt
-        dydt[off_v + i] = (i_stim[i] - i_ion + i_ax) / cm_v[i]
+        dydt[off_v + i] = (i_stim_eff - i_ion + i_ax) / cm_v[i]
 
         # Gate derivatives (HH core) — channel-specific Q10
         dydt[off_m + i] = phi_na * (am(vi) * (1.0 - mi) - bm(vi) * mi)
@@ -328,6 +358,17 @@ def rhs_multicompartment(
             ji = y[off_j + i]
             dydt[off_y + i] = phi_nar * (ay_NaR(vi) * (1.0 - yi) - by_NaR(vi) * yi)
             dydt[off_j + i] = phi_nar * (aj_NaR(vi) * (1.0 - ji) - bj_NaR(vi) * ji)
+
+        # SK gate ODE: dz/dt = (z_inf(Ca) - z) / tau_SK
+        # Hirschberg et al. 1998, J Gen Physiol 111:565
+        if en_sk:
+            zi = y[off_zsk + i]
+            if dyn_ca:
+                ca_sk = y[off_ca + i]
+            else:
+                ca_sk = ca_rest
+            z_inf = z_inf_SK(ca_sk)
+            dydt[off_zsk + i] = (z_inf - zi) / tau_sk
 
         # Calcium dynamics
         if dyn_ca:

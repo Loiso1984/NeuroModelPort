@@ -68,7 +68,7 @@ class ChannelRegistry:
         ))
         
         # 7. SK (Ca2+-activated K+)
-        # No standard alpha/beta gates — z depends on [Ca], handled separately in RHS.
+        # Gate z_sk: ODE-based with tau_SK (Hirschberg 1998), z_inf depends on [Ca²⁺]
         self.channels.append(Channel(name="SK", color=(0.9, 0.1, 0.9)))
 
         # 8. I_T (T-type Ca2+, low-threshold, CaV3.x — Destexhe 1998)
@@ -150,6 +150,11 @@ class ChannelRegistry:
             for alpha, beta in [(ay_NaR, by_NaR), (aj_NaR, bj_NaR)]:
                 a_val, b_val = alpha(V0), beta(V0)
                 y0_list.append(np.full(N, a_val / (a_val + b_val)))
+
+        # SK gate z_sk: initialise at steady-state z_inf(Ca_rest)
+        if config.channels.enable_SK:
+            z0 = z_inf_SK(config.calcium.Ca_rest)
+            y0_list.append(np.full(N, z0))
 
         # Динамика кальция
         if config.calcium.dynamic_Ca:
