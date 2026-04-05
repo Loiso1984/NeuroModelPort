@@ -106,6 +106,11 @@ class MorphologyBuilder:
         # Membrane capacitance [µF/cm²]
         Cm_v = np.full(N_comp, cc.Cm, dtype=np.float64)
         
+        # Apply trunk gNa reduction (demyelination model: low internodal Na density)
+        if not mc.single_comp and mc.N_trunk > 0 and mc.gNa_trunk_mult < 1.0:
+            trunk_slice = slice(1 + mc.N_ais, 1 + mc.N_ais + mc.N_trunk)
+            gNa_v[trunk_slice] *= mc.gNa_trunk_mult
+
         # Apply AIS multipliers for all channels (matches Scilab v9.0 behaviour)
         if not mc.single_comp and mc.N_ais > 0:
             ais_slice = slice(1, 1 + mc.N_ais)

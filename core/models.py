@@ -22,6 +22,9 @@ class MorphologyParams(BaseModel):
     # Axon trunk
     N_trunk: int   = Field(default=35, ge=0, description="Number of trunk segments")
     d_trunk: float = Field(default=2e-4,  gt=0, description="Trunk diameter (cm)")
+    gNa_trunk_mult: float = Field(default=1.0, ge=0.0, le=1.0,
+        description="gNa multiplier in trunk (0–1×). Default 1.0 = uniform density; "
+                    "set <1 to model internodal Na-channel scarcity (demyelination).")
 
     # Bifurcation and branches (Rall's law)
     N_b1: int  = Field(default=4,    ge=0, description="Branch 1 segments")
