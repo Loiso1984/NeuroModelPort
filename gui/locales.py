@@ -299,6 +299,10 @@ class Translator:
                 "M: Epilepsy (v10 SCN1A mutation)": "M: Epilepsy (v10 SCN1A mutation)",
                 "N: Alzheimer's (v10 Calcium Toxicity)": "N: Alzheimer's (v10 Calcium Toxicity)",
                 "O: Hypoxia (v10 ATP-pump failure)": "O: Hypoxia (v10 ATP-pump failure)",
+                "P: Thalamic Reticular Nucleus (TRN Spindles)": "P: Thalamic Reticular Nucleus (TRN Spindles)",
+                "Q: Striatal Spiny Projection (SPN)": "Q: Striatal Spiny Projection (SPN)",
+                "R: Cholinergic Neuromodulation (ACh)": "R: Cholinergic Neuromodulation (ACh)",
+                "S: Pathology: Dravet Syndrome (SCN1A LOF)": "S: Pathology: Dravet Syndrome (SCN1A LOF)",
             },
             'RU': {
                 "A: Squid Giant Axon (HH 1952)": "A: Гигантский аксон кальмара (ХХ 1952)",
@@ -316,6 +320,10 @@ class Translator:
                 "M: Epilepsy (v10 SCN1A mutation)": "M: Эпилепсия (мутация SCN1A v10)",
                 "N: Alzheimer's (v10 Calcium Toxicity)": "N: Болезнь Альцгеймера (токсичность кальция v10)",
                 "O: Hypoxia (v10 ATP-pump failure)": "O: Гипоксия (отказ АТФ-насоса v10)",
+                "P: Thalamic Reticular Nucleus (TRN Spindles)": "P: Ретикулярное ядро таламуса (TRN веретёна)",
+                "Q: Striatal Spiny Projection (SPN)": "Q: Шиповатый проекционный нейрон (SPN)",
+                "R: Cholinergic Neuromodulation (ACh)": "R: Холинергическая нейромодуляция (ACh)",
+                "S: Pathology: Dravet Syndrome (SCN1A LOF)": "S: Патология: Синдром Драве (SCN1A LOF)",
             }
         }
         return preset_translations.get(self.lang, {}).get(preset_name, preset_name)

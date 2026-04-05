@@ -68,6 +68,7 @@ class SimulationResult:
 
         self.currents:    dict  = {}
         self.atp_estimate: float = 0.0
+        self.atp_breakdown: dict = {}  # {Na_pump, Ca_pump, baseline, total}
 
         # Morphology dict stored for post-analysis (current balance, etc.)
         self.morph: dict = {}
@@ -391,10 +392,42 @@ class NeuronSolver:
             z_act = z_inf_SK(res.ca_i[0, :])
             res.currents['SK'] = morph['gSK_v'][0] * z_act * (v[0, :] - cfg.channels.EK)
 
-        # ATP estimate: Q_Na [nC/cm²] → nmol ATP/cm²
+        # ── ATP consumption estimate ──────────────────────────────────
+        # Na+/K+-ATPase: 3 Na+ pumped per ATP hydrolysis (Skou 1957).
+        # Ca²+-ATPase (PMCA): 1 Ca²+ pumped per ATP (Bhatt et al. 2005).
+        # Baseline pump: resting Na+/K+-ATPase ≈ 50% of neuronal ATP even
+        # without spiking (Attwell & Laughlin 2001, J Cereb Blood Flow Metab).
         dt = cfg.stim.dt_eval
+        F = 96485.33  # Faraday constant [C/mol]
+
+        # 1. Na+ pump cost: |Q_Na| / (3·F)  [µC/cm²·ms → mol → nmol ATP/cm²]
         q_na = float(np.sum(np.abs(res.currents['Na']))) * dt
-        res.atp_estimate = (q_na * 1e-9) / (3.0 * 96485.33) * 1e9
+        if 'NaP' in res.currents:
+            q_na += float(np.sum(np.abs(res.currents['NaP']))) * dt
+        if 'NaR' in res.currents:
+            q_na += float(np.sum(np.abs(res.currents['NaR']))) * dt
+        atp_na = (q_na * 1e-9) / (3.0 * F) * 1e9  # nmol/cm²
+
+        # 2. Ca²+ pump cost: |Q_Ca| / (1·2F)  [divalent ion, z=2]
+        atp_ca = 0.0
+        for ca_key in ('ICa', 'ITCa'):
+            if ca_key in res.currents:
+                q_ca = float(np.sum(np.abs(res.currents[ca_key]))) * dt
+                atp_ca += (q_ca * 1e-9) / (1.0 * 2.0 * F) * 1e9
+
+        # 3. Baseline Na+/K+-ATPase resting cost
+        # ~0.4 nmol ATP/(cm²·s) for a resting neuron (Attwell & Laughlin 2001)
+        t_sim_s = cfg.stim.t_sim * 1e-3
+        atp_baseline = 0.4 * t_sim_s  # nmol/cm²
+
+        atp_total = atp_na + atp_ca + atp_baseline
+        res.atp_estimate = atp_total
+        res.atp_breakdown = {
+            'Na_pump': atp_na,
+            'Ca_pump': atp_ca,
+            'baseline': atp_baseline,
+            'total': atp_total,
+        }
 
     # ─────────────────────────────────────────────────────────────────
     def run_monte_carlo(self) -> list:

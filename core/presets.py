@@ -46,6 +46,10 @@ def get_preset_names():
         "M: Epilepsy (v10 SCN1A mutation)",
         "N: Alzheimer's (v10 Calcium Toxicity)",
         "O: Hypoxia (v10 ATP-pump failure)",
+        "P: Thalamic Reticular Nucleus (TRN Spindles)",
+        "Q: Striatal Spiny Projection (SPN)",
+        "R: Cholinergic Neuromodulation (ACh)",
+        "S: Pathology: Dravet Syndrome (SCN1A LOF)",
     ]
 
 def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
@@ -454,6 +458,108 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Validated: 10 µA/cm² → ~10 spikes, 65 Hz, Vmax ≈ 46 mV (slower than 37°C)
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 10.0
+
+    # --- 16. ТАЛАМИЧЕСКОЕ РЕТИКУЛЯРНОЕ ЯДРО (TRN — СОННЫЕ ВЕРЕТЁНА) ---
+    elif "Reticular" in name or "TRN" in name:
+        # TRN neurons: GABAergic, high I_T density, generate sleep spindles.
+        # Reference: Destexhe et al. 1996, J Neurosci 16:169;
+        #            Huguenard & Prince 1992, J Neurosci 12:3804
+        cfg.morphology.single_comp = True
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 60.0, 10.0, 0.05
+        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -72.0
+        cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 24.0, 2.3
+        # I_T: very high density in TRN dendrites (Huguenard & Prince 1992)
+        # Somatic density ~3-5× higher than in relay neurons
+        cfg.channels.enable_ITCa = True
+        cfg.channels.gTCa_max = 5.0     # High T-type: drives robust spindle-like bursts
+        cfg.channels.enable_Ih = True
+        cfg.channels.gIh_max = 0.01     # Lower Ih than relay — less sag, more burst
+        cfg.channels.enable_ICa = False
+        cfg.channels.enable_SK = False
+        cfg.calcium.dynamic_Ca = True
+        cfg.calcium.Ca_rest = 5e-5
+        cfg.calcium.Ca_ext = 2.0
+        cfg.calcium.tau_Ca = 150.0       # Fast extrusion
+        cfg.calcium.B_Ca = 1e-5
+        cfg.morphology.d_soma = 20e-4
+        cfg.stim.jacobian_mode = 'sparse_fd'
+        # Low tonic drive: TRN bursts from I_T de-inactivation at hyperpolarized Vm
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 2.0
+
+    # --- 17. ШИПОВАТЫЙ ПРОЕКЦИОННЫЙ НЕЙРОН СТРИАТУМА (SPN) ---
+    elif "Striatal" in name or "SPN" in name:
+        # Medium spiny neuron (MSN/SPN): characteristic long latency to first
+        # spike due to strong I_A and hyperpolarized resting potential.
+        # Reference: Nisenbaum & Wilson 1995, J Neurophysiol 74:1163;
+        #            Surmeier et al. 1989, Brain Res 473:187
+        cfg.morphology.single_comp = True
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 80.0, 8.0, 0.04
+        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -80.0  # Very hyperpolarized rest
+        cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
+        # Strong I_A: key feature — delays spike onset by hundreds of ms
+        cfg.channels.enable_IA = True
+        cfg.channels.gA_max = 2.0       # High I_A density (Nisenbaum & Wilson 1995)
+        # Ih: inward rectification contributes to ramp-like depolarization
+        cfg.channels.enable_Ih = True
+        cfg.channels.gIh_max = 0.01
+        cfg.channels.enable_ICa = False
+        cfg.channels.enable_SK = False
+        cfg.calcium.dynamic_Ca = False
+        cfg.morphology.d_soma = 15e-4   # Small soma (12-20 µm)
+        cfg.stim.jacobian_mode = 'sparse_fd'
+        # Moderate const stimulus: shows characteristic delayed firing onset
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 6.0
+
+    # --- 18. ХОЛИНЕРГИЧЕСКАЯ НЕЙРОМОДУЛЯЦИЯ (ACh: Бодрствование vs Сон) ---
+    elif "Cholinergic" in name or "ACh" in name:
+        # L5 pyramidal base + I_M. ACh blocks I_M → shift from adapting to tonic.
+        # With I_M enabled: adapting/bursting (sleep-like, M-current dampens excitability).
+        # With I_M blocked (gIM_max→0 via GUI): tonic high-frequency (awake/attentive).
+        # Reference: Brown & Adams 1980, Nature 283:673;
+        #            McCormick & Prince 1986, J Physiol 375:169
+        apply_preset(cfg, "Pyramidal L5 (Mainen 1996)")
+        cfg.morphology.single_comp = True
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        cfg.channels.gNa_max = 56.0
+        # I_M: muscarinic-sensitive K+ current — the ACh target
+        cfg.channels.enable_IM = True
+        cfg.channels.gIM_max = 0.5      # Yamada 1989 somatic density
+        # Moderate Ih for subthreshold dynamics
+        cfg.channels.enable_Ih = True
+        cfg.channels.gIh_max = 0.01
+        cfg.stim.jacobian_mode = 'sparse_fd'
+        # Const stimulus: with I_M → adapting; user blocks gIM → tonic firing
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 8.0
+
+    # --- 19. ПАТОЛОГИЯ: СИНДРОМ ДРАВЕ (SCN1A LOSS-OF-FUNCTION) ---
+    elif "Dravet" in name:
+        # FS interneuron with reduced gNa (SCN1A haploinsufficiency).
+        # Paradox: Na-channel loss-of-function in inhibitory neurons causes
+        # network hyperexcitability (disinhibition) → epileptic seizures.
+        # Reference: Yu et al. 2006, Nat Neurosci 9:1142;
+        #            Ogiwara et al. 2007, J Neurosci 27:5903
+        apply_preset(cfg, "FS Interneuron (Wang-Buzsaki)")
+        cfg.morphology.single_comp = True
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        # SCN1A haploinsufficiency: ~50% reduction in Nav1.1
+        # FS interneurons depend heavily on Nav1.1 for sustained firing
+        cfg.channels.gNa_max = 60.0     # Reduced: 120 → 60 (50% Nav1.1 loss)
+        cfg.channels.enable_IA = True
+        cfg.channels.gA_max = 0.8       # FS baseline
+        cfg.stim.jacobian_mode = 'sparse_fd'
+        # Strong const stimulus: FS interneuron fails to maintain high-freq firing
+        # → reduced inhibitory output → network disinhibition
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 40.0            # Same drive as FS base, but fewer spikes
 
     # Stage/mode overlays for selected presets.
     if "Thalamic" in name:

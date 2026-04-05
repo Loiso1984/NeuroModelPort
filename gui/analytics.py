@@ -484,8 +484,15 @@ class AnalyticsWidget(QTabWidget):
         ]
         for name, q in Q.items():
             lines.append(f"║    Q_{name:<5} = {q:.2f} nC/cm²" + " " * 30 + "║")
+        atp_bd = stats.get('atp_breakdown', {})
+        atp_na_s = f"{atp_bd.get('Na_pump', 0.0):.3e}" if atp_bd else "—"
+        atp_ca_s = f"{atp_bd.get('Ca_pump', 0.0):.3e}" if atp_bd else "—"
+        atp_bl_s = f"{atp_bd.get('baseline', 0.0):.3e}" if atp_bd else "—"
         lines += [
-            f"║    ATP est. = {atp:.4e} nmol/cm²" + " " * 25 + "║",
+            f"║    ATP total  = {atp:.4e} nmol/cm²" + " " * 22 + "║",
+            f"║      Na⁺ pump = {atp_na_s} nmol/cm²" + " " * 23 + "║",
+            f"║      Ca²⁺pump = {atp_ca_s} nmol/cm²" + " " * 23 + "║",
+            f"║      baseline = {atp_bl_s} nmol/cm²" + " " * 23 + "║",
             "╚══════════════════════════════════════════════════════════════════╝",
         ]
 
