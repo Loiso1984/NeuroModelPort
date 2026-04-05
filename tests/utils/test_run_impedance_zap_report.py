@@ -186,3 +186,44 @@ def test_impedance_report_strict_mode_passes_when_all_guards_ok(monkeypatch, tmp
     assert artifact["strict_mode"] is True
     assert artifact["all_guard_ok"] is True
     assert artifact["failed_case_ids"] == []
+
+
+def test_impedance_report_supports_custom_output_and_failure_print(monkeypatch, tmp_path, capsys):
+    _inject_fake_pydantic(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rpt, "CASES", [{"id": "bad", "preset": "bad", "f_res_range": (0.5, 40.0)}])
+
+    def fake_run_case(case: dict, *, fmin_hz: float, fmax_hz: float) -> dict:
+        return {
+            "id": case["id"],
+            "preset": case["preset"],
+            "valid": True,
+            "guard_ok": False,
+            "guard_reasons": ["f_res_out_of_expected_range"],
+            "f_res_hz": 60.0,
+            "z_res_kohm_cm2": 5.0,
+            "f_res_expected_range_hz": [0.5, 40.0],
+            "v_peak_mV": -40.0,
+            "v_min_mV": -70.0,
+        }
+
+    monkeypatch.setattr(rpt, "run_case", fake_run_case)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_impedance_zap_report.py",
+            "--output",
+            "custom/report.json",
+            "--print-failures",
+        ],
+    )
+
+    rc = rpt.main()
+    out = capsys.readouterr().out
+    artifact = json.loads(Path("custom/report.json").read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert "Saved: custom/report.json" in out
+    assert " - bad: f_res_out_of_expected_range" in out
+    assert artifact["failed_case_ids"] == ["bad"]

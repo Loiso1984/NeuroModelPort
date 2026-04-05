@@ -19,6 +19,7 @@ This registry separates active deterministic validators from legacy/compatibilit
 - `run_impedance_zap_report.py`
   - supports strict gate mode (`--strict`) and configurable analysis band (`--fmin/--fmax`).
   - emits `guard_reasons` (per row) and `failed_case_ids` (artifact-level) for triage.
+  - supports custom artifact path (`--output`) and optional stdout failure list (`--print-failures`).
 
 ## Legacy / Compatibility Utilities
 

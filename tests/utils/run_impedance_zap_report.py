@@ -105,10 +105,13 @@ def main() -> int:
     parser.add_argument("--fmin", type=float, default=0.5, help="Lower impedance analysis frequency bound")
     parser.add_argument("--fmax", type=float, default=80.0, help="Upper impedance analysis frequency bound")
     parser.add_argument("--strict", action="store_true", help="Return non-zero if any guard fails")
+    parser.add_argument("--output", type=str, default=str(ARTIFACT), help="Artifact output JSON path")
+    parser.add_argument("--print-failures", action="store_true", help="Print failed case ids and reasons")
     args = parser.parse_args()
     if args.fmin <= 0.0 or args.fmax <= args.fmin:
         print("[WARN] invalid frequency bounds: require 0 < --fmin < --fmax")
         return 2
+    out_path = Path(args.output)
 
     try:
         import pydantic  # noqa:F401
@@ -141,11 +144,15 @@ def main() -> int:
         "all_guard_ok": (ok == total),
         "failed_case_ids": [r["id"] for r in rows if not r.get("guard_ok", False)],
     }
-    ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
-    ARTIFACT.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
-    print(f"Saved: {ARTIFACT}")
+    print(f"Saved: {out_path}")
     print(f"Guard OK: {ok}/{total}")
+    if args.print_failures and artifact["failed_case_ids"]:
+        for row in rows:
+            if not row.get("guard_ok", False):
+                print(f" - {row.get('id')}: {','.join(row.get('guard_reasons', []))}")
 
     if args.strict and ok != total:
         return 1
