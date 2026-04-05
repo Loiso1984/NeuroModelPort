@@ -2,6 +2,18 @@
 
 Current status snapshot after latest branch-contour runs.
 
+## v10.2 Critique Intake (newly confirmed priority)
+
+Based on current code audit versus v10.2 critique, these items are explicitly treated as open and priority-ordered:
+
+- `P0` RHS hot-path allocation removal in `core/rhs.py` + solver/jacobian contract synchronization.
+- `P0` GUI analytics update-cycle memory hardening (remove repeated clear/cla in hot paths, shift to persistent artists).
+- `P0` Preset F (MS) demyelination severity recalibration until conduction ratio reflects pathological attenuation.
+- `P1` RHS argument explosion refactor (reduce positional-argument fragility).
+- `P1` Calcium upper-bound safety clamp for long pathological runs.
+
+Execution source of truth for this queue is now `CurrentTasks10.2.md` + `AIDER_PLAN.md` (v10.2 section).
+
 ## Closed in validation contour
 
 - `1` Calcium/Nernst calibration checks (core acceptance layer): active branch tests + extended deterministic report artifacts.

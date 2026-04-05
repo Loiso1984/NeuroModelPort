@@ -304,6 +304,11 @@ attenuation = np.exp(-distance_um / space_constant_um)
 Вердикт: Ваш фильтр сначала ослабляет сигнал как DC (константа), а потом "размазывает" его по времени ФНЧ. Это не совсем физично (в реальности фильтрация и затухание — это единый процесс дисперсии в кабеле). Но опять же, для "одиночного нейрона с прокси" — это гениально простой и быстрый обходной путь. Просто не заявляйте это как точное кабельное решение.
 ---
 
+## v10.2 Execution Control Note
+- Canonical execution queue and phase gating are tracked in `CurrentTasks10.2.md`.
+- This plan remains normative for technical implementation details.
+- If a conflict appears, use `ATTENTION.md` invariants first, then this plan, then status docs.
+
 ## 🛠️ AGENT ACTION PLAN v10.2: Critical Fixes & Hardening
 *Supersedes ad-hoc priority lists. Execute phases sequentially. Commit after each phase.*
 
@@ -371,3 +376,32 @@ attenuation = np.exp(-distance_um / space_constant_um)
 - [ ] In `_build_tabs`, initialize empty `QWidget` placeholders for heavy tabs (Equilibrium, Phase Plane, Kymograph, etc.).
 - [ ] Hook `QTabWidget.currentChanged` signal.
 - [ ] Instantiate Matplotlib figure + call `_update_*` only on first tab click (using `self._last_result`).
+
+---
+
+### 🔵 PHASE 5: PRESET STRESS VALIDATION & REFERENCE CONSISTENCY
+
+#### 5.1 Wide-Range Stress Harness (`tests/utils`, `tests/branches`)
+- [ ] Validate **all** presets on broad sweeps (`Iext`, `t_sim`, `T_celsius`, noise, morphology multipliers).
+- [ ] Collect structured metrics per run (spike count/rate, Vm bounds, delay, attenuation ratios, NaN/inf flags).
+- [ ] Produce `PASS/WARN/FAIL` summary per preset with anomaly excerpts.
+
+#### 5.2 Physiological Plausibility Audit (`core/presets.py`, docs)
+- [ ] Check preset parameters against reference ranges/literature notes (`g*`, `E_rev`, `Ra`, morphology scales).
+- [ ] Add sanity rules for “common-sense physiology” (no absurd baseline regimes under nominal inputs).
+- [ ] Record expected-vs-observed ranges in `docs/VALIDATION_COVERAGE_STATUS.md`.
+
+---
+
+### 🟣 PHASE 6: FINAL POLISH — DOCS, BILINGUAL QA, QUICK GUIDE
+
+#### 6.1 Documentation Completion
+- [ ] Sync core docs with implemented functionality and validation workflow.
+- [ ] Add concise “what changed / how to verify / known limits” sections for current version.
+
+#### 6.2 RU/EN Consistency Check
+- [ ] Verify key docs + GUI labels/messages for semantic parity in RU/EN.
+- [ ] Fix missing or drifting translations in `gui/locales.py` and primary docs.
+
+#### 6.3 User Quick-Start
+- [ ] Add short user guide: setup, run simulation, read oscilloscope/topology/analytics, export/validation basics.

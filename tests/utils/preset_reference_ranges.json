@@ -1,0 +1,33 @@
+{
+  "default": {
+    "firing_hz": [0.0, 250.0],
+    "v_min": [-130.0, -40.0],
+    "v_max": [0.0, 120.0]
+  },
+  "keyword_rules": [
+    {
+      "match": "FS Interneuron",
+      "firing_hz": [20.0, 450.0],
+      "v_min": [-120.0, -40.0],
+      "v_max": [10.0, 120.0]
+    },
+    {
+      "match": "Pyramidal",
+      "firing_hz": [0.0, 120.0],
+      "v_min": [-120.0, -40.0],
+      "v_max": [0.0, 120.0]
+    },
+    {
+      "match": "Thalamic Relay",
+      "firing_hz": [0.0, 180.0],
+      "v_min": [-130.0, -40.0],
+      "v_max": [0.0, 120.0]
+    },
+    {
+      "match": "Purkinje",
+      "firing_hz": [20.0, 350.0],
+      "v_min": [-120.0, -40.0],
+      "v_max": [0.0, 120.0]
+    }
+  ]
+}

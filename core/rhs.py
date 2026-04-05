@@ -9,11 +9,13 @@ from .dual_stimulation import (
 F_CONST = 96485.33
 R_GAS = 8.314
 TEMP_ZERO = 273.15
+CA_I_MIN_M_M = 1e-9
+CA_I_MAX_M_M = 10.0
 
 @njit(float64(float64, float64, float64), cache=True)
 def nernst_ca_ion(ca_i, ca_ext, t_kelvin):
     """Динамический потенциал Нернста для Кальция (z=2). | Dynamic Nernst potential for Calcium (z=2)."""
-    ca_i_safe = max(ca_i, 1e-9)
+    ca_i_safe = min(max(ca_i, CA_I_MIN_M_M), CA_I_MAX_M_M)
     return (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(ca_ext / ca_i_safe) * 1000.0
 
 @njit(float64(float64, float64, float64, float64), cache=True)
@@ -116,13 +118,13 @@ def rhs_multicompartment(
     t, y, n_comp,
     # Флаги включения каналов
     en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
-    # Векторы проводимостей (уже с учетом AIS-множителей)
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
+    # Packed per-compartment vectors (rows): conductances + thermal phi
+    gbar_mat,  # [gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar]
     # Потенциалы реверсии
     ena, ek, el, eih, ea,
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
-    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
+    phi_mat,   # [phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar]
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
@@ -142,6 +144,28 @@ def rhs_multicompartment(
     """
 
     # --- Compute variable offsets in state vector y ---
+    gna_v = gbar_mat[0]
+    gk_v = gbar_mat[1]
+    gl_v = gbar_mat[2]
+    gih_v = gbar_mat[3]
+    gca_v = gbar_mat[4]
+    ga_v = gbar_mat[5]
+    gsk_v = gbar_mat[6]
+    gtca_v = gbar_mat[7]
+    gim_v = gbar_mat[8]
+    gnap_v = gbar_mat[9]
+    gnar_v = gbar_mat[10]
+
+    phi_na = phi_mat[0]
+    phi_k = phi_mat[1]
+    phi_ih = phi_mat[2]
+    phi_ca = phi_mat[3]
+    phi_ia = phi_mat[4]
+    phi_tca = phi_mat[5]
+    phi_im = phi_mat[6]
+    phi_nap = phi_mat[7]
+    phi_nar = phi_mat[8]
+
     off_v = 0
     off_m = n_comp
     off_h = 2 * n_comp
@@ -228,6 +252,9 @@ def rhs_multicompartment(
     if stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 0.0:
         attenuated_current = dfilter_attenuation * base_current
         d_vfiltered_dt_primary = (attenuated_current - v_filtered_primary) / dfilter_tau_ms
+    use_dfilter_primary_eff = use_dfilter_primary
+    if dfilter_tau_ms <= 0.0:
+        use_dfilter_primary_eff = 0
 
     is_cond_2 = False
     e_syn_2 = 0.0
@@ -242,6 +269,9 @@ def rhs_multicompartment(
         if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 0.0:
             attenuated_current_2 = dfilter_attenuation_2 * base_current_2
             d_vfiltered_dt_secondary = (attenuated_current_2 - v_filtered_secondary) / dfilter_tau_ms_2
+    use_dfilter_secondary_eff = use_dfilter_secondary
+    if dfilter_tau_ms_2 <= 0.0:
+        use_dfilter_secondary_eff = 0
 
     # --- Zero the pre-allocated output buffer (Numba-native; no heap alloc) ---
     for _k in range(len(dydt)):
@@ -270,7 +300,7 @@ def rhs_multicompartment(
             ui = y[off_u + i]
             # Nernst for Ca: per-compartment when dynamic, else fixed
             if dyn_ca:
-                ca_i_val = y[off_ca + i]
+                ca_i_val = min(max(y[off_ca + i], CA_I_MIN_M_M), CA_I_MAX_M_M)
                 eca_i = nernst_ca_ion(ca_i_val, ca_ext, t_kelvin)
             else:
                 ca_i_val = ca_rest
@@ -292,7 +322,7 @@ def rhs_multicompartment(
             qi = y[off_q + i]
             if dyn_ca:
                 if not en_ica:  # eca_i not yet computed
-                    ca_i_val = y[off_ca + i]
+                    ca_i_val = min(max(y[off_ca + i], CA_I_MIN_M_M), CA_I_MAX_M_M)
                     eca_i = nernst_ca_ion(ca_i_val, ca_ext, t_kelvin)
             else:
                 if not en_ica:
@@ -331,7 +361,7 @@ def rhs_multicompartment(
         # Stimulus current: evaluate distributed contribution per-compartment.
         i_stim_primary = distributed_stimulus_current_for_comp(
             i, n_comp, base_current, stim_comp, stim_mode,
-            use_dfilter_primary, dfilter_attenuation, v_filtered_primary,
+            use_dfilter_primary_eff, dfilter_attenuation, dfilter_tau_ms, v_filtered_primary,
         )
         if is_conductance_based:
             g_syn = i_stim_primary  # distributed conductance [mS/cm²]
@@ -345,7 +375,7 @@ def rhs_multicompartment(
         if dual_stim_enabled == 1:
             i_stim_secondary = distributed_stimulus_current_for_comp(
                 i, n_comp, base_current_2, stim_comp_2, stim_mode_2,
-                use_dfilter_secondary, dfilter_attenuation_2, v_filtered_secondary,
+                use_dfilter_secondary_eff, dfilter_attenuation_2, dfilter_tau_ms_2, v_filtered_secondary,
             )
             if is_cond_2:
                 g2 = i_stim_secondary
@@ -405,7 +435,7 @@ def rhs_multicompartment(
         if en_sk:
             zi = y[off_zsk + i]
             if dyn_ca:
-                ca_sk = y[off_ca + i]
+                ca_sk = min(max(y[off_ca + i], CA_I_MIN_M_M), CA_I_MAX_M_M)
             else:
                 ca_sk = ca_rest
             z_inf = z_inf_SK(ca_sk)
@@ -415,8 +445,10 @@ def rhs_multicompartment(
         if dyn_ca:
             ca_i_val = y[off_ca + i]
             dca = b_ca[i] * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
-            # Hard clamp: prevent negative calcium
-            if ca_i_val < 1e-9 and dca < 0.0:
+            # Hard clamp: keep calcium in physiologically bounded range.
+            if ca_i_val <= CA_I_MIN_M_M and dca < 0.0:
+                dca = 0.0
+            if ca_i_val >= CA_I_MAX_M_M and dca > 0.0:
                 dca = 0.0
             dydt[off_ca + i] = dca
 

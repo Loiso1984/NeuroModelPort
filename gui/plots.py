@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                                 QCheckBox, QGroupBox, QComboBox, QDoubleSpinBox, QLabel, QSpinBox, QPushButton, QMainWindow)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPageSize, QPdfWriter
+from .delay_target import junction_index, resolve_delay_target
 
 # Colour scheme (matches analytics.py)
 CHAN_COLORS = {
@@ -42,6 +43,30 @@ COMP_COLORS = {
 
 _THRESHOLD_MV = -20.0   # AP detection threshold (mV)
 _MAX_SPIKE_MARKERS = 150  # cap markers to avoid clutter at very high firing rates
+_MAX_PLOT_POINTS = 2500
+
+
+def _plot_point_budget(plot, *, min_points: int = 800, max_points: int = 6000, oversample: float = 2.0) -> int:
+    """Estimate draw-point budget from current viewport width."""
+    width_px = float(plot.getViewBox().sceneBoundingRect().width())
+    if width_px <= 0.0:
+        return _MAX_PLOT_POINTS
+    budget = int(width_px * oversample)
+    return max(min_points, min(max_points, budget))
+
+
+def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POINTS) -> tuple[np.ndarray, np.ndarray]:
+    """Fast stride downsampling for interactive rendering paths."""
+    n = int(len(t))
+    if n <= max_points or max_points <= 0:
+        return t, y
+    step = max(1, n // max_points)
+    t_ds = t[::step]
+    y_ds = y[::step]
+    if len(t_ds) == 0 or t_ds[-1] != t[-1]:
+        t_ds = np.concatenate((t_ds, np.array([t[-1]])))
+        y_ds = np.concatenate((y_ds, np.array([y[-1]])))
+    return t_ds, y_ds
 
 PLOT_THEMES = {
     "Default": {
@@ -100,6 +125,7 @@ class OscilloscopeWidget(QWidget):
         self._curves_v:    dict = {}
         self._curves_gate: dict = {}
         self._curves_i:    dict = {}
+        self._transient_items: list = []
 
     # ─────────────────────────────────────────────────────────────────
     def _title_html(self, text: str, color: str) -> str:
@@ -409,29 +435,14 @@ class OscilloscopeWidget(QWidget):
     def _resolve_delay_target(self, result):
         n = int(result.n_comp)
         mc = result.config.morphology
-        if n <= 1:
-            return None, "", "terminal"
-
-        target = self._delay_target_name
-        if target == "AIS":
-            if n > 1 and int(mc.N_ais) > 0:
-                return 1, "AIS", "ais"
-            return None, "", "ais"
-        if target == "Trunk Junction":
-            if int(mc.N_trunk) > 0:
-                j = 1 + int(mc.N_ais) + int(mc.N_trunk) - 1
-            elif int(mc.N_ais) > 0:
-                j = int(mc.N_ais)
-            else:
-                j = 0
-            if 1 <= j < n:
-                return j, "junction", "terminal"
-            return None, "", "terminal"
-        if target == "Custom Compartment":
-            idx = int(self._delay_custom_index)
-            idx = max(1, min(n - 1, idx))
-            return idx, f"comp[{idx}]", "terminal"
-        return n - 1, "terminal", "terminal"
+        return resolve_delay_target(
+            target_name=self._delay_target_name,
+            custom_index=self._delay_custom_index,
+            n_comp=n,
+            n_ais=int(mc.N_ais),
+            n_trunk=int(mc.N_trunk),
+            terminal_idx=n - 1,
+        )
 
     def _sync_delay_controls_core(self, n: int, mc):
         self._cb_show_delay.setEnabled(n > 1)
@@ -441,12 +452,7 @@ class OscilloscopeWidget(QWidget):
         if self._spin_delay_comp.value() > max_idx:
             self._spin_delay_comp.setValue(max_idx)
         has_ais = n > 1 and int(mc.N_ais) > 0
-        if int(mc.N_trunk) > 0:
-            j = 1 + int(mc.N_ais) + int(mc.N_trunk) - 1
-        elif int(mc.N_ais) > 0:
-            j = int(mc.N_ais)
-        else:
-            j = 0
+        j = junction_index(n, int(mc.N_ais), int(mc.N_trunk))
         has_junction = 1 <= j < n
         model = self._combo_delay_target.model()
         for i in range(self._combo_delay_target.count()):
@@ -487,15 +493,16 @@ class OscilloscopeWidget(QWidget):
     #  CLEAR
     # ─────────────────────────────────────────────────────────────────
     def clear(self):
-        self._p_v.clear()
-        self._p_g.clear()
-        self._p_i.clear()
+        for item in self._transient_items:
+            for plot in (self._p_v, self._p_g, self._p_i):
+                try:
+                    plot.removeItem(item)
+                except Exception:
+                    pass
+        self._transient_items = []
         self._curves_v.clear()
         self._curves_gate.clear()
         self._curves_i.clear()
-        self._p_v.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
-        self._p_g.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
-        self._p_i.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._apply_grid_alpha()
         self._set_default_titles()
 
@@ -512,24 +519,33 @@ class OscilloscopeWidget(QWidget):
         t   = result.t
         n   = result.n_comp
         mc  = result.config.morphology
+        budget_v = _plot_point_budget(self._p_v)
+        budget_g = _plot_point_budget(self._p_g)
+        budget_i = _plot_point_budget(self._p_i)
 
         # ── Voltage traces ────────────────────────────────────────────
         soma_pen = pg.mkPen(color=theme["soma"], width=2.0 * lw)
-        c_soma   = self._p_v.plot(t, result.v_soma, pen=soma_pen, name="Soma")
+        t_soma, v_soma = _downsample_xy(t, result.v_soma, max_points=budget_v)
+        c_soma   = self._p_v.plot(t_soma, v_soma, pen=soma_pen, name="Soma")
         self._curves_v['Soma'] = c_soma
+        self._transient_items.append(c_soma)
 
         if n > 1 and mc.N_ais > 0:
             ais_pen = pg.mkPen(color=theme["ais"], width=1.5 * lw,
                                style=Qt.PenStyle.DashLine)
-            c_ais   = self._p_v.plot(t, result.v_all[1, :], pen=ais_pen, name="AIS")
+            t_ais, v_ais = _downsample_xy(t, result.v_all[1, :], max_points=budget_v)
+            c_ais   = self._p_v.plot(t_ais, v_ais, pen=ais_pen, name="AIS")
             self._curves_v['AIS'] = c_ais
+            self._transient_items.append(c_ais)
 
         if n > 2:
             term_pen = pg.mkPen(color=theme["terminal"], width=1.2 * lw,
                                 style=Qt.PenStyle.DotLine)
-            c_term   = self._p_v.plot(t, result.v_all[-1, :],
+            t_term, v_term = _downsample_xy(t, result.v_all[-1, :], max_points=budget_v)
+            c_term   = self._p_v.plot(t_term, v_term,
                                        pen=term_pen, name="Terminal")
             self._curves_v['Terminal'] = c_term
+            self._transient_items.append(c_term)
 
         # ── Threshold line at _THRESHOLD_MV ──────────────────────────
         thresh_line = pg.InfiniteLine(
@@ -541,6 +557,7 @@ class OscilloscopeWidget(QWidget):
                        'anchors': [(0, 1), (0, 1)]}
         )
         self._p_v.addItem(thresh_line)
+        self._transient_items.append(thresh_line)
 
         # ── Spike markers ─────────────────────────────────────────────
         from core.analysis import detect_spikes
@@ -553,7 +570,9 @@ class OscilloscopeWidget(QWidget):
             # Cap markers to avoid visual clutter at very high firing rates
             markers_t = sp_t if n_spikes <= _MAX_SPIKE_MARKERS else sp_t[::max(1, n_spikes // _MAX_SPIKE_MARKERS)]
             for t_sp in markers_t:
-                self._p_v.addItem(pg.InfiniteLine(pos=t_sp, angle=90, pen=spike_pen))
+                spike_line = pg.InfiniteLine(pos=t_sp, angle=90, pen=spike_pen)
+                self._p_v.addItem(spike_line)
+                self._transient_items.append(spike_line)
 
         delay_tag = ""
         if self._cb_show_delay.isChecked() and n > 1:
@@ -566,20 +585,20 @@ class OscilloscopeWidget(QWidget):
             if np.isfinite(t_soma) and np.isfinite(t_target) and t_target >= t_soma:
                 delay_ms = t_target - t_soma
                 delay_tag = f" | delay soma->{target_label} {delay_ms:.2f} ms"
-                self._p_v.addItem(
-                    pg.InfiniteLine(
-                        pos=t_soma,
-                        angle=90,
-                        pen=pg.mkPen(theme["soma"], width=max(1.0, 1.0 * lw), style=Qt.PenStyle.DashLine),
-                    )
+                soma_delay_line = pg.InfiniteLine(
+                    pos=t_soma,
+                    angle=90,
+                    pen=pg.mkPen(theme["soma"], width=max(1.0, 1.0 * lw), style=Qt.PenStyle.DashLine),
                 )
-                self._p_v.addItem(
-                    pg.InfiniteLine(
-                        pos=t_target,
-                        angle=90,
-                        pen=pg.mkPen(theme[target_color_key], width=max(1.0, 1.0 * lw), style=Qt.PenStyle.DashLine),
-                    )
+                target_delay_line = pg.InfiniteLine(
+                    pos=t_target,
+                    angle=90,
+                    pen=pg.mkPen(theme[target_color_key], width=max(1.0, 1.0 * lw), style=Qt.PenStyle.DashLine),
                 )
+                self._p_v.addItem(soma_delay_line)
+                self._p_v.addItem(target_delay_line)
+                self._transient_items.append(soma_delay_line)
+                self._transient_items.append(target_delay_line)
 
         # ── V(t) title with spike stats ───────────────────────────────
         duration_s = t[-1] / 1000.0
@@ -599,8 +618,10 @@ class OscilloscopeWidget(QWidget):
             if name in gates:
                 col  = GATE_COLORS.get(name, (180, 180, 180, 200))
                 pen  = pg.mkPen(color=col[:3], width=1.5 * lw)
-                c    = self._p_g.plot(t, gates[name], pen=pen, name=name)
+                tg, yg = _downsample_xy(t, gates[name], max_points=budget_g)
+                c    = self._p_g.plot(tg, yg, pen=pen, name=name)
                 self._curves_gate[name] = c
+                self._transient_items.append(c)
                 c.setVisible(self._cb_g[name].isChecked())
 
         # ── Ion currents ──────────────────────────────────────────────
@@ -608,10 +629,12 @@ class OscilloscopeWidget(QWidget):
             col   = CHAN_COLORS.get(name, (120, 120, 120, 150))
             pen   = pg.mkPen(color=col[:3], width=1.5 * lw)
             brush = pg.mkBrush(col)
-            c     = self._p_i.plot(t, curr, pen=pen,
+            tc, yc = _downsample_xy(t, curr, max_points=budget_i)
+            c     = self._p_i.plot(tc, yc, pen=pen,
                                     fillLevel=0.0, fillBrush=brush,
                                     name=f"I_{name}")
             self._curves_i[name] = c
+            self._transient_items.append(c)
             c.setVisible(self._cb_i.get(name, QCheckBox()).isChecked())
 
         # ── Reconstructed stimulus input trace ─────────────────────────
@@ -622,8 +645,10 @@ class OscilloscopeWidget(QWidget):
             width=1.8 * lw,
             style=Qt.PenStyle.SolidLine,
         )
-        c_si = self._p_i.plot(t, stim_input, pen=stim_input_pen, name="I_stim(input)")
+        t_si, y_si = _downsample_xy(t, stim_input, max_points=budget_i)
+        c_si = self._p_i.plot(t_si, y_si, pen=stim_input_pen, name="I_stim(input)")
         self._curves_i['Stim_input'] = c_si
+        self._transient_items.append(c_si)
         c_si.setVisible(self._cb_i['Stim_input'].isChecked())
 
         # ── Filtered stimulus current ─────────────────────────────────
@@ -631,9 +656,11 @@ class OscilloscopeWidget(QWidget):
         if result.v_dendritic_filtered is not None:
             filt_curr_pen = pg.mkPen(color=theme["stim_filtered"], width=1.5 * lw,
                                       style=Qt.PenStyle.DashLine)
-            c_sf = self._p_i.plot(t, result.v_dendritic_filtered,
+            t_sf, y_sf = _downsample_xy(t, result.v_dendritic_filtered, max_points=budget_i)
+            c_sf = self._p_i.plot(t_sf, y_sf,
                                    pen=filt_curr_pen, name="I_stim(filt)")
             self._curves_i['Stim_filtered'] = c_sf
+            self._transient_items.append(c_sf)
             c_sf.setVisible(self._cb_i['Stim_filtered'].isChecked())
 
         # Sync checkbox visibility
@@ -660,6 +687,7 @@ class OscilloscopeWidget(QWidget):
         self.clear()
         theme = PLOT_THEMES.get(self._theme_name, PLOT_THEMES["Default"])
         lw = self._line_width_scale
+        budget_v = _plot_point_budget(self._p_v)
 
         def _with_alpha(color_val, alpha):
             if isinstance(color_val, str):
@@ -676,8 +704,10 @@ class OscilloscopeWidget(QWidget):
         band_color = _with_alpha(theme["ais"], 110)
 
         for res in results_list:
-            self._p_v.plot(res.t, res.v_soma,
-                           pen=pg.mkPen(cloud_color, width=1.0 * lw))
+            t_cloud, v_cloud = _downsample_xy(res.t, res.v_soma, max_points=budget_v)
+            cloud_line = self._p_v.plot(t_cloud, v_cloud,
+                                        pen=pg.mkPen(cloud_color, width=1.0 * lw))
+            self._transient_items.append(cloud_line)
 
         all_v  = np.array([r.v_soma for r in results_list])
         mean_v = np.mean(all_v, axis=0)
@@ -685,25 +715,31 @@ class OscilloscopeWidget(QWidget):
         t      = results_list[0].t
 
         # Mean ± std band
-        self._p_v.plot(t, mean_v,
-                       pen=pg.mkPen(mean_color, width=2.5 * lw), name="Mean V(t)")
-        self._p_v.plot(t, mean_v + std_v,
-                       pen=pg.mkPen(band_color, width=1.0 * lw,
-                                    style=Qt.PenStyle.DashLine),
-                       name="Mean ± σ")
-        self._p_v.plot(t, mean_v - std_v,
-                       pen=pg.mkPen(band_color, width=1.0 * lw,
-                                    style=Qt.PenStyle.DashLine))
+        t_mean, y_mean = _downsample_xy(t, mean_v, max_points=budget_v)
+        t_plus, y_plus = _downsample_xy(t, mean_v + std_v, max_points=budget_v)
+        t_minus, y_minus = _downsample_xy(t, mean_v - std_v, max_points=budget_v)
+        mean_line = self._p_v.plot(t_mean, y_mean,
+                                   pen=pg.mkPen(mean_color, width=2.5 * lw), name="Mean V(t)")
+        plus_line = self._p_v.plot(t_plus, y_plus,
+                                   pen=pg.mkPen(band_color, width=1.0 * lw,
+                                                style=Qt.PenStyle.DashLine),
+                                   name="Mean ± σ")
+        minus_line = self._p_v.plot(t_minus, y_minus,
+                                    pen=pg.mkPen(band_color, width=1.0 * lw,
+                                                 style=Qt.PenStyle.DashLine))
+        self._transient_items.extend([mean_line, plus_line, minus_line])
 
         # Threshold line
-        self._p_v.addItem(pg.InfiniteLine(
+        thresh_line = pg.InfiniteLine(
             pos=_THRESHOLD_MV, angle=0,
             pen=pg.mkPen(QColor(theme["threshold"]), width=max(1.0, 1.0 * lw),
                          style=Qt.PenStyle.DashLine),
             label=f'{_THRESHOLD_MV:+.0f} mV',
             labelOpts={'position': 0.02, 'color': theme["threshold"],
                        'anchors': [(0, 1), (0, 1)]}
-        ))
+        )
+        self._p_v.addItem(thresh_line)
+        self._transient_items.append(thresh_line)
 
         n = len(results_list)
         self._p_v.setTitle(self._title_html(f"Monte-Carlo: {n} trials — mean ± σ", "#89B4FA"))
