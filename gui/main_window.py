@@ -429,7 +429,6 @@ class MainWindow(QMainWindow):
         self.form_ana = PydanticFormWidget(
             self.config.analysis,
             "Analysis / Sweep / Map",
-            hidden_fields={"enable_lyapunov"},
         )
 
         # Group 1: run setup (user-edited first)
@@ -627,9 +626,10 @@ class MainWindow(QMainWindow):
         self._set_stim_form_value("alpha_tau", float(dc.primary_alpha_tau))
 
         if "Iext_absolute_nA" in self.form_stim.widgets_map:
+            from core.unit_converter import density_to_absolute_current
             d = float(self.config.morphology.d_soma)
             area = np.pi * d * d
-            i_abs = float(dc.primary_Iext) * area * 1000.0
+            i_abs = density_to_absolute_current(float(dc.primary_Iext), area)
             self._set_stim_form_value("Iext_absolute_nA", i_abs)
 
     def _on_morph_field_changed(self, field_name: str, _value):

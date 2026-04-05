@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
-
-pytest.importorskip("pydantic")
 from core.jacobian import analytic_sparse_jacobian
 from core.rhs_contract import RHS_ARG_COUNT
 

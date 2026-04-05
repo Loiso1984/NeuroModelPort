@@ -113,9 +113,17 @@ def rhs_multicompartment_fast(
     """
     Fast Cython version of rhs_multicompartment
     
-    Expected speedup: 5-10x over Python version
-    Currently: SKELETON - needs full implementation
+    IMPORTANT:
+    This backend is intentionally disabled because the implementation is
+    incomplete (no sparse coupling, partial channel set, incomplete Ca dynamics).
+    It must not be used for scientific simulations until full feature parity with
+    core.rhs.rhs_multicompartment is implemented and validated.
     """
+    raise NotImplementedError(
+        "core/optimization/cython_rhs.pyx is a non-production skeleton. "
+        "Use NeuronSolver (Numba+SciPy) backend."
+    )
+
     cdef np.ndarray[DTYPE_t, ndim=1] dydt = np.zeros_like(y)
     cdef int i
     cdef double V, m, h, n_k
@@ -170,6 +178,10 @@ def rhs_multicompartment_fast(
 # Benchmark function
 def benchmark_rhs_call(n_comp=10, n_calls=1000):
     """Benchmark RHS evaluation speed"""
+    raise NotImplementedError(
+        "Benchmark disabled: cython_rhs backend is non-production skeleton."
+    )
+
     import time
     
     # Setup dummy data

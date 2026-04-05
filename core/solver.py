@@ -193,7 +193,9 @@ class NeuronSolver:
         dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
 
         # Secondary stimulus defaults.
-        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 0.0
+        # Keep secondary defaults physically valid even when dual stimulation is disabled.
+        # This protects against stricter external validators and stale serialized configs.
+        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
         zap_f0_2, zap_f1_2 = primary_zap_f0, primary_zap_f1
         stim_comp_2, stim_mode_2 = 0, 0
         use_dfilter_secondary = 0
@@ -229,17 +231,19 @@ class NeuronSolver:
             "en_im": cfg.channels.enable_IM,
             "en_nap": cfg.channels.enable_NaP,
             "en_nar": cfg.channels.enable_NaR,
-            "gna_v": morph['gNa_v'],
-            "gk_v": morph['gK_v'],
-            "gl_v": morph['gL_v'],
-            "gih_v": morph['gIh_v'],
-            "gca_v": morph['gCa_v'],
-            "ga_v": morph['gA_v'],
-            "gsk_v": morph['gSK_v'],
-            "gtca_v": morph['gTCa_v'],
-            "gim_v": morph['gIM_v'],
-            "gnap_v": morph['gNaP_v'],
-            "gnar_v": morph['gNaR_v'],
+            "gbar_mat": np.vstack([
+                morph['gNa_v'],
+                morph['gK_v'],
+                morph['gL_v'],
+                morph['gIh_v'],
+                morph['gCa_v'],
+                morph['gA_v'],
+                morph['gSK_v'],
+                morph['gTCa_v'],
+                morph['gIM_v'],
+                morph['gNaP_v'],
+                morph['gNaR_v'],
+            ]),
             "ena": cfg.channels.ENa,
             "ek": cfg.channels.EK,
             "el": cfg.channels.EL,
@@ -249,15 +253,17 @@ class NeuronSolver:
             "l_data": morph['L_data'],
             "l_indices": morph['L_indices'],
             "l_indptr": morph['L_indptr'],
-            "phi_na": cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
-            "phi_k": cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
-            "phi_ih": cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
-            "phi_ca": cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
-            "phi_ia": cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
-            "phi_tca": cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
-            "phi_im": cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
-            "phi_nap": cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
-            "phi_nar": cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
+            "phi_mat": np.vstack([
+                cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
+            ]),
             "t_kelvin": t_kelvin,
             "ca_ext": cfg.calcium.Ca_ext,
             "ca_rest": cfg.calcium.Ca_rest,
@@ -296,14 +302,12 @@ class NeuronSolver:
         validate_rhs_args_values(rhs_values)
         args = pack_rhs_args(rhs_values)
 
-        # Pre-allocate the RHS output buffer once.  rhs_multicompartment zeroes
+        # Pre-allocate the RHS output buffer once. rhs_multicompartment zeroes
         # it in-place via a Numba loop (no np.zeros_like heap alloc per step).
-        # The wrapper returns .copy() so scipy BDF can safely hold references to
-        # previous f-values without them being overwritten on the next call.
         _dydt_buf = np.empty(len(y0), dtype=np.float64)
 
         def _rhs_fn(t, y):
-            return rhs_multicompartment(t, y, *args, _dydt_buf).copy()
+            return rhs_multicompartment(t, y, *args, _dydt_buf)
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
 
