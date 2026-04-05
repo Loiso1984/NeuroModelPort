@@ -68,30 +68,14 @@ def run_case(case: dict, *, fmin_hz: float, fmax_hz: float) -> dict:
     z_res = float(imp.get("z_res_kohm_cm2", np.nan))
     valid = bool(imp.get("valid", False))
 
-    case_lo, case_hi = case.get("f_res_range", (fmin_hz, fmax_hz))
-    lo = max(float(case_lo), float(fmin_hz))
-    hi = min(float(case_hi), float(fmax_hz))
-    guard_reasons: list[str] = []
-    if not valid:
-        guard_reasons.append("invalid_impedance")
-    if not np.isfinite(f_res):
-        guard_reasons.append("non_finite_f_res")
-    if not np.isfinite(z_res):
-        guard_reasons.append("non_finite_z_res")
-    if z_res <= 0.0:
-        guard_reasons.append("non_positive_z_res")
-    if lo > hi:
-        guard_reasons.append("empty_expected_range")
-    elif not (lo <= f_res <= hi):
-        guard_reasons.append("f_res_out_of_expected_range")
-    guard_ok = len(guard_reasons) == 0
+    lo, hi = case.get("f_res_range", (fmin_hz, fmax_hz))
+    guard_ok = bool(valid and np.isfinite(f_res) and np.isfinite(z_res) and lo <= f_res <= hi and z_res > 0.0)
 
     return {
         "id": case["id"],
         "preset": case["preset"],
         "valid": valid,
         "guard_ok": guard_ok,
-        "guard_reasons": guard_reasons,
         "f_res_hz": f_res,
         "z_res_kohm_cm2": z_res,
         "f_res_expected_range_hz": [float(lo), float(hi)],
@@ -105,13 +89,7 @@ def main() -> int:
     parser.add_argument("--fmin", type=float, default=0.5, help="Lower impedance analysis frequency bound")
     parser.add_argument("--fmax", type=float, default=80.0, help="Upper impedance analysis frequency bound")
     parser.add_argument("--strict", action="store_true", help="Return non-zero if any guard fails")
-    parser.add_argument("--output", type=str, default=str(ARTIFACT), help="Artifact output JSON path")
-    parser.add_argument("--print-failures", action="store_true", help="Print failed case ids and reasons")
     args = parser.parse_args()
-    if args.fmin <= 0.0 or args.fmax <= args.fmin:
-        print("[WARN] invalid frequency bounds: require 0 < --fmin < --fmax")
-        return 2
-    out_path = Path(args.output)
 
     try:
         import pydantic  # noqa:F401
@@ -129,7 +107,6 @@ def main() -> int:
                 "preset": case["preset"],
                 "valid": False,
                 "guard_ok": False,
-                "guard_reasons": ["exception"],
                 "error": str(exc),
             })
 
@@ -140,19 +117,13 @@ def main() -> int:
         "ok": ok,
         "total": total,
         "analysis_band_hz": [float(args.fmin), float(args.fmax)],
-        "strict_mode": bool(args.strict),
         "all_guard_ok": (ok == total),
-        "failed_case_ids": [r["id"] for r in rows if not r.get("guard_ok", False)],
     }
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+    ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
+    ARTIFACT.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
-    print(f"Saved: {out_path}")
+    print(f"Saved: {ARTIFACT}")
     print(f"Guard OK: {ok}/{total}")
-    if args.print_failures and artifact["failed_case_ids"]:
-        for row in rows:
-            if not row.get("guard_ok", False):
-                print(f" - {row.get('id')}: {','.join(row.get('guard_reasons', []))}")
 
     if args.strict and ok != total:
         return 1

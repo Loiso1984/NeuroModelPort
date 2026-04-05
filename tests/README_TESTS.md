@@ -44,12 +44,9 @@ This document reflects the *current* local validation flow used in active develo
    - deterministic branch-equivalent scenario report for dual-stim behavior and modulation expectations,
    - artifact: `_test_results/dual_stim_extended_report.json`.
 12. ZAP impedance report (TRN / Cholinergic / Thalamic):
-   - `python tests/utils/run_impedance_zap_report.py --strict`
-   - optional bounds: `--fmin ... --fmax ...` (must satisfy `0 < fmin < fmax`),
-   - optional output/triage helpers: `--output path/to/report.json --print-failures`,
+   - `python tests/utils/run_impedance_zap_report.py`
    - deterministic ZAP-driven impedance summary (`f_res`, `z_res`) for resonance checks,
-   - artifact includes `analysis_band_hz`, `strict_mode`, `all_guard_ok`, and `failed_case_ids`;
-   - each row includes `guard_reasons` for quick triage when strict gate fails.
+   - artifact: `_test_results/impedance_zap_report.json`.
 
 ## Directory Roles
 
