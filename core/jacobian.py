@@ -33,7 +33,7 @@ from .kinetics import (
     bx_NaP,
     by_NaR,
 )
-from .rhs import F_CONST, R_GAS
+from .rhs import CA_I_MAX_M_M, CA_I_MIN_M_M, F_CONST, R_GAS
 from .rhs_contract import RHS_ARG_COUNT, unpack_rhs_args
 
 _LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
@@ -328,6 +328,71 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
     J_csr = sparsity_csr.copy().astype(float)
     J_csr.data[:] = 0.0
     pos = _build_csr_pos_map(J_csr)
+    zero_vec_cache: dict[int, np.ndarray] = {}
+    ca_rest_vec_cache: dict[tuple[int, float], np.ndarray] = {}
+    state_slices_cache: dict[tuple[int, bool, bool, bool, bool, int, int, bool, bool, bool, bool, bool], tuple[dict[str, slice | int | None], int]] = {}
+
+    def _zero_vec(n: int) -> np.ndarray:
+        v = zero_vec_cache.get(n)
+        if v is None:
+            v = np.zeros(n, dtype=float)
+            zero_vec_cache[n] = v
+        return v
+
+    def _ca_rest_vec(n: int, ca_rest_scalar: float) -> np.ndarray:
+        key = (n, float(ca_rest_scalar))
+        v = ca_rest_vec_cache.get(key)
+        if v is None:
+            v = np.full(n, float(ca_rest_scalar), dtype=float)
+            ca_rest_vec_cache[key] = v
+        return v
+
+    def _cached_state_slices(
+        n_comp_local: int,
+        en_ih_local: bool,
+        en_ica_local: bool,
+        en_ia_local: bool,
+        dyn_ca_local: bool,
+        use_dfilter_primary_local: int,
+        use_dfilter_secondary_local: int,
+        en_itca_local: bool,
+        en_im_local: bool,
+        en_nap_local: bool,
+        en_nar_local: bool,
+        en_sk_local: bool,
+    ) -> tuple[dict[str, slice | int | None], int]:
+        key = (
+            int(n_comp_local),
+            bool(en_ih_local),
+            bool(en_ica_local),
+            bool(en_ia_local),
+            bool(dyn_ca_local),
+            int(use_dfilter_primary_local),
+            int(use_dfilter_secondary_local),
+            bool(en_itca_local),
+            bool(en_im_local),
+            bool(en_nap_local),
+            bool(en_nar_local),
+            bool(en_sk_local),
+        )
+        out = state_slices_cache.get(key)
+        if out is None:
+            out = _state_slices(
+                n_comp_local,
+                en_ih_local,
+                en_ica_local,
+                en_ia_local,
+                dyn_ca_local,
+                use_dfilter_primary_local,
+                use_dfilter_secondary_local,
+                en_itca=en_itca_local,
+                en_im=en_im_local,
+                en_nap=en_nap_local,
+                en_nar=en_nar_local,
+                en_sk=en_sk_local,
+            )
+            state_slices_cache[key] = out
+        return out
 
     def _set(row, col, val):
         k = pos.get((row, col))
@@ -342,10 +407,10 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
     def jac_fn(
         t, y, n_comp,
         en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
-        gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
+        gbar_mat,
         ena, ek, el, eih, ea,
         cm_v, l_data, l_indices, l_indptr,
-        phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
+        phi_mat,
         t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
         stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
         use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
@@ -356,25 +421,58 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         # Zero all entries
         J_csr.data[:] = 0.0
 
-        idx, n_state = _state_slices(
-            n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter_primary, use_dfilter_secondary,
-            en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar, en_sk=en_sk,
+        gna_v = gbar_mat[0]
+        gk_v = gbar_mat[1]
+        gl_v = gbar_mat[2]
+        gih_v = gbar_mat[3]
+        gca_v = gbar_mat[4]
+        ga_v = gbar_mat[5]
+        gsk_v = gbar_mat[6]
+        gtca_v = gbar_mat[7]
+        gim_v = gbar_mat[8]
+        gnap_v = gbar_mat[9]
+        gnar_v = gbar_mat[10]
+
+        phi_na = phi_mat[0]
+        phi_k = phi_mat[1]
+        phi_ih = phi_mat[2]
+        phi_ca = phi_mat[3]
+        phi_ia = phi_mat[4]
+        phi_tca = phi_mat[5]
+        phi_im = phi_mat[6]
+        phi_nap = phi_mat[7]
+        phi_nar = phi_mat[8]
+
+        idx, n_state = _cached_state_slices(
+            n_comp,
+            en_ih,
+            en_ica,
+            en_ia,
+            dyn_ca,
+            use_dfilter_primary,
+            use_dfilter_secondary,
+            en_itca,
+            en_im,
+            en_nap,
+            en_nar,
+            en_sk,
         )
 
         v = y[idx["v"]]
         m = y[idx["m"]]
         h = y[idx["h"]]
         n = y[idx["n"]]
-        r = y[idx["r"]] if idx["r"] is not None else np.zeros(n_comp)
-        s = y[idx["s"]] if idx["s"] is not None else np.zeros(n_comp)
-        u = y[idx["u"]] if idx["u"] is not None else np.zeros(n_comp)
-        a = y[idx["a"]] if idx["a"] is not None else np.zeros(n_comp)
-        b = y[idx["b"]] if idx["b"] is not None else np.zeros(n_comp)
-        w_g = y[idx["w"]] if idx["w"] is not None else np.zeros(n_comp)
-        x_g = y[idx["x"]] if idx["x"] is not None else np.zeros(n_comp)
-        y_nr = y[idx["y_nr"]] if idx["y_nr"] is not None else np.zeros(n_comp)
-        j_nr = y[idx["j_nr"]] if idx["j_nr"] is not None else np.zeros(n_comp)
-        ca_i = y[idx["ca"]] if idx["ca"] is not None else np.full(n_comp, ca_rest)
+        zero_v = _zero_vec(n_comp)
+        r = y[idx["r"]] if idx["r"] is not None else zero_v
+        s = y[idx["s"]] if idx["s"] is not None else zero_v
+        u = y[idx["u"]] if idx["u"] is not None else zero_v
+        a = y[idx["a"]] if idx["a"] is not None else zero_v
+        b = y[idx["b"]] if idx["b"] is not None else zero_v
+        w_g = y[idx["w"]] if idx["w"] is not None else zero_v
+        x_g = y[idx["x"]] if idx["x"] is not None else zero_v
+        y_nr = y[idx["y_nr"]] if idx["y_nr"] is not None else zero_v
+        j_nr = y[idx["j_nr"]] if idx["j_nr"] is not None else zero_v
+        ca_i = y[idx["ca"]] if idx["ca"] is not None else _ca_rest_vec(n_comp, ca_rest)
 
         k_nernst = (R_GAS * t_kelvin / (2.0 * F_CONST)) * 1000.0
 
@@ -399,8 +497,8 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             daa_v = _rate_derivative(aa_IA, v); dba_v = _rate_derivative(ba_IA, v)
             dab_v = _rate_derivative(ab_IA, v); dbb_v = _rate_derivative(bb_IA, v)
         if en_itca:
-            p_g = y[idx["p"]] if idx["p"] is not None else np.zeros(n_comp)
-            q_g = y[idx["q"]] if idx["q"] is not None else np.zeros(n_comp)
+            p_g = y[idx["p"]] if idx["p"] is not None else zero_v
+            q_g = y[idx["q"]] if idx["q"] is not None else zero_v
             amt_v = am_TCa(v);  bmt_v = bm_TCa(v)
             aht_v = ah_TCa(v);  bht_v = bh_TCa(v)
             damt_v = _rate_derivative(am_TCa, v); dbmt_v = _rate_derivative(bm_TCa, v)
@@ -439,7 +537,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             i_ca_val = 0.0
             if en_ica:
                 if dyn_ca:
-                    ca_safe = max(ca_i[i], 1e-9)
+                    ca_safe = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
                     eca = k_nernst * np.log(ca_ext / ca_safe)
                     deca_dca = -k_nernst / ca_safe
                 else:
@@ -464,7 +562,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             i_tca_val = 0.0
             if en_itca and idx["p"] is not None:
                 if dyn_ca:
-                    ca_safe_t = max(ca_i[i], 1e-9)
+                    ca_safe_t = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
                     eca_t = k_nernst * np.log(ca_ext / ca_safe_t)
                     deca_t_dca = -k_nernst / ca_safe_t
                 else:
@@ -472,8 +570,9 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                     deca_t_dca = 0.0
                 # If ICa already computed eca for this compartment, reuse it
                 if en_ica and dyn_ca:
-                    eca_t = k_nernst * np.log(ca_ext / max(ca_i[i], 1e-9))
-                    deca_t_dca = -k_nernst / max(ca_i[i], 1e-9)
+                    ca_safe_t = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
+                    eca_t = k_nernst * np.log(ca_ext / ca_safe_t)
+                    deca_t_dca = -k_nernst / ca_safe_t
                 dItdv = gtca_v[i] * (p_g[i] ** 2) * q_g[i]
                 dItdp = gtca_v[i] * 2.0 * p_g[i] * q_g[i] * (v[i] - eca_t)
                 dItdq = gtca_v[i] * (p_g[i] ** 2) * (v[i] - eca_t)
