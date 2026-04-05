@@ -6,9 +6,17 @@ This document reflects the *current* local validation flow used in active develo
 
 1. Active branch gate (main daily check):
    - `python tests/utils/run_active_branch_suite.py --workers 2`
+   - includes strict impedance utility gate (`run_impedance_zap_report.py --strict`) as a utility check;
+     if `pydantic` is unavailable, this utility is reported as warning (environment-limited), not hard fail.
+   - for CI-hard mode, enable `--fail-on-warn` to treat utility warnings as failures.
 2. Unified physiology protocol report:
    - `python tests/utils/run_unified_preset_protocol.py`
    - artifact: `_test_results/unified_preset_protocol.json`
+2.1 Priority physiology cluster (high-risk O/N/F lanes orchestration):
+   - `python tests/utils/run_priority_physiology_cluster.py`
+   - optional strict modes: `--fail-on-warn`, `--strict-critical`
+   - artifact: `_test_results/priority_physiology_cluster.json`
+   - artifact includes `critical_ok` and `next_actions` for priority steering.
 3. Targeted heavy hypoxia search (deterministic):
    - `python tests/utils/hypoxia_deterministic_search.py ...`
    - default is sequential for stability/performance; threaded mode requires `--allow-parallel`.
@@ -44,9 +52,12 @@ This document reflects the *current* local validation flow used in active develo
    - deterministic branch-equivalent scenario report for dual-stim behavior and modulation expectations,
    - artifact: `_test_results/dual_stim_extended_report.json`.
 12. ZAP impedance report (TRN / Cholinergic / Thalamic):
-   - `python tests/utils/run_impedance_zap_report.py`
+   - `python tests/utils/run_impedance_zap_report.py --strict`
+   - optional bounds: `--fmin ... --fmax ...` (must satisfy `0 < fmin < fmax`),
+   - optional output/triage helpers: `--output path/to/report.json --print-failures`,
    - deterministic ZAP-driven impedance summary (`f_res`, `z_res`) for resonance checks,
-   - artifact: `_test_results/impedance_zap_report.json`.
+   - artifact includes `analysis_band_hz`, `strict_mode`, `all_guard_ok`, and `failed_case_ids`;
+   - each row includes `guard_reasons` for quick triage when strict gate fails.
 
 ## Directory Roles
 

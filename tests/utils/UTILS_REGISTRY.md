@@ -5,7 +5,11 @@ This registry separates active deterministic validators from legacy/compatibilit
 ## Active Deterministic Utilities
 
 - `run_active_branch_suite.py`
+  - supports utility warning policy toggle (`--fail-on-warn`) for CI-hard gating.
 - `run_unified_preset_protocol.py`
+- `run_priority_physiology_cluster.py`
+  - orchestrates high-priority physiology utility runs (unified/pathology/F-conduction) with pass/warn/fail artifact.
+  - supports strict warning policy (`--fail-on-warn`), critical-lane gating (`--strict-critical`), and custom output path (`--output`).
 - `run_preset_stress_matrix.py`
 - `run_pathology_focus_report.py`
 - `run_pathology_worstcase_followup.py`
@@ -17,6 +21,10 @@ This registry separates active deterministic validators from legacy/compatibilit
 - `hypoxia_deterministic_search.py`
 - `benchmark_jacobian_modes.py`
 - `run_impedance_zap_report.py`
+  - supports strict gate mode (`--strict`) and configurable analysis band (`--fmin/--fmax`).
+  - emits `guard_reasons` (per row) and `failed_case_ids` (artifact-level) for triage.
+  - supports custom artifact path (`--output`) and optional stdout failure list (`--print-failures`).
+  - consumed by `run_active_branch_suite.py` as utility strict-gate check.
 
 ## Legacy / Compatibility Utilities
 

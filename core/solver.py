@@ -9,7 +9,7 @@ from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import rhs_multicompartment, F_CONST, R_GAS
-from core.rhs_contract import pack_rhs_args
+from core.rhs_contract import pack_rhs_args, validate_rhs_args_values
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
 
@@ -218,7 +218,7 @@ class NeuronSolver:
                     -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
                 )
 
-        args = pack_rhs_args({
+        rhs_values = {
             "n_comp": n_comp,
             "en_ih": cfg.channels.enable_Ih,
             "en_ica": cfg.channels.enable_ICa,
@@ -292,7 +292,9 @@ class NeuronSolver:
             "use_dfilter_secondary": use_dfilter_secondary,
             "dfilter_attenuation_2": dfilter_attenuation_2,
             "dfilter_tau_ms_2": dfilter_tau_ms_2,
-        })
+        }
+        validate_rhs_args_values(rhs_values)
+        args = pack_rhs_args(rhs_values)
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
         

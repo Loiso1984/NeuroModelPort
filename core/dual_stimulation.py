@@ -224,6 +224,38 @@ def apply_secondary_stimulus_current(
 
 
 @njit(cache=True)
+def distributed_stimulus_current_for_comp(
+    comp_idx: int,
+    n_comp: int,
+    base_current: float,
+    stim_comp: int,
+    stim_mode: int,
+    use_dfilter: int,
+    dfilter_attenuation: float,
+    v_filtered: float,
+) -> float:
+    """Return stimulus contribution for a single compartment without temp vectors.
+
+    stim_mode:
+      0 = soma/custom compartment (uses stim_comp),
+      1 = AIS,
+      2 = dendritic_filtered (projects to soma via optional filter state).
+    """
+    if stim_mode == 0:
+        return base_current if (0 <= stim_comp < n_comp and comp_idx == stim_comp) else 0.0
+    if stim_mode == 1:
+        ais_comp = 1 if n_comp > 1 else 0
+        return base_current if comp_idx == ais_comp else 0.0
+    if stim_mode == 2:
+        if comp_idx != 0:
+            return 0.0
+        if use_dfilter == 1:
+            return v_filtered
+        return dfilter_attenuation * base_current
+    return base_current if (0 <= stim_comp < n_comp and comp_idx == stim_comp) else 0.0
+
+
+@njit(cache=True)
 def apply_dual_stimulation(
     t: float,
     y: np.ndarray,
