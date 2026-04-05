@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 from core.models import FullModelConfig
 from core.solver import NeuronSolver
-from core.analysis import detect_spikes
 
 
 def _make_im_config(jacobian_mode: str = "sparse_fd") -> FullModelConfig:
@@ -26,9 +25,7 @@ def _make_im_config(jacobian_mode: str = "sparse_fd") -> FullModelConfig:
     cfg.channels.EL = -54.387
     # Enable M-current
     cfg.channels.enable_IM = True
-    cfg.channels.gM_max = 0.5  # Strong enough to see adaptation effect
-    # Mammalian temperature (I_M is a mammalian channel)
-    cfg.env.T_celsius = 37.0
+    cfg.channels.gIM_max = 0.5  # Strong enough to see adaptation effect
     # Long pulse to observe adaptation
     cfg.stim.t_sim = 200.0
     cfg.stim.stim_type = "pulse"
@@ -61,19 +58,24 @@ def test_im_current_extracted():
 
 def test_im_reduces_firing_rate():
     """M-current should reduce spike count (spike-frequency adaptation)."""
+    threshold = -20.0
+
     # Without I_M
     cfg_off = _make_im_config()
     cfg_off.channels.enable_IM = False
     res_off = NeuronSolver(cfg_off).run_single()
-    pks_off, _, _ = detect_spikes(res_off.v_soma, res_off.t)
+    v_off = res_off.v_soma
+    n_off = int(np.sum((v_off[:-1] < threshold) & (v_off[1:] >= threshold)))
 
     # With I_M
     cfg_on = _make_im_config()
     res_on = NeuronSolver(cfg_on).run_single()
-    pks_on, _, _ = detect_spikes(res_on.v_soma, res_on.t)
+    v_on = res_on.v_soma
+    n_on = int(np.sum((v_on[:-1] < threshold) & (v_on[1:] >= threshold)))
 
-    assert len(pks_on) < len(pks_off), (
-        f"I_M should reduce spike count: {len(pks_on)} >= {len(pks_off)}"
+    assert n_off > 0, f"Baseline (no I_M) should produce spikes, got {n_off}"
+    assert n_on < n_off, (
+        f"I_M should reduce spike count: {n_on} >= {n_off}"
     )
 
 

@@ -13,6 +13,7 @@ from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.presets import apply_preset
 from core.rhs import rhs_multicompartment
+from core.rhs_contract import pack_rhs_args
 from core.solver import NeuronSolver
 
 
@@ -29,81 +30,32 @@ def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.n
 
 
 def _solver_args_from_cfg(cfg: FullModelConfig):
+    """Build (y0, args, dydt_buf) using the canonical pack_rhs_args contract.
+
+    Mirrors solver.py NeuronSolver.run_single arg construction so that direct
+    calls to rhs_multicompartment in tests use the same positional order as
+    the live solver path.  Returns a pre-allocated dydt buffer sized to y0.
+    """
     morph = MorphologyBuilder.build(cfg)
     n_comp = morph["N_comp"]
     y0 = ChannelRegistry().compute_initial_states(-65.0, cfg)
 
     s_map = {
-        "const": 0,
-        "pulse": 1,
-        "alpha": 2,
-        "ou_noise": 3,
-        "AMPA": 4,
-        "NMDA": 5,
-        "GABAA": 6,
-        "GABAB": 7,
-        "Kainate": 8,
-        "Nicotinic": 9,
+        "const": 0, "pulse": 1, "alpha": 2, "ou_noise": 3,
+        "AMPA": 4, "NMDA": 5, "GABAA": 6, "GABAB": 7,
+        "Kainate": 8, "Nicotinic": 9, "zap": 10,
     }
-    stype = s_map.get(cfg.stim.stim_type, 0)
-    t_kelvin = cfg.env.T_celsius + 273.15
-
     stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
 
-    primary_stim_type = cfg.stim.stim_type
-    primary_iext = cfg.stim.Iext
-    primary_t0 = cfg.stim.pulse_start
-    primary_td = cfg.stim.pulse_dur
-    primary_atau = cfg.stim.alpha_tau
-    primary_stim_comp = cfg.stim.stim_comp
-    primary_location = cfg.stim_location.location
-
-    dual_stim_enabled = 0
-    stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2 = (
-        0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0,
-        0,
-    )
-    dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
-    use_dfilter_secondary = 0
-    if cfg.dual_stimulation is not None and getattr(cfg.dual_stimulation, "enabled", False):
-        dual_stim_enabled = 1
-        primary_stim_type = getattr(cfg.dual_stimulation, "primary_stim_type", primary_stim_type)
-        primary_iext = getattr(cfg.dual_stimulation, "primary_Iext", primary_iext)
-        primary_t0 = getattr(cfg.dual_stimulation, "primary_start", primary_t0)
-        primary_td = getattr(cfg.dual_stimulation, "primary_duration", primary_td)
-        primary_atau = getattr(cfg.dual_stimulation, "primary_alpha_tau", primary_atau)
-        primary_location = getattr(cfg.dual_stimulation, "primary_location", primary_location)
-        primary_stim_comp = 0
-
-        stype_2 = s_map.get(cfg.dual_stimulation.secondary_stim_type, 0)
-        iext_2 = cfg.dual_stimulation.secondary_Iext
-        t0_2 = cfg.dual_stimulation.secondary_start
-        td_2 = cfg.dual_stimulation.secondary_duration
-        atau_2 = cfg.dual_stimulation.secondary_alpha_tau
-        stim_mode_2 = stim_mode_map.get(cfg.dual_stimulation.secondary_location, 0)
-        dfilter_tau_ms_2 = cfg.dual_stimulation.secondary_tau_dendritic_ms
-        use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
-        if stim_mode_2 == 2 and cfg.dual_stimulation.secondary_space_constant_um > 0:
-            dfilter_attenuation_2 = np.exp(
-                -cfg.dual_stimulation.secondary_distance_um
-                / cfg.dual_stimulation.secondary_space_constant_um
-            )
-
-    stype = s_map.get(primary_stim_type, 0)
-    stim_mode = stim_mode_map.get(primary_location, 0)
+    t_kelvin = cfg.env.T_celsius + 273.15
+    stype = s_map.get(cfg.stim.stim_type, 0)
+    stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
     use_dfilter = int(
         stim_mode == 2
         and cfg.dendritic_filter.enabled
         and cfg.dendritic_filter.tau_dendritic_ms > 0.0
     )
     if use_dfilter == 1:
-        y0 = np.concatenate([y0, np.array([0.0])])
-    if use_dfilter_secondary == 1:
         y0 = np.concatenate([y0, np.array([0.0])])
 
     attenuation = 1.0
@@ -112,58 +64,60 @@ def _solver_args_from_cfg(cfg: FullModelConfig):
             -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
         )
 
-    args = (
-        n_comp,
-        cfg.channels.enable_Ih,
-        cfg.channels.enable_ICa,
-        cfg.channels.enable_IA,
-        cfg.channels.enable_SK,
-        cfg.calcium.dynamic_Ca,
-        morph["gNa_v"],
-        morph["gK_v"],
-        morph["gL_v"],
-        morph["gIh_v"],
-        morph["gCa_v"],
-        morph["gA_v"],
-        morph["gSK_v"],
-        cfg.channels.ENa,
-        cfg.channels.EK,
-        cfg.channels.EL,
-        cfg.channels.E_Ih,
-        cfg.channels.E_A,
-        morph["Cm_v"],
-        morph["L_data"],
-        morph["L_indices"],
-        morph["L_indptr"],
-        cfg.env.phi,
-        t_kelvin,
-        cfg.calcium.Ca_ext,
-        cfg.calcium.Ca_rest,
-        cfg.calcium.tau_Ca,
-        cfg.calcium.B_Ca,
-        stype,
-        primary_iext,
-        primary_t0,
-        primary_td,
-        primary_atau,
-        primary_stim_comp,
-        stim_mode,
-        use_dfilter,
-        attenuation,
-        cfg.dendritic_filter.tau_dendritic_ms if use_dfilter == 1 else 0.0,
-        dual_stim_enabled,
-        stype_2,
-        iext_2,
-        t0_2,
-        td_2,
-        atau_2,
-        stim_comp_2,
-        stim_mode_2,
-        use_dfilter_secondary,
-        dfilter_attenuation_2,
-        dfilter_tau_ms_2,
-    )
-    return y0, args
+    # Per-compartment B_Ca (surface/volume ratio scaling — mirrors solver._build_b_ca_vector)
+    b_ca_v = NeuronSolver._build_b_ca_vector(cfg, morph)
+
+    rhs_values = {
+        "n_comp": n_comp,
+        "en_ih": cfg.channels.enable_Ih,
+        "en_ica": cfg.channels.enable_ICa,
+        "en_ia": cfg.channels.enable_IA,
+        "en_sk": cfg.channels.enable_SK,
+        "dyn_ca": cfg.calcium.dynamic_Ca,
+        "en_itca": cfg.channels.enable_ITCa,
+        "en_im": cfg.channels.enable_IM,
+        "en_nap": cfg.channels.enable_NaP,
+        "en_nar": cfg.channels.enable_NaR,
+        "gna_v": morph["gNa_v"], "gk_v": morph["gK_v"], "gl_v": morph["gL_v"],
+        "gih_v": morph["gIh_v"], "gca_v": morph["gCa_v"], "ga_v": morph["gA_v"],
+        "gsk_v": morph["gSK_v"], "gtca_v": morph["gTCa_v"],
+        "gim_v": morph["gIM_v"], "gnap_v": morph["gNaP_v"], "gnar_v": morph["gNaR_v"],
+        "ena": cfg.channels.ENa, "ek": cfg.channels.EK, "el": cfg.channels.EL,
+        "eih": cfg.channels.E_Ih, "ea": cfg.channels.E_A,
+        "cm_v": morph["Cm_v"], "l_data": morph["L_data"],
+        "l_indices": morph["L_indices"], "l_indptr": morph["L_indptr"],
+        "phi_na": cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
+        "phi_k":  cfg.env.build_phi_vector(cfg.env.Q10_K,  n_comp),
+        "phi_ih": cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
+        "phi_ca": cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
+        "phi_ia": cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
+        "phi_tca": cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
+        "phi_im":  cfg.env.build_phi_vector(cfg.env.Q10_IM,  n_comp),
+        "phi_nap": cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
+        "phi_nar": cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
+        "t_kelvin": t_kelvin,
+        "ca_ext": cfg.calcium.Ca_ext, "ca_rest": cfg.calcium.Ca_rest,
+        "tau_ca": cfg.calcium.tau_Ca, "b_ca": b_ca_v,
+        "mg_ext": cfg.env.Mg_ext, "tau_sk": cfg.channels.tau_SK,
+        "stype": stype, "iext": cfg.stim.Iext,
+        "t0": cfg.stim.pulse_start, "td": cfg.stim.pulse_dur,
+        "atau": cfg.stim.alpha_tau,
+        "zap_f0_hz": cfg.stim.zap_f0_hz, "zap_f1_hz": cfg.stim.zap_f1_hz,
+        "event_times_arr": np.array(cfg.stim.event_times or [], dtype=np.float64),
+        "n_events": int(len(cfg.stim.event_times or [])),
+        "stim_comp": cfg.stim.stim_comp, "stim_mode": stim_mode,
+        "use_dfilter_primary": use_dfilter,
+        "dfilter_attenuation": attenuation,
+        "dfilter_tau_ms": cfg.dendritic_filter.tau_dendritic_ms,
+        "dual_stim_enabled": 0,
+        "stype_2": 0, "iext_2": 0.0, "t0_2": 0.0, "td_2": 0.0, "atau_2": 0.0,
+        "zap_f0_hz_2": cfg.stim.zap_f0_hz, "zap_f1_hz_2": cfg.stim.zap_f1_hz,
+        "stim_comp_2": 0, "stim_mode_2": 0,
+        "use_dfilter_secondary": 0, "dfilter_attenuation_2": 1.0, "dfilter_tau_ms_2": 0.0,
+    }
+    args = pack_rhs_args(rhs_values)
+    dydt_buf = np.empty(len(y0), dtype=np.float64)
+    return y0, args, dydt_buf
 
 
 def test_analytic_sparse_jacobian_matches_fd_on_single_comp():
@@ -179,10 +133,10 @@ def test_analytic_sparse_jacobian_matches_fd_on_single_comp():
     cfg.stim.stim_type = "const"
     cfg.stim.Iext = 8.0
 
-    y0, args = _solver_args_from_cfg(cfg)
+    y0, args, dydt_buf = _solver_args_from_cfg(cfg)
 
     # JIT warmup for RHS before finite-difference loop.
-    rhs_multicompartment(0.0, y0, *args)
+    rhs_multicompartment(0.0, y0, *args, dydt_buf)
     j_an = analytic_sparse_jacobian(0.0, y0, *args).toarray()
 
     eps = 1e-6
@@ -193,8 +147,8 @@ def test_analytic_sparse_jacobian_matches_fd_on_single_comp():
         ym = y0.copy()
         yp[col] += eps
         ym[col] -= eps
-        fp = rhs_multicompartment(0.0, yp, *args)
-        fm = rhs_multicompartment(0.0, ym, *args)
+        fp = rhs_multicompartment(0.0, yp, *args, dydt_buf).copy()
+        fm = rhs_multicompartment(0.0, ym, *args, dydt_buf).copy()
         j_fd[:, col] = (fp - fm) / (2.0 * eps)
 
     rel_err = np.linalg.norm(j_an - j_fd) / max(np.linalg.norm(j_fd), 1e-12)

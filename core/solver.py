@@ -296,8 +296,17 @@ class NeuronSolver:
         validate_rhs_args_values(rhs_values)
         args = pack_rhs_args(rhs_values)
 
+        # Pre-allocate the RHS output buffer once.  rhs_multicompartment zeroes
+        # it in-place via a Numba loop (no np.zeros_like heap alloc per step).
+        # The wrapper returns .copy() so scipy BDF can safely hold references to
+        # previous f-values without them being overwritten on the next call.
+        _dydt_buf = np.empty(len(y0), dtype=np.float64)
+
+        def _rhs_fn(t, y):
+            return rhs_multicompartment(t, y, *args, _dydt_buf).copy()
+
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
-        
+
         # ── Optimization settings ──
         # max_step prevents integrator from taking too large steps
         # which can cause instability in stiff systems
@@ -305,49 +314,39 @@ class NeuronSolver:
 
         jacobian_mode = cfg.stim.jacobian_mode
         jacobian_options = {}
+        _sparsity_kwargs = dict(
+            n_comp=n_comp,
+            en_ih=cfg.channels.enable_Ih,
+            en_ica=cfg.channels.enable_ICa,
+            en_ia=cfg.channels.enable_IA,
+            en_sk=cfg.channels.enable_SK,
+            dyn_ca=cfg.calcium.dynamic_Ca,
+            l_indices=morph["L_indices"],
+            l_indptr=morph["L_indptr"],
+            use_dfilter_primary=use_dfilter_primary,
+            use_dfilter_secondary=use_dfilter_secondary,
+            en_itca=cfg.channels.enable_ITCa,
+            en_im=cfg.channels.enable_IM,
+            en_nap=cfg.channels.enable_NaP,
+            en_nar=cfg.channels.enable_NaR,
+        )
         if jacobian_mode == "sparse_fd":
-            jacobian_options["jac_sparsity"] = build_jacobian_sparsity(
-                n_comp=n_comp,
-                en_ih=cfg.channels.enable_Ih,
-                en_ica=cfg.channels.enable_ICa,
-                en_ia=cfg.channels.enable_IA,
-                en_sk=cfg.channels.enable_SK,
-                dyn_ca=cfg.calcium.dynamic_Ca,
-                l_indices=morph["L_indices"],
-                l_indptr=morph["L_indptr"],
-                use_dfilter_primary=use_dfilter_primary,
-                use_dfilter_secondary=use_dfilter_secondary,
-                en_itca=cfg.channels.enable_ITCa,
-                en_im=cfg.channels.enable_IM,
-                en_nap=cfg.channels.enable_NaP,
-                en_nar=cfg.channels.enable_NaR,
-            )
+            jacobian_options["jac_sparsity"] = build_jacobian_sparsity(**_sparsity_kwargs)
         elif jacobian_mode == "analytic_sparse":
-            sparsity = build_jacobian_sparsity(
-                n_comp=n_comp,
-                en_ih=cfg.channels.enable_Ih,
-                en_ica=cfg.channels.enable_ICa,
-                en_ia=cfg.channels.enable_IA,
-                en_sk=cfg.channels.enable_SK,
-                dyn_ca=cfg.calcium.dynamic_Ca,
-                l_indices=morph["L_indices"],
-                l_indptr=morph["L_indptr"],
-                use_dfilter_primary=use_dfilter_primary,
-                use_dfilter_secondary=use_dfilter_secondary,
-                en_itca=cfg.channels.enable_ITCa,
-                en_im=cfg.channels.enable_IM,
-                en_nap=cfg.channels.enable_NaP,
-                en_nar=cfg.channels.enable_NaR,
-            )
-            jacobian_options["jac"] = make_analytic_jacobian(sparsity)
+            sparsity = build_jacobian_sparsity(**_sparsity_kwargs)
+            _jac_raw = make_analytic_jacobian(sparsity)
+            # Wrap as closure: jacobian uses physics args only (no dydt buffer).
+            def _jac_fn(t, y):
+                return _jac_raw(t, y, *args)
+            jacobian_options["jac"] = _jac_fn
         elif jacobian_mode != "dense_fd":
             raise ValueError(f"Unsupported jacobian_mode={jacobian_mode}")
-        
+
         sol = solve_ivp(
-            rhs_multicompartment,
+            _rhs_fn,
             (0.0, cfg.stim.t_sim),
             y0,
-            args=args,
+            # args= omitted: _rhs_fn captures args and _dydt_buf via closure
             method='BDF',
             t_eval=t_eval,
             rtol=1e-5,
