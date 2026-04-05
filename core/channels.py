@@ -71,13 +71,7 @@ class ChannelRegistry:
         # Gate z_sk: ODE-based with tau_SK (Hirschberg 1998), z_inf depends on [Ca²⁺]
         self.channels.append(Channel(name="SK", color=(0.9, 0.1, 0.9)))
 
-        # 8. I_M (Muscarinic K+, KCNQ/Kv7 — Yamada/Koch/Adams 1989)
-        self.channels.append(Channel(
-            name="IM", color=(0.3, 0.7, 0.3),
-            gates=[GateInfo('w', 1, aw_M, bw_M)]
-        ))
-
-        # 9. I_T (T-type Ca2+, low-threshold, CaV3.x — Destexhe 1998)
+        # 8. I_T (T-type Ca2+, low-threshold, CaV3.x — Destexhe 1998)
         self.channels.append(Channel(
             name="ITCa", is_Ca=True, color=(1.0, 0.8, 0.0),
             gates=[
@@ -138,10 +132,6 @@ class ChannelRegistry:
             for alpha, beta in [(aa_IA, ba_IA), (ab_IA, bb_IA)]:
                 a_val, b_val = alpha(V0), beta(V0)
                 y0_list.append(np.full(N, a_val / (a_val + b_val)))
-
-        if config.channels.enable_IM:
-            a_val, b_val = aw_M(V0), bw_M(V0)
-            y0_list.append(np.full(N, a_val / (a_val + b_val)))
 
         if config.channels.enable_ITCa:
             for alpha, beta in [(am_TCa, bm_TCa), (ah_TCa, bh_TCa)]:

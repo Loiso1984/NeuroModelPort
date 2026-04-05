@@ -130,11 +130,15 @@ def rhs_multicompartment(
     # Dual stimulation (secondary) - optional
     dual_stim_enabled,
     stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, stim_comp_2, stim_mode_2,
-    use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2
+    use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
+    # Pre-allocated output buffer (avoids heap allocation per solver step)
+    dydt
 ):
     """
     Высокопроизводительное ядро ОДУ v10.1 (C-style scalar loop).
     Все токи рассчитываются как скаляры, без промежуточных аллокаций.
+    dydt is a pre-allocated output array passed from the solver; zeroed here
+    via a Numba loop (no numpy allocation inside @njit).
     """
 
     # --- Compute variable offsets in state vector y ---
@@ -239,8 +243,9 @@ def rhs_multicompartment(
             attenuated_current_2 = dfilter_attenuation_2 * base_current_2
             d_vfiltered_dt_secondary = (attenuated_current_2 - v_filtered_secondary) / dfilter_tau_ms_2
 
-    # --- Output array ---
-    dydt = np.zeros_like(y)
+    # --- Zero the pre-allocated output buffer (Numba-native; no heap alloc) ---
+    for _k in range(len(dydt)):
+        dydt[_k] = 0.0
 
     # --- Main C-style loop: all currents as scalars ---
     for i in range(n_comp):

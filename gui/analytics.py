@@ -178,15 +178,19 @@ class AnalyticsWidget(QTabWidget):
         # 1 — Traces (pyqtgraph for interactivity)
         self._build_traces_tab()
 
-        # 2 — Gate Dynamics
+        # 2 — Gate Dynamics (axes rebuilt lazily; shape depends on active channels)
         self.fig_gates, cvs = _mpl_fig(3, 1)
         self.addTab(_tab_with_toolbar(cvs), "⚙ Gates")
         self.cvs_gates = cvs
+        self._gates_n_rows: int | None = None   # cached subplot count
+        self._gates_axes: list = []              # cached Axes references
 
-        # 2.5 — Channel Currents (NEW)
+        # 2.5 — Channel Currents (axes rebuilt lazily; shape depends on active channels)
         self.fig_currents, cvs = _mpl_fig(3, 1)
         self.addTab(_tab_with_toolbar(cvs), "⚡ Currents")
         self.cvs_currents = cvs
+        self._currents_n_rows: int | None = None
+        self._currents_axes: list = []
 
         # 2.6 — Spike Mechanism (why spikes attenuate)
         self.fig_spike_mech, cvs = _mpl_fig(4, 1)
@@ -208,8 +212,12 @@ class AnalyticsWidget(QTabWidget):
         self.addTab(_tab_with_toolbar(cvs), "🔄 Phase Plane")
         self.cvs_phase = cvs
 
-        # 5 — Kymograph (dynamic layout — 1 or 2 subplots depending on n_comp)
-        self.fig_kymo, cvs = _mpl_fig(1, 1)
+        # 5 — Kymograph (pre-created 2-row layout; second row hidden for single-comp)
+        self.fig_kymo, cvs = _mpl_fig(2, 1)
+        self._kymo_axes = [self.fig_kymo.add_subplot(2, 1, k) for k in range(1, 3)]
+        self.fig_kymo.set_tight_layout({'pad': 2.5})
+        self._kymo_cbar1: object = None   # colorbar handle (safe removal)
+        self._kymo_cbar2: object = None
         self.addTab(_tab_with_toolbar(cvs), "🌊 Kymograph")
         self.cvs_kymo = cvs
 
@@ -646,29 +654,36 @@ class AnalyticsWidget(QTabWidget):
         from core.analysis import extract_gate_traces
         gates = extract_gate_traces(result)
         t = result.t
-
-        self.fig_gates.clear()
-        self.fig_gates.set_tight_layout({'pad': 2.5})
-
         n_rows = max(2, len(gates) + 1)
-        ax_v = self.fig_gates.add_subplot(n_rows, 1, 1)
+
+        # Rebuild subplot grid only when the number of active channels changes.
+        # This avoids fig.clear() (which destroys toolbar state) on every run.
+        if self._gates_n_rows != n_rows:
+            self.fig_gates.clear()
+            self.fig_gates.set_tight_layout({'pad': 2.5})
+            self._gates_axes = [self.fig_gates.add_subplot(n_rows, 1, k)
+                                 for k in range(1, n_rows + 1)]
+            self._gates_n_rows = n_rows
+
+        ax_v = self._gates_axes[0]
+        ax_v.cla()
         ax_v.plot(t, result.v_soma, color='#2060CC', linewidth=2.5, alpha=0.9)
         _configure_ax_interactive(ax_v, title='Membrane Potential (V_soma)',
                                   xlabel='', ylabel='V (mV)', show_legend=False)
         ax_v.tick_params(labelbottom=False)
 
-        for i, (name, trace) in enumerate(gates.items(), start=2):
-            ax = self.fig_gates.add_subplot(n_rows, 1, i)
+        for i, (name, trace) in enumerate(gates.items(), start=1):
+            ax = self._gates_axes[i]
+            ax.cla()
             color = GATE_COLORS.get(name, '#888888')
             ax.plot(t, trace, color=color, lw=2.5, label=f'{name} activation', alpha=0.9)
             ax.set_ylim(-0.05, 1.05)
             ax.set_ylabel(f'{name}(t)', fontsize=10, fontweight='bold')
-            ax.tick_params(labelbottom=(i == n_rows))
-            if i < n_rows:
-                ax.tick_params(labelbottom=False)
+            is_last = (i == n_rows - 1)
+            ax.tick_params(labelbottom=is_last)
             _configure_ax_interactive(ax, show_legend=True, grid_alpha=0.15)
 
-        self.fig_gates.axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
+        self._gates_axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
         self.cvs_gates.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
@@ -677,36 +692,40 @@ class AnalyticsWidget(QTabWidget):
     def _update_currents(self, result):
         """Plot channel currents with membrane potential overlay."""
         t = result.t
-        
-        self.fig_currents.clear()
-        self.fig_currents.set_tight_layout({'pad': 2.5})
-
         # Count non-zero current traces
-        currents = {name: curr for name, curr in result.currents.items() 
-                   if np.max(np.abs(curr)) > 1e-9}
-        
+        currents = {name: curr for name, curr in result.currents.items()
+                    if np.max(np.abs(curr)) > 1e-9}
         n_rows = max(2, len(currents) + 1)
-        
-        # Row 1: Membrane potential
-        ax_v = self.fig_currents.add_subplot(n_rows, 1, 1)
+
+        # Rebuild subplot grid only when the number of active channels changes.
+        if self._currents_n_rows != n_rows:
+            self.fig_currents.clear()
+            self.fig_currents.set_tight_layout({'pad': 2.5})
+            self._currents_axes = [self.fig_currents.add_subplot(n_rows, 1, k)
+                                    for k in range(1, n_rows + 1)]
+            self._currents_n_rows = n_rows
+
+        # Row 0: Membrane potential
+        ax_v = self._currents_axes[0]
+        ax_v.cla()
         ax_v.plot(t, result.v_soma, color='#2060CC', lw=2.5, alpha=0.9)
         _configure_ax_interactive(ax_v, title='Membrane Potential (V_soma)',
                                   xlabel='', ylabel='V (mV)', show_legend=False)
         ax_v.tick_params(labelbottom=False)
 
         # Remaining rows: Individual currents
-        for i, (name, curr) in enumerate(currents.items(), start=2):
-            ax = self.fig_currents.add_subplot(n_rows, 1, i)
+        for i, (name, curr) in enumerate(currents.items(), start=1):
+            ax = self._currents_axes[i]
+            ax.cla()
             color = CHAN_COLORS.get(name, '#888888')
             ax.plot(t, curr, color=color, lw=2.5, label=f'I_{name}', alpha=0.9)
             ax.axhline(y=0, color='k', linestyle='-', alpha=0.2, linewidth=0.8)
             ax.set_ylabel(f'I_{name} (pA)', fontsize=10, fontweight='bold')
-            ax.tick_params(labelbottom=(i == n_rows))
-            if i < n_rows:
-                ax.tick_params(labelbottom=False)
+            is_last = (i == n_rows - 1)
+            ax.tick_params(labelbottom=is_last)
             _configure_ax_interactive(ax, show_legend=True, grid_alpha=0.15)
 
-        self.fig_currents.axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
+        self._currents_axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
         self.cvs_currents.draw_idle()
 
     def _update_spike_mechanism(self, result, stats: dict):
@@ -1013,23 +1032,36 @@ class AnalyticsWidget(QTabWidget):
     #  5 — KYMOGRAPH
     # ─────────────────────────────────────────────────────────────────
     def _update_kymo(self, result):
-        self.fig_kymo.clear()
         n = result.n_comp
+        ax1, ax2 = self._kymo_axes
+
+        # Safe removal of previous colorbars before clearing axes
+        for attr, cb in (('_kymo_cbar1', self._kymo_cbar1),
+                          ('_kymo_cbar2', self._kymo_cbar2)):
+            if cb is not None:
+                try:
+                    cb.remove()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        ax1.cla()
+        ax2.cla()
 
         if n < 2:
-            ax = self.fig_kymo.add_subplot(1, 1, 1)
-            ax.text(0.5, 0.5, 'Single-compartment mode\n(no kymograph)',
-                    ha='center', va='center', fontsize=14, color='gray',
-                    transform=ax.transAxes)
+            ax2.set_visible(False)
+            ax1.text(0.5, 0.5, 'Single-compartment mode\n(no kymograph)',
+                     ha='center', va='center', fontsize=14, color='gray',
+                     transform=ax1.transAxes)
             self.cvs_kymo.draw_idle()
             return
 
+        ax2.set_visible(True)
         mc = result.config.morphology
         t  = result.t
         V  = result.v_all      # shape (N_comp, N_time)
 
         # Build two axonal paths: soma → Branch1 tip, soma → Branch2 tip
-        i_ais_s  = 1
         i_tr_s   = 1 + mc.N_ais
         i_branch = i_tr_s + mc.N_trunk
         i_b1s    = i_branch + 1
@@ -1038,27 +1070,26 @@ class AnalyticsWidget(QTabWidget):
         path1 = list(range(0, min(i_b1s + mc.N_b1, n)))
         path2 = list(range(0, min(i_b2s + mc.N_b2, n)))
 
-        ax1 = self.fig_kymo.add_subplot(2, 1, 1)
         im1 = ax1.imshow(
             V[path1, :], aspect='auto', origin='lower',
             extent=[t[0], t[-1], 0, len(path1)],
             cmap='plasma', vmin=V.min(), vmax=V.max()
         )
-        self.fig_kymo.colorbar(im1, ax=ax1, label='V (mV)')
+        self._kymo_cbar1 = self.fig_kymo.colorbar(im1, ax=ax1, label='V (mV)')
         ax1.set_ylabel('Compartment (soma → B1 tip)')
         ax1.set_title('Kymograph — Path to Branch 1')
 
-        ax2 = self.fig_kymo.add_subplot(2, 1, 2)
         im2 = ax2.imshow(
             V[path2, :], aspect='auto', origin='lower',
             extent=[t[0], t[-1], 0, len(path2)],
             cmap='plasma', vmin=V.min(), vmax=V.max()
         )
-        self.fig_kymo.colorbar(im2, ax=ax2, label='V (mV)')
-        ax2.set_xlabel('Time (ms)');  ax2.set_ylabel('Compartment (soma → B2 tip)')
+        self._kymo_cbar2 = self.fig_kymo.colorbar(im2, ax=ax2, label='V (mV)')
+        ax2.set_xlabel('Time (ms)')
+        ax2.set_ylabel('Compartment (soma → B2 tip)')
         ax2.set_title('Kymograph — Path to Branch 2')
 
-        self.fig_kymo.tight_layout()
+        self.fig_kymo.tight_layout(pad=2.5)
         self.cvs_kymo.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
