@@ -216,7 +216,8 @@ class SimulationParams(BaseModel):
     Iext is in µA/cm² (current density). The unit_converter module provides
     display conversions for user-facing interfaces.
 
-    For GUI display, absolute current in nanoamperes (nA) is computed as:
+    For GUI display, absolute current in nanoamperes (nA) is computed
+    from `FullModelConfig.Iext_absolute_nA` property:
         I_absolute_nA = Iext * Area_soma_cm² * 1000
         Area_soma_cm² = π * (d_soma_cm)²
     """
@@ -229,7 +230,7 @@ class SimulationParams(BaseModel):
     stim_type:  Literal[
         'const', 'pulse', 'alpha', 'ou_noise',
         'AMPA', 'NMDA', 'GABAA', 'GABAB',
-        'Kainate', 'Nicotinic'
+        'Kainate', 'Nicotinic', 'zap'
     ] = Field(
         default='const',
         description=(
@@ -238,10 +239,11 @@ class SimulationParams(BaseModel):
         )
     )
     Iext:       float   = Field(default=10.0,        description="Stimulus amplitude (uA/cm2 density)")
-    Iext_absolute_nA: float = Field(default=0.0,     description="Stimulus absolute current (nanoamperes, for GUI display only)")
     pulse_start: float  = Field(default=10.0,        description="Pulse onset (ms)")
     pulse_dur:   float  = Field(default=1.0,         description="Pulse duration (ms)")
     alpha_tau:   float  = Field(default=2.0,         description="Alpha-synapse time constant (ms)")
+    zap_f0_hz: float = Field(default=0.5, ge=0.01, description="ZAP/chirp start frequency (Hz)")
+    zap_f1_hz: float = Field(default=40.0, ge=0.01, description="ZAP/chirp end frequency (Hz)")
     stim_comp:   int    = Field(default=0,           description="Compartment index to inject current")
     # Event-driven synaptic queue (Stage 6.3, preparation for network connectivity)
     # Each entry is a spike-arrival timestamp in ms. When non-empty and stim_type is
@@ -367,6 +369,15 @@ class FullModelConfig(BaseModel):
     dual_stimulation: Optional[Any] = None  # Optional dual stimulation config (DualStimulationConfig or None)
     analysis:   AnalysisParams    = AnalysisParams()
     preset_modes: PresetModeParams = PresetModeParams()
+
+    @property
+    def Iext_absolute_nA(self) -> float:
+        """Derived absolute stimulus current (nA) from canonical density source `stim.Iext`."""
+        import numpy as np
+        from core.unit_converter import density_to_absolute_current
+
+        soma_area_cm2 = np.pi * float(self.morphology.d_soma) ** 2
+        return density_to_absolute_current(float(self.stim.Iext), soma_area_cm2)
 
 
 # Rebuild FullModelConfig after importing DualStimulationConfig (optional)

@@ -596,12 +596,16 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     I_ion_soma = sum(result.currents.values())
 
     # Stimulus current
-    s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0}
+    s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10}
     stype = s_map.get(cfg.stim.stim_type, 0)
     I_stim = np.array([
-        get_stim_current(float(ti), stype,
-                         cfg.stim.Iext, cfg.stim.pulse_start,
-                         cfg.stim.pulse_dur, cfg.stim.alpha_tau)
+        get_stim_current(
+            float(ti), stype,
+            cfg.stim.Iext, cfg.stim.pulse_start,
+            cfg.stim.pulse_dur, cfg.stim.alpha_tau,
+            float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+            float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+        )
         for ti in t
     ])
 
@@ -799,6 +803,7 @@ def _stim_type_to_code(stim_type: str) -> int:
         "GABAB": 7,
         "Kainate": 8,
         "Nicotinic": 9,
+        "zap": 10,
     }.get(stim_type, 0)
 
 
@@ -843,6 +848,8 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                 cfg.stim.pulse_start,
                 cfg.stim.pulse_dur,
                 cfg.stim.alpha_tau,
+                float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+                float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
             )
             stim[i] += attenuation * float(base)
 
@@ -864,6 +871,8 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                 float(getattr(dual_cfg, "secondary_start", 0.0)),
                 float(getattr(dual_cfg, "secondary_duration", 0.0)),
                 float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
+                float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
+                float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
             )
             stim[i] += attenuation_2 * float(base_2)
 
@@ -1037,7 +1046,81 @@ def estimate_spike_modulation(
     return out
 
 
-def full_analysis(result) -> dict:
+def compute_membrane_impedance(
+    t_ms: np.ndarray,
+    v_mV: np.ndarray,
+    i_stim_uA_cm2: np.ndarray,
+    fmin_hz: float = 0.5,
+    fmax_hz: float = 200.0,
+) -> dict:
+    """Estimate membrane impedance Z(f)=V(f)/I(f) from time-domain traces.
+
+    Returns magnitude in kOhm*cm^2 because input units are mV and uA/cm^2.
+    """
+    t_ms = np.asarray(t_ms, dtype=float)
+    v_mV = np.asarray(v_mV, dtype=float)
+    i_stim_uA_cm2 = np.asarray(i_stim_uA_cm2, dtype=float)
+
+    out = {
+        "valid": False,
+        "freq_hz": np.array([]),
+        "z_mag_kohm_cm2": np.array([]),
+        "z_phase_deg": np.array([]),
+        "f_res_hz": np.nan,
+        "z_res_kohm_cm2": np.nan,
+    }
+
+    if len(t_ms) < 16 or len(v_mV) != len(t_ms) or len(i_stim_uA_cm2) != len(t_ms):
+        return out
+
+    dt_ms = float(np.mean(np.diff(t_ms)))
+    if not np.isfinite(dt_ms) or dt_ms <= 0.0:
+        return out
+
+    fs_hz = 1000.0 / dt_ms
+    n = len(t_ms)
+
+    v = v_mV - float(np.mean(v_mV))
+    i = i_stim_uA_cm2 - float(np.mean(i_stim_uA_cm2))
+
+    vf = np.fft.rfft(v)
+    inf = np.fft.rfft(i)
+    freq = np.fft.rfftfreq(n, d=dt_ms / 1000.0)
+
+    band = (freq >= float(fmin_hz)) & (freq <= float(fmax_hz))
+    if not np.any(band):
+        return out
+
+    eps = 1e-12
+    i_abs = np.abs(inf)
+    drive_mask = i_abs > (0.01 * np.max(i_abs) + eps)
+    mask = band & drive_mask
+    if not np.any(mask):
+        mask = band
+
+    z = np.zeros_like(vf, dtype=np.complex128)
+    z[mask] = vf[mask] / (inf[mask] + eps)
+
+    freq_b = freq[mask]
+    z_mag = np.abs(z[mask])
+    z_phase = np.angle(z[mask], deg=True)
+
+    if len(freq_b) == 0:
+        return out
+
+    k = int(np.argmax(z_mag))
+    out.update({
+        "valid": True,
+        "freq_hz": freq_b,
+        "z_mag_kohm_cm2": z_mag,
+        "z_phase_deg": z_phase,
+        "f_res_hz": float(freq_b[k]),
+        "z_res_kohm_cm2": float(z_mag[k]),
+    })
+    return out
+
+
+def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
     """
     Compute the complete Neuron Passport from a SimulationResult.
 
@@ -1215,7 +1298,8 @@ def full_analysis(result) -> dict:
         "lyapunov_class": "disabled",
         "lyapunov_valid_pairs": 0,
     }
-    if getattr(ana, "enable_lyapunov", False):
+    should_compute_lyapunov = getattr(ana, "enable_lyapunov", False) if compute_lyapunov is None else bool(compute_lyapunov)
+    if should_compute_lyapunov:
         lyap_raw = estimate_ftle_lle(
             V,
             t,

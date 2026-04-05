@@ -16,6 +16,7 @@ This registry separates active deterministic validators from legacy/compatibilit
 - `run_dual_stim_extended_report.py`
 - `hypoxia_deterministic_search.py`
 - `benchmark_jacobian_modes.py`
+- `run_impedance_zap_report.py`
 
 ## Legacy / Compatibility Utilities
 

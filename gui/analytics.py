@@ -1,7 +1,7 @@
 """
-gui/analytics.py — Full Scientific Analytics Suite v10.0
+gui/analytics.py — Full Scientific Analytics Suite v10.1
 
-10 analytical tabs using matplotlib embedded in Qt:
+Analytical tabs using matplotlib embedded in Qt:
   0. Neuron Passport     — rich biophysical report
   1. Oscilloscope detail — multi-compartment traces
   2. Gate Dynamics       — m, h, n, r, s, u vs time
@@ -14,6 +14,10 @@ gui/analytics.py — Full Scientific Analytics Suite v10.0
   9. Sweep               — traces + f-I curve
  10. S-D Curve           — strength-duration + Weiss fit
  11. Excitability Map    — 2-D heatmap (I × duration)
+ 12. Spectrogram         — STFT of soma Vm
+ 13. Impedance Z(f)      — membrane frequency response (|Z|, phase)
+
+Lyapunov computation is explicit via `Compute LLE` action.
 """
 
 import numpy as np
@@ -130,6 +134,7 @@ class AnalyticsWidget(QTabWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._last_result = None
+        self._last_stats = None
         self._last_bif_data = None
         self._last_bif_param_name = None
         self._last_sweep_results = None
@@ -143,10 +148,23 @@ class AnalyticsWidget(QTabWidget):
     #  TAB CONSTRUCTION
     # ─────────────────────────────────────────────────────────────────
     def _build_tabs(self):
+        corner = QWidget()
+        corner_l = QHBoxLayout(corner)
+        corner_l.setContentsMargins(0, 0, 0, 0)
+        corner_l.setSpacing(6)
+
+        self._btn_compute_lle = QPushButton("Compute LLE")
+        self._btn_compute_lle.setToolTip("Run Lyapunov/LLE analysis explicitly for the latest simulation")
+        self._btn_compute_lle.setEnabled(False)
+        self._btn_compute_lle.clicked.connect(self._compute_lle_now)
+        corner_l.addWidget(self._btn_compute_lle)
+
         self._btn_fullscreen = QPushButton("Full Screen")
         self._btn_fullscreen.setToolTip("Open analytics in a maximized window")
         self._btn_fullscreen.clicked.connect(self.open_fullscreen)
-        self.setCornerWidget(self._btn_fullscreen, Qt.Corner.TopRightCorner)
+        corner_l.addWidget(self._btn_fullscreen)
+
+        self.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
         # 0 — Passport (text)
         self.passport_view = QTextEdit()
@@ -241,6 +259,13 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_spectro = cvs
         self._spectro_cbar = None  # colorbar handle for safe removal
 
+        # 13 — Membrane Impedance Z(f)
+        self.fig_impedance, cvs = _mpl_fig(2, 1)
+        self.ax_impedance = [self.fig_impedance.add_subplot(2, 1, k) for k in range(1, 3)]
+        self.fig_impedance.set_tight_layout({'pad': 2.5})
+        self.addTab(_tab_with_toolbar(cvs), "🧲 Impedance")
+        self.cvs_impedance = cvs
+
     def _build_traces_tab(self):
         """pyqtgraph multi-compartment detail traces tab."""
         win = pg.GraphicsLayoutWidget()
@@ -267,7 +292,9 @@ class AnalyticsWidget(QTabWidget):
                                     compute_optional_equilibrium,
                                     compute_nullclines, compute_current_balance,
                                     extract_gate_traces)
-        stats = full_analysis(result)
+        stats = full_analysis(result, compute_lyapunov=False)
+        self._last_stats = stats
+        self._btn_compute_lle.setEnabled(True)
         self._update_passport(result, stats)
         self._update_traces(result)
         self._update_gates(result)
@@ -278,8 +305,20 @@ class AnalyticsWidget(QTabWidget):
         self._update_kymo(result)
         self._update_energy(result)
         self._update_spectrogram(result)
+        self._update_impedance(result)
         if result.morph:
             self._update_balance(result)
+
+
+    def _compute_lle_now(self):
+        """Explicit Lyapunov action (separate from simulation parameter toggles)."""
+        if self._last_result is None:
+            return
+        from core.analysis import full_analysis
+
+        stats = full_analysis(self._last_result, compute_lyapunov=True)
+        self._last_stats = stats
+        self._update_passport(self._last_result, stats)
 
     # ─────────────────────────────────────────────────────────────────
     #  0 — NEURON PASSPORT
@@ -446,7 +485,7 @@ class AnalyticsWidget(QTabWidget):
             "║  DYNAMICAL STABILITY (LLE/FTLE)                                 ║",
         ]
         if lyap_class == 'disabled':
-            lines.append("║    Analysis disabled (enable_lyapunov=False)                    ║")
+            lines.append("║    LLE not computed. Use `Compute LLE` button.                  ║")
         else:
             lines += [
                 f"║    Class = {lyap_class:<21}  LLE = {_fmt(lyap_lle_s, '+.4f', '1/s'):<14}  ║",
@@ -506,6 +545,53 @@ class AnalyticsWidget(QTabWidget):
         ]
 
         self.passport_view.setPlainText("\n".join(lines))
+
+    def _update_impedance(self, result):
+        """Update membrane impedance magnitude/phase panels from latest run."""
+        from core.analysis import reconstruct_stimulus_trace, compute_membrane_impedance
+
+        ax_mag, ax_phase = self.ax_impedance
+        ax_mag.clear()
+        ax_phase.clear()
+
+        i_stim = reconstruct_stimulus_trace(result)
+        imp = compute_membrane_impedance(result.t, result.v_soma, i_stim)
+
+        if not imp.get("valid", False):
+            ax_mag.text(0.5, 0.5, "Insufficient data for Z(f)", ha="center", va="center", transform=ax_mag.transAxes)
+            ax_phase.text(0.5, 0.5, "Need dynamic stimulus content", ha="center", va="center", transform=ax_phase.transAxes)
+            _configure_ax_interactive(ax_mag, title="Impedance Magnitude", xlabel="Frequency (Hz)", ylabel="|Z| (kΩ·cm²)", show_legend=False)
+            _configure_ax_interactive(ax_phase, title="Impedance Phase", xlabel="Frequency (Hz)", ylabel="Phase (deg)", show_legend=False)
+            self.cvs_impedance.draw_idle()
+            return
+
+        f = imp["freq_hz"]
+        zmag = imp["z_mag_kohm_cm2"]
+        zph = imp["z_phase_deg"]
+        fres = imp.get("f_res_hz", np.nan)
+        zres = imp.get("z_res_kohm_cm2", np.nan)
+
+        ax_mag.plot(f, zmag, color="#2E86DE", lw=1.8, label="|Z(f)|")
+        if np.isfinite(fres):
+            ax_mag.axvline(fres, color="#E67E22", ls="--", lw=1.2, label=f"f_res={fres:.2f} Hz")
+        _configure_ax_interactive(
+            ax_mag,
+            title=f"Membrane Impedance |Z(f)|  (peak={zres:.2f} kΩ·cm² @ {fres:.2f} Hz)" if np.isfinite(fres) else "Membrane Impedance |Z(f)|",
+            xlabel="Frequency (Hz)",
+            ylabel="|Z| (kΩ·cm²)",
+            show_legend=True,
+        )
+
+        ax_phase.plot(f, zph, color="#8E44AD", lw=1.5, label="∠Z(f)")
+        ax_phase.axhline(0.0, color="#7f8c8d", lw=0.8, ls=":")
+        _configure_ax_interactive(
+            ax_phase,
+            title="Impedance Phase",
+            xlabel="Frequency (Hz)",
+            ylabel="Phase (deg)",
+            show_legend=True,
+        )
+        self.cvs_impedance.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  1 — TRACES (pyqtgraph)

@@ -3,17 +3,18 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QGroupBox, QVBoxLayout, QLabel
 )
 from PySide6.QtCore import Qt
-from typing import Literal, get_args, get_origin
+from typing import Literal, get_args, get_origin, Iterable
 from pydantic import BaseModel
 
 
 class PydanticFormWidget(QWidget):
-    def __init__(self, pydantic_instance: BaseModel, title: str = "", parent=None, on_change=None):
+    def __init__(self, pydantic_instance: BaseModel, title: str = "", parent=None, on_change=None, hidden_fields: Iterable[str] | None = None):
         super().__init__(parent)
         self.instance = pydantic_instance
         self.on_change = on_change
         self.widgets_map = {}
         self.labels_map = {}
+        self.hidden_fields = set(hidden_fields or ())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -24,6 +25,8 @@ class PydanticFormWidget(QWidget):
 
     def _build_form(self):
         for field_name, field_info in self.instance.model_fields.items():
+            if field_name in self.hidden_fields:
+                continue
             field_type = field_info.annotation
             val = getattr(self.instance, field_name)
             origin = get_origin(field_type)

@@ -569,34 +569,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
     elif "Hypoxia" in name:
         _apply_hypoxia_mode(cfg)
 
-    # Calculate absolute current for GUI display
-    _calculate_absolute_iext(cfg)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPER: CALCULATE ABSOLUTE CURRENT FOR GUI DISPLAY
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _calculate_absolute_iext(cfg: FullModelConfig):
-    """
-    Calculate absolute stimulus current (nanoamperes) from density for GUI display.
-
-    This function should be called AFTER setting cfg.stim.Iext density to populate
-    the Iext_absolute_nA field for user-friendly display.
-
-    Parameters
-    ----------
-    cfg : FullModelConfig
-        Configuration with set Iext and morphology
-    """
-    from core.unit_converter import density_to_absolute_current
-
-    soma_diameter_cm = cfg.morphology.d_soma
-    soma_area_cm2 = np.pi * soma_diameter_cm ** 2
-
-    cfg.stim.Iext_absolute_nA = density_to_absolute_current(
-        cfg.stim.Iext, soma_area_cm2
-    )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # СИНАПТИЧЕСКИЕ СТИМУЛЫ: Неврофизиологически корректные расширения alpha-функции
