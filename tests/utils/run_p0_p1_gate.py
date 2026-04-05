@@ -16,6 +16,7 @@ class StepResult:
     status: str
     stdout_tail: str
     stderr_tail: str
+    duration_sec: float
 
 
 def _classify_exit_code(code: int) -> str:
@@ -25,21 +26,43 @@ def _classify_exit_code(code: int) -> str:
         return "FAIL"
     if code == 2:
         return "WARN_DEPENDENCY"
+    if code == 124:
+        return "TIMEOUT"
     return "ERROR"
 
 
-def _run_step(name: str, cmd: list[str]) -> StepResult:
+def _run_step(name: str, cmd: list[str], timeout_sec: float) -> StepResult:
+    import time
+
     repo_root = Path(__file__).resolve().parents[2]
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(repo_root))
-    out_tail = "\n".join(proc.stdout.splitlines()[-30:])
-    err_tail = "\n".join(proc.stderr.splitlines()[-30:])
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+            timeout=timeout_sec,
+        )
+        out_tail = "\n".join(proc.stdout.splitlines()[-30:])
+        err_tail = "\n".join(proc.stderr.splitlines()[-30:])
+        rc = int(proc.returncode)
+    except subprocess.TimeoutExpired as exc:
+        rc = 124
+        out_tail = "\n".join((exc.stdout or "").splitlines()[-30:])
+        err_tail = "\n".join((exc.stderr or "").splitlines()[-30:])
+        if err_tail:
+            err_tail += "\n"
+        err_tail += f"[timeout] step exceeded {timeout_sec:.1f}s"
+    duration = float(time.monotonic() - t0)
     return StepResult(
         name=name,
         command=cmd,
-        exit_code=int(proc.returncode),
-        status=_classify_exit_code(int(proc.returncode)),
+        exit_code=rc,
+        status=_classify_exit_code(rc),
         stdout_tail=out_tail,
         stderr_tail=err_tail,
+        duration_sec=duration,
     )
 
 
@@ -47,6 +70,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Run consolidated P0/P1 gate checks.")
     ap.add_argument("--out-dir", default="tests/artifacts/p0_p1_gate")
     ap.add_argument("--target-ratio", type=float, default=0.3)
+    ap.add_argument("--step-timeout-sec", type=float, default=1200.0)
     args = ap.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -93,9 +117,9 @@ def main() -> int:
         ),
     ]
 
-    results = [_run_step(name, cmd) for name, cmd in steps]
+    results = [_run_step(name, cmd, timeout_sec=args.step_timeout_sec) for name, cmd in steps]
 
-    blocking = [r for r in results if r.status in {"FAIL", "ERROR"}]
+    blocking = [r for r in results if r.status in {"FAIL", "ERROR", "TIMEOUT"}]
     summary = {
         "status": "FAIL" if blocking else "PASS",
         "blocking_steps": [r.name for r in blocking],

@@ -16,6 +16,76 @@
 - [ ] **P0-2:** добить Preset F conduction attenuation до целевого `ratio_f < 0.3` на extended sweep.
 - [ ] **P1-1:** довести Ca safety bounds на длинных патологических прогонах (без NaN/inf).
 
+## 🧩 Addendum: Code Review Reconciliation (2026-04-05)
+
+> Этот блок не заменяет основной план, а уточняет **приоритеты исполнения** и критерии закрытия/незакрытия по свежему ревью.
+
+### Статус по ревью: что уже закрыто и что остаётся открытым
+
+#### ✅ Подтверждённо закрыто (оставляем как done)
+1. **Ca safety bounds (P1-1 technical implementation):** клемпы `Ca_i` и защитный Nernst-path реализованы в core-слое; остаётся только долгий прогон-верификация на патологических сценариях.
+2. **RHS hot-path аллокации (P0-1 implementation core):** переход на preallocated `dydt` и removal heap-allocation в RHS выполнены; остаётся проверить устойчивость/регрессию на branch contour.
+3. **Decimation base-path:** базовые адаптивные downsampling-механизмы добавлены и используются в plotting/analytics path.
+4. **Delay target SSoT utility:** унификация через `gui/delay_target.py` выполнена и сохранена как обязательный путь для delay-focused UI.
+
+#### 🔴 Открытые критические блокеры (P0, must-fix до новых фич)
+1. **GUI analytics memory discipline до конца не доведена.**
+   - Запрещены hot-path пересоздания/удаления artist/axes (`clear/cla/remove/add_subplot`-паттерны) в update-циклах.
+   - Требование: фиксированная заранее созданная сетка осей + show/hide + `set_data()` обновления.
+   - DoD: повторные прогоны/sweep без деградации responsiveness и без роста memory-footprint в цикле обновлений.
+2. **Preset F (MS) physiology ещё не соответствует цели.**
+   - Требование: добиться устойчивого патологического затухания/блока проведения (`ratio_f <= 0.30`) в branch + extended sweep.
+   - Примечание: tuning делается итеративно, с обязательной фиксацией артефактов.
+
+#### 🟠 Открытые высокорисковые долги (P1, после закрытия P0)
+1. **RHS scalar-args compression (продолжение борьбы с arg-explosion).**
+   - Следующий шаг: упаковать scalar stimulus/environment параметры в структурированный контейнер (`np.ndarray` фиксированной структуры либо иной numba-safe packed format).
+   - Цель: уменьшение позиционной хрупкости сигнатуры и упрощение solver/jacobian/rhs-contract синхронизации.
+2. **GUI SSoT для `Iext_absolute_nA` не полностью соблюдён.**
+   - Требование: абсолютный ток только read-only presentation (hint/label), без обратной записи в editable form controls.
+3. **Lazy initialization тяжёлых analytics tabs.**
+   - Требование: не создавать все тяжёлые MPL canvas на старте; инициализация по первому заходу на вкладку.
+
+### Исполняемый алгоритм (обязательная последовательность)
+1. **Step A / P0:** закрыть GUI analytics memory leak discipline (`gui/analytics.py`) без изменения физики модели.
+2. **Step B / P0:** закрыть физиологию Preset F (`core/presets.py`) до прохождения ratio-gate.
+3. **Step C / Verify:** прогнать branch+utility проверки и зафиксировать JSON/MD артефакты.
+4. **Step D / P1:** только после A+B перейти к SSoT `Iext_absolute_nA`, scalar-args packing и lazy tabs.
+
+### Gate-критерии перед переходом к P1
+- Branch test по MS attenuation стабильно зелёный.
+- Extended F-conduction report подтверждает целевой режим (не «почти полная проводимость»).
+- GUI update-path работает без пересоздания осей/artist в hot-loop.
+- Обновлены статусы в `CurrentTasks10.2.md` + `docs/VALIDATION_COVERAGE_STATUS.md` (факт, без wishful-thinking).
+
+## 🧩 Addendum: Drift & Contract Risks Intake (2026-04-05, late)
+
+> Дополнение к плану (не замена): новые пункты из свежего ревью, с сохранением приоритетной оси P0→P1.
+
+### 🔴 P0 (critical)
+1. **Analytics hot-path must avoid dynamic axis destruction/recreation.**
+   - Внесено в план как жёсткий запрет на `ax.remove()`/recreate subplot в update-loop.
+   - Текущий статус: **in progress** (фиксированная сетка осей уже внедрена; требуется финальный аудит оставшихся remove-paths в analytics).
+2. **Preset F attenuation gate remains blocking until confirmed by real run artifacts.**
+   - Цель сохраняется: `ratio_f <= 0.30` на branch + extended utility.
+   - Текущий статус: **open / blocking**.
+
+### 🟠 P1 (high risk)
+1. **Dual implementation drift in `run_euler_maruyama` (`core/advanced_sim.py`).**
+   - Риск: стохастический контур дублирует физику отдельно от RHS.
+   - План: вынести единый расчёт производных/токов в shared numba-safe helper и переиспользовать в RHS + EM path.
+   - Статус: **open**.
+2. **RHS signature fragility (`rhs.py` vs `jacobian.py`) despite contract checks.**
+   - Риск: позиционный сдвиг аргументов может дать silent scientific corruption.
+   - План: compress scalar stimulus/environment args в packed container (`stim/env params` block).
+   - Статус: **open**.
+3. **SSoT for `Iext_absolute_nA` presentation in GUI.**
+   - Требование: read-only display вне editable form fields.
+   - Статус: **✅ closed in GUI hint path** (абсолютный ток теперь отображается только текстом в `lbl_params_hint`; обратная запись в form field удаляется).
+4. **Dendritic filter tau-edge verification (`tau<=0`).**
+   - Текущий статус: **✅ logic guarded** (filter auto-disables; no divide-by-zero path in active derivative branch).
+   - Остаток: поддерживать regression coverage при будущих refactor.
+
 ---
 
 ## Цель
@@ -190,6 +260,12 @@
 - ✅ Stress-harness reference ranges externalized to `tests/utils/preset_reference_ranges.json` (keyword rules + default envelopes), enabling iterative literature alignment without code edits.
 - ✅ RHS contract secondary-stim validation is now conditional on `dual_stim_enabled==1`; single-stim launches no longer fail on irrelevant secondary fields (fix for `Invalid atau_2` on regular runs).
 - ✅ Jacobian Nernst path aligned with RHS calcium safety envelope: ICa/ITCa now clamp `Ca_i` to `[CA_I_MIN_M_M, CA_I_MAX_M_M]`, reducing Jacobian/RHS mismatch risk on long pathological simulations.
+- ✅ Analytics hot-path cleanup progressed further: sweep traces/colorbar, bifurcation peaks, impedance diagnostics, and spectrogram mesh now use persistent artists/state updates (no per-update artist/axis removals in these paths).
+- ✅ Solver fallback hardening expanded: BDF primary step now falls back to LSODA on any solver-side exception class (not just `RuntimeError`), reducing platform-specific crash risk in stiff/singular episodes.
+- 🟠 Preset F demyelination retuned toward stronger conduction block signature: increased `Ra`, leak (`gL`), and effective membrane capacitance (`Cm`) while reducing `gNa_max`; pending verification artifacts from branch/extended runs.
+- ✅ Sweep analytics trace lifecycle corrected for sparse/partial sweep results: persistent trace slots now hide by actual plotted-series count, preventing stale curves from prior runs.
+- ✅ P0/P1 gate runner hardened against hangs: per-step timeout policy added with explicit `TIMEOUT` classification and blocking semantics in consolidated summary.
+- ✅ Windows execution helper synced with timeout-capable gate runner (`RUN_TESTS_FOR_Codex.bat` now passes `--step-timeout-sec`), reducing “stuck test” risk on host runs.
 
 ## Low-Priority GUI Backlog (compiled from AIDER + new recommendations)
 > Ниже — только уникальные, реализуемые пункты (без дублей уже закрытых задач).

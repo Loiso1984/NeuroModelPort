@@ -325,11 +325,12 @@ def apply_preset(cfg: FullModelConfig, name: str):
         apply_preset(cfg, "alpha-Motoneuron (Powers 2001)")
         # Severe demyelination profile:
         # - high axial resistance (internodal conduction impairment),
-        # - high leak shunt (exposed membrane),
-        # - reduced Na drive to favor propagation failure distally.
-        cfg.morphology.Ra = 700.0
-        cfg.channels.gL = 2.6
-        cfg.channels.gNa_max = 70.0
+        # - high leak shunt + higher effective membrane capacitance (myelin loss),
+        # - reduced Na drive to favor distal propagation failure/block.
+        cfg.morphology.Ra = 900.0
+        cfg.channels.gL = 3.2
+        cfg.channels.gNa_max = 45.0
+        cfg.channels.Cm = 6.0
         cfg.stim.jacobian_mode = 'sparse_fd'
         # Keep the same input class as control; pathology should emerge from membrane/cable changes.
         cfg.stim.stim_type = 'alpha'

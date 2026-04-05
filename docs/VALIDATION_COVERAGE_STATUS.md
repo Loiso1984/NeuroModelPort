@@ -11,6 +11,10 @@ Based on current code audit versus v10.2 critique, these items are explicitly tr
 - `P0` Preset F (MS) demyelination severity recalibration until conduction ratio reflects pathological attenuation.
 - `P1` RHS argument explosion refactor (reduce positional-argument fragility).
 - `P1` Calcium upper-bound safety clamp for long pathological runs.
+- Addendum (2026-04-05) confirmed by post-implementation review:
+  - keep `P0` on GUI update-cycle memory discipline (no hot-path artist/axes recreation),
+  - keep `P0` on Preset F demyelination severity until ratio target is reproducibly met,
+  - defer `P1` items (RHS scalar packing, GUI SSoT absolute-current cleanup, lazy heavy analytics tabs) until P0 gates are closed.
 
 Execution source of truth for this queue is now `CurrentTasks10.2.md` + `AIDER_PLAN.md` (v10.2 section).
 

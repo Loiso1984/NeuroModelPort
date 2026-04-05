@@ -192,22 +192,34 @@ class AnalyticsWidget(QTabWidget):
         # 1 — Traces (pyqtgraph for interactivity)
         self._build_traces_tab()
 
-        # 2 — Gate Dynamics (axes rebuilt lazily; shape depends on active channels)
-        self.fig_gates, cvs = _mpl_fig(3, 1)
+        # 2 — Gate Dynamics (fixed pre-created grid; show/hide only in updates)
+        self._gates_max_rows = 10  # Vm + up to 9 gate traces
+        self.fig_gates, cvs = _mpl_fig(self._gates_max_rows, 1)
         self.addTab(_tab_with_toolbar(cvs), "⚙ Gates")
         self.cvs_gates = cvs
-        self._gates_n_rows: int | None = None   # cached subplot count
-        self._gates_axes: list = []              # cached Axes references
+        self._gates_n_rows: int | None = None
+        self._gates_axes: list = [
+            self.fig_gates.add_subplot(self._gates_max_rows, 1, k)
+            for k in range(1, self._gates_max_rows + 1)
+        ]
+        for ax in self._gates_axes:
+            ax.set_visible(False)
         self._gates_line_v = None
         self._gates_lines: dict[str, object] = {}
         self._gates_signature: tuple[str, ...] = ()
 
-        # 2.5 — Channel Currents (axes rebuilt lazily; shape depends on active channels)
-        self.fig_currents, cvs = _mpl_fig(3, 1)
+        # 2.5 — Channel Currents (fixed pre-created grid; show/hide only in updates)
+        self._currents_max_rows = 12  # Vm + up to 11 channel traces
+        self.fig_currents, cvs = _mpl_fig(self._currents_max_rows, 1)
         self.addTab(_tab_with_toolbar(cvs), "⚡ Currents")
         self.cvs_currents = cvs
         self._currents_n_rows: int | None = None
-        self._currents_axes: list = []
+        self._currents_axes: list = [
+            self.fig_currents.add_subplot(self._currents_max_rows, 1, k)
+            for k in range(1, self._currents_max_rows + 1)
+        ]
+        for ax in self._currents_axes:
+            ax.set_visible(False)
         self._currents_line_v = None
         self._currents_lines: dict[str, object] = {}
         self._currents_zero_lines: dict[str, object] = {}
@@ -219,6 +231,12 @@ class AnalyticsWidget(QTabWidget):
         self.fig_spike_mech.set_tight_layout({'pad': 2.5})
         self.addTab(_tab_with_toolbar(cvs), "🧪 Spike Mechanism")
         self.cvs_spike_mech = cvs
+        self._spike_mech_init_done = False
+        self._spike_mech_lines: dict[str, object] = {}
+        self._spike_mech_curr_lines: dict[str, object] = {}
+        self._spike_mech_norm_lines: dict[str, object] = {}
+        self._spike_mech_texts: dict[str, object] = {}
+        self._spike_mech_ax2b = None
 
         # 3 — Equilibrium Curves
         self.fig_equil, cvs = _mpl_fig(2, 2)
@@ -280,6 +298,7 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_sweep = cvs
         self._sweep_cbar = None
         self._sweep_trace_lines: list = []
+        self._sweep_trace_max = 64
         self._sweep_metric_lines: dict[str, object] = {}
 
         # 10 — S-D Curve
@@ -308,7 +327,6 @@ class AnalyticsWidget(QTabWidget):
         self._spectro_cbar = None  # colorbar handle for safe removal
         self._spectro_vm_line = None
         self._spectro_mesh = None
-        self._spectro_mesh_shape = None
         self._spectro_fail_text = None
 
         # 13 — Membrane Impedance Z(f)
@@ -318,7 +336,7 @@ class AnalyticsWidget(QTabWidget):
         self.addTab(_tab_with_toolbar(cvs), "🧲 Impedance")
         self.cvs_impedance = cvs
         self._impedance_lines: dict[str, object] = {}
-        self._impedance_texts: list = []
+        self._impedance_texts: dict[str, object] = {}
 
     def _build_traces_tab(self):
         """pyqtgraph multi-compartment detail traces tab."""
@@ -614,12 +632,15 @@ class AnalyticsWidget(QTabWidget):
             self._impedance_lines["zph"] = ax_phase.plot([], [], color="#8E44AD", lw=1.5, label="∠Z(f)")[0]
             self._impedance_lines["zero"] = ax_phase.axhline(0.0, color="#7f8c8d", lw=0.8, ls=":")
 
-        for txt in self._impedance_texts:
-            try:
-                txt.remove()
-            except Exception:
-                pass
-        self._impedance_texts = []
+        if not self._impedance_texts:
+            self._impedance_texts["mag"] = ax_mag.text(
+                0.5, 0.5, "", ha="center", va="center", transform=ax_mag.transAxes, visible=False
+            )
+            self._impedance_texts["phase"] = ax_phase.text(
+                0.5, 0.5, "", ha="center", va="center", transform=ax_phase.transAxes, visible=False
+            )
+        self._impedance_texts["mag"].set_visible(False)
+        self._impedance_texts["phase"].set_visible(False)
 
         i_stim = reconstruct_stimulus_trace(result)
         imp = compute_membrane_impedance(result.t, result.v_soma, i_stim)
@@ -628,12 +649,10 @@ class AnalyticsWidget(QTabWidget):
             self._impedance_lines["zmag"].set_data([], [])
             self._impedance_lines["zph"].set_data([], [])
             self._impedance_lines["fres"].set_visible(False)
-            self._impedance_texts.append(
-                ax_mag.text(0.5, 0.5, "Insufficient data for Z(f)", ha="center", va="center", transform=ax_mag.transAxes)
-            )
-            self._impedance_texts.append(
-                ax_phase.text(0.5, 0.5, "Need dynamic stimulus content", ha="center", va="center", transform=ax_phase.transAxes)
-            )
+            self._impedance_texts["mag"].set_text("Insufficient data for Z(f)")
+            self._impedance_texts["mag"].set_visible(True)
+            self._impedance_texts["phase"].set_text("Need dynamic stimulus content")
+            self._impedance_texts["phase"].set_visible(True)
             _configure_ax_interactive(ax_mag, title="Impedance Magnitude", xlabel="Frequency (Hz)", ylabel="|Z| (kΩ·cm²)", show_legend=False)
             _configure_ax_interactive(ax_phase, title="Impedance Phase", xlabel="Frequency (Hz)", ylabel="Phase (deg)", show_legend=False)
             self.cvs_impedance.draw_idle()
@@ -751,20 +770,16 @@ class AnalyticsWidget(QTabWidget):
         t = result.t
         n_rows = max(2, len(gates) + 1)
         gates_signature = tuple(gates.keys())
+        n_rows = min(n_rows, self._gates_max_rows)
 
-        # Rebuild subplot grid only when the number of active channels changes.
-        # Remove/rebuild only managed axes; avoid fig.clear() to preserve toolbar/nav state.
         if self._gates_n_rows != n_rows or self._gates_signature != gates_signature:
-            for ax in self._gates_axes:
-                ax.remove()
-            self._gates_axes = []
-            self.fig_gates.set_tight_layout({'pad': 2.5})
-            self._gates_axes = [self.fig_gates.add_subplot(n_rows, 1, k)
-                                 for k in range(1, n_rows + 1)]
             self._gates_n_rows = n_rows
             self._gates_signature = gates_signature
             self._gates_line_v = None
             self._gates_lines = {}
+
+        for idx, ax in enumerate(self._gates_axes):
+            ax.set_visible(idx < n_rows)
 
         ax_v = self._gates_axes[0]
         if self._gates_line_v is None:
@@ -776,13 +791,17 @@ class AnalyticsWidget(QTabWidget):
                                   xlabel='', ylabel='V (mV)', show_legend=False)
         ax_v.tick_params(labelbottom=False)
 
+        visible_names: set[str] = set()
         for i, (name, trace) in enumerate(gates.items(), start=1):
+            if i >= n_rows:
+                break
             ax = self._gates_axes[i]
             color = GATE_COLORS.get(name, '#888888')
             if name not in self._gates_lines:
                 self._gates_lines[name] = ax.plot([], [], color=color, lw=2.5, label=f'{name} activation', alpha=0.9)[0]
             line = self._gates_lines[name]
             line.set_data(t, trace)
+            line.set_visible(True)
             ax.relim()
             ax.autoscale_view()
             ax.set_ylim(-0.05, 1.05)
@@ -790,6 +809,12 @@ class AnalyticsWidget(QTabWidget):
             is_last = (i == n_rows - 1)
             ax.tick_params(labelbottom=is_last)
             _configure_ax_interactive(ax, show_legend=True, grid_alpha=0.15)
+            visible_names.add(name)
+
+        for name, line in self._gates_lines.items():
+            if name not in visible_names:
+                line.set_data([], [])
+                line.set_visible(False)
 
         self._gates_axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
         self.cvs_gates.draw_idle()
@@ -805,20 +830,17 @@ class AnalyticsWidget(QTabWidget):
                     if np.max(np.abs(curr)) > 1e-9}
         n_rows = max(2, len(currents) + 1)
         currents_signature = tuple(currents.keys())
+        n_rows = min(n_rows, self._currents_max_rows)
 
-        # Rebuild subplot grid only when the number of active channels changes.
         if self._currents_n_rows != n_rows or self._currents_signature != currents_signature:
-            for ax in self._currents_axes:
-                ax.remove()
-            self._currents_axes = []
-            self.fig_currents.set_tight_layout({'pad': 2.5})
-            self._currents_axes = [self.fig_currents.add_subplot(n_rows, 1, k)
-                                    for k in range(1, n_rows + 1)]
             self._currents_n_rows = n_rows
             self._currents_signature = currents_signature
             self._currents_line_v = None
             self._currents_lines = {}
             self._currents_zero_lines = {}
+
+        for idx, ax in enumerate(self._currents_axes):
+            ax.set_visible(idx < n_rows)
 
         # Row 0: Membrane potential
         ax_v = self._currents_axes[0]
@@ -832,7 +854,10 @@ class AnalyticsWidget(QTabWidget):
         ax_v.tick_params(labelbottom=False)
 
         # Remaining rows: Individual currents
+        visible_names: set[str] = set()
         for i, (name, curr) in enumerate(currents.items(), start=1):
+            if i >= n_rows:
+                break
             ax = self._currents_axes[i]
             color = CHAN_COLORS.get(name, '#888888')
             if name not in self._currents_lines:
@@ -841,15 +866,43 @@ class AnalyticsWidget(QTabWidget):
                 self._currents_zero_lines[name] = ax.axhline(y=0, color='k', linestyle='-', alpha=0.2, linewidth=0.8)
             line = self._currents_lines[name]
             line.set_data(t, curr)
+            line.set_visible(True)
+            self._currents_zero_lines[name].set_visible(True)
             ax.relim()
             ax.autoscale_view()
             ax.set_ylabel(f'I_{name} (pA)', fontsize=10, fontweight='bold')
             is_last = (i == n_rows - 1)
             ax.tick_params(labelbottom=is_last)
             _configure_ax_interactive(ax, show_legend=True, grid_alpha=0.15)
+            visible_names.add(name)
+
+        for name, line in self._currents_lines.items():
+            if name not in visible_names:
+                line.set_data([], [])
+                line.set_visible(False)
+        for name, zline in self._currents_zero_lines.items():
+            if name not in visible_names:
+                zline.set_visible(False)
 
         self._currents_axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
         self.cvs_currents.draw_idle()
+
+    def _init_spike_mechanism_artists(self) -> None:
+        if self._spike_mech_init_done:
+            return
+        ax1, ax2, ax3, ax4 = self.ax_spike_mech
+        self._spike_mech_lines["ax1_vm"] = ax1.plot([], [], color="#2060CC", lw=2.0, label="V_soma")[0]
+        self._spike_mech_lines["ax1_peaks"] = ax1.plot([], [], linestyle="None", marker="o", markersize=4.0, color="#AA3377", label="spike peaks")[0]
+        self._spike_mech_lines["ax2_peak_v"] = ax2.plot([], [], "o-", color="#1F77B4", lw=1.8, label="V_peak")[0]
+        self._spike_mech_ax2b = ax2.twinx()
+        self._spike_mech_lines["ax2_ca"] = self._spike_mech_ax2b.plot([], [], "s--", color="#D62728", lw=1.4, label="Ca_i@spike")[0]
+        self._spike_mech_texts["ax2_warn"] = ax2.text(0.02, 0.55, "", transform=ax2.transAxes, fontsize=10, color="#444444")
+        self._spike_mech_texts["ax3_reasons"] = ax3.text(
+            0.01, 0.02, "", transform=ax3.transAxes, fontsize=8.5, color="#333333",
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="#F8F8F8", edgecolor="#CCCCCC", alpha=0.9),
+        )
+        self._spike_mech_texts["ax4_empty"] = ax4.text(0.02, 0.55, "", transform=ax4.transAxes, fontsize=9.5, color="#444444")
+        self._spike_mech_init_done = True
 
     def _update_spike_mechanism(self, result, stats: dict):
         """
@@ -857,43 +910,27 @@ class AnalyticsWidget(QTabWidget):
         """
         from core.analysis import detect_spikes
 
+        self._init_spike_mechanism_artists()
         t = np.asarray(result.t, dtype=float)
         v = np.asarray(result.v_soma, dtype=float)
         ax1, ax2, ax3, ax4 = self.ax_spike_mech
         for ax in self.ax_spike_mech:
-            for ln in list(ax.lines):
-                try:
-                    ln.remove()
-                except Exception:
-                    pass
-            for coll in list(ax.collections):
-                try:
-                    coll.remove()
-                except Exception:
-                    pass
-            for txt in list(ax.texts):
-                try:
-                    txt.remove()
-                except Exception:
-                    pass
             ax.set_axis_on()
             ax.set_visible(True)
+        self._spike_mech_texts["ax2_warn"].set_visible(False)
+        self._spike_mech_texts["ax4_empty"].set_visible(False)
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
         n_sp = len(spike_times)
 
-        ax1.plot(t, v, color="#2060CC", lw=2.0, label="V_soma")
+        self._spike_mech_lines["ax1_vm"].set_data(t, v)
         if n_sp > 0:
-            ax1.scatter(
-                t[peak_idx],
-                v[peak_idx],
-                c=np.arange(n_sp),
-                cmap="plasma",
-                s=26,
-                label="spike peaks",
-                zorder=4,
-            )
+            self._spike_mech_lines["ax1_peaks"].set_data(t[peak_idx], v[peak_idx])
+            self._spike_mech_lines["ax1_peaks"].set_visible(True)
+        else:
+            self._spike_mech_lines["ax1_peaks"].set_data([], [])
+            self._spike_mech_lines["ax1_peaks"].set_visible(False)
         _configure_ax_interactive(
             ax1,
             title=f"Spike Peaks Timeline (N={n_sp})",
@@ -903,14 +940,8 @@ class AnalyticsWidget(QTabWidget):
         )
 
         if n_sp < 2:
-            ax2.text(
-                0.02,
-                0.55,
-                "Need at least 2 spikes for attenuation diagnostics.",
-                transform=ax2.transAxes,
-                fontsize=10,
-                color="#444444",
-            )
+            self._spike_mech_texts["ax2_warn"].set_text("Need at least 2 spikes for attenuation diagnostics.")
+            self._spike_mech_texts["ax2_warn"].set_visible(True)
             ax2.set_axis_off()
             ax3.set_axis_off()
             ax4.set_axis_off()
@@ -919,17 +950,25 @@ class AnalyticsWidget(QTabWidget):
 
         sp_no = np.arange(1, n_sp + 1)
         peak_v = v[peak_idx]
-        ax2.plot(sp_no, peak_v, "o-", color="#1F77B4", lw=1.8, label="V_peak")
+        self._spike_mech_lines["ax2_peak_v"].set_data(sp_no, peak_v)
+        self._spike_mech_lines["ax2_peak_v"].set_visible(True)
         ax2.set_ylabel("Peak V (mV)", fontsize=10, fontweight="bold")
         ax2.grid(True, alpha=0.25)
+        self._spike_mech_ax2b.set_ylabel("Ca_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
+        self._spike_mech_ax2b.tick_params(axis="y", labelcolor="#D62728")
 
         if result.ca_i is not None and len(result.ca_i) > 0:
             ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
             ca_sp = ca_nM[peak_idx]
-            ax2b = ax2.twinx()
-            ax2b.plot(sp_no, ca_sp, "s--", color="#D62728", lw=1.4, label="Ca_i@spike")
-            ax2b.set_ylabel("Ca_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
-            ax2b.tick_params(axis="y", labelcolor="#D62728")
+            self._spike_mech_lines["ax2_ca"].set_data(sp_no, ca_sp)
+            self._spike_mech_lines["ax2_ca"].set_visible(True)
+            self._spike_mech_ax2b.set_visible(True)
+            self._spike_mech_ax2b.relim()
+            self._spike_mech_ax2b.autoscale_view()
+        else:
+            self._spike_mech_lines["ax2_ca"].set_data([], [])
+            self._spike_mech_lines["ax2_ca"].set_visible(False)
+            self._spike_mech_ax2b.set_visible(False)
 
         _configure_ax_interactive(
             ax2,
@@ -941,8 +980,14 @@ class AnalyticsWidget(QTabWidget):
 
         curr_candidates = ["Na", "K", "ICa", "IA", "SK", "Ih", "Leak"]
         traces = {k: np.asarray(result.currents[k], dtype=float) for k in curr_candidates if k in result.currents}
+        for line in self._spike_mech_curr_lines.values():
+            line.set_data([], [])
+            line.set_visible(False)
         for name, tr in traces.items():
-            ax3.plot(sp_no, tr[peak_idx], marker=".", lw=1.2, label=name, color=CHAN_COLORS.get(name, "#555555"))
+            if name not in self._spike_mech_curr_lines:
+                self._spike_mech_curr_lines[name] = ax3.plot([], [], marker=".", lw=1.2, label=name, color=CHAN_COLORS.get(name, "#555555"))[0]
+            self._spike_mech_curr_lines[name].set_data(sp_no, tr[peak_idx])
+            self._spike_mech_curr_lines[name].set_visible(True)
         _configure_ax_interactive(
             ax3,
             title="Currents Sampled at Spike Peaks",
@@ -964,6 +1009,9 @@ class AnalyticsWidget(QTabWidget):
             return np.convolve(x, kernel, mode="same")
 
         plotted = 0
+        for line in self._spike_mech_norm_lines.values():
+            line.set_data([], [])
+            line.set_visible(False)
         for name in ("Na", "K", "ICa", "IA", "SK", "Ih", "Leak"):
             if name not in traces:
                 continue
@@ -971,14 +1019,11 @@ class AnalyticsWidget(QTabWidget):
             ymax = float(np.max(y_abs))
             if ymax <= 1e-12:
                 continue
-            ax4.plot(
-                t,
-                y_abs / ymax,
-                lw=1.3,
-                alpha=0.9,
-                label=f"|I_{name}| norm",
-                color=CHAN_COLORS.get(name, "#666666"),
-            )
+            key = f"norm_{name}"
+            if key not in self._spike_mech_norm_lines:
+                self._spike_mech_norm_lines[key] = ax4.plot([], [], lw=1.3, alpha=0.9, label=f"|I_{name}| norm", color=CHAN_COLORS.get(name, "#666666"))[0]
+            self._spike_mech_norm_lines[key].set_data(t, y_abs / ymax)
+            self._spike_mech_norm_lines[key].set_visible(True)
             plotted += 1
 
         if result.ca_i is not None and len(result.ca_i) > 0:
@@ -987,18 +1032,15 @@ class AnalyticsWidget(QTabWidget):
             ca_rng = float(np.max(ca_s) - np.min(ca_s))
             if ca_rng > 1e-12:
                 ca_norm = (ca_s - np.min(ca_s)) / ca_rng
-                ax4.plot(t, ca_norm, "--", lw=1.4, color="#D62728", label="Ca_i norm")
+                if "norm_ca" not in self._spike_mech_norm_lines:
+                    self._spike_mech_norm_lines["norm_ca"] = ax4.plot([], [], "--", lw=1.4, color="#D62728", label="Ca_i norm")[0]
+                self._spike_mech_norm_lines["norm_ca"].set_data(t, ca_norm)
+                self._spike_mech_norm_lines["norm_ca"].set_visible(True)
                 plotted += 1
 
         if plotted == 0:
-            ax4.text(
-                0.02,
-                0.55,
-                "No channel activity traces available for time-resolved causality view.",
-                transform=ax4.transAxes,
-                fontsize=9.5,
-                color="#444444",
-            )
+            self._spike_mech_texts["ax4_empty"].set_text("No channel activity traces available for time-resolved causality view.")
+            self._spike_mech_texts["ax4_empty"].set_visible(True)
             ax4.set_axis_off()
         else:
             _configure_ax_interactive(
@@ -1047,15 +1089,8 @@ class AnalyticsWidget(QTabWidget):
         if not reasons:
             reasons = ["No dominant attenuation driver from peak-sampled metrics; inspect full-current traces."]
 
-        ax3.text(
-            0.01,
-            0.02,
-            " | ".join(reasons[:3]),
-            transform=ax3.transAxes,
-            fontsize=8.5,
-            color="#333333",
-            bbox=dict(boxstyle="round,pad=0.25", facecolor="#F8F8F8", edgecolor="#CCCCCC", alpha=0.9),
-        )
+        self._spike_mech_texts["ax3_reasons"].set_text(" | ".join(reasons[:3]))
+        self._spike_mech_texts["ax3_reasons"].set_visible(True)
 
         self.cvs_spike_mech.draw_idle()
 
@@ -1436,33 +1471,28 @@ class AnalyticsWidget(QTabWidget):
             z = power_db[freq_mask, :]
             vmin = float(np.percentile(z, 5))
             vmax = float(np.percentile(z, 99))
-            if self._spectro_fail_text is not None:
-                try:
-                    self._spectro_fail_text.remove()
-                except Exception:
-                    pass
-                self._spectro_fail_text = None
-            if self._spectro_mesh is None:
-                self._spectro_mesh = ax_sp.pcolormesh(
-                    x, y, z, cmap='inferno', shading='auto', vmin=vmin, vmax=vmax
+            if self._spectro_fail_text is None:
+                self._spectro_fail_text = ax_sp.text(
+                    0.5, 0.5, '', ha='center', va='center', transform=ax_sp.transAxes, visible=False
                 )
-                self._spectro_mesh_shape = z.shape
+            self._spectro_fail_text.set_visible(False)
+            if self._spectro_mesh is None:
+                self._spectro_mesh = ax_sp.imshow(
+                    z,
+                    aspect='auto',
+                    origin='lower',
+                    extent=[x[0], x[-1], y[0], y[-1]],
+                    cmap='inferno',
+                    vmin=vmin,
+                    vmax=vmax,
+                )
                 self._spectro_cbar = self.fig_spectro.colorbar(
                     self._spectro_mesh, ax=ax_sp, label='Power (dB)', pad=0.02
                 )
             else:
-                if self._spectro_mesh_shape != z.shape:
-                    try:
-                        self._spectro_mesh.remove()
-                    except Exception:
-                        pass
-                    self._spectro_mesh = ax_sp.pcolormesh(
-                        x, y, z, cmap='inferno', shading='auto', vmin=vmin, vmax=vmax
-                    )
-                    self._spectro_mesh_shape = z.shape
-                else:
-                    self._spectro_mesh.set_array(z.ravel())
-                    self._spectro_mesh.set_clim(vmin=vmin, vmax=vmax)
+                self._spectro_mesh.set_data(z)
+                self._spectro_mesh.set_extent([x[0], x[-1], y[0], y[-1]])
+                self._spectro_mesh.set_clim(vmin=vmin, vmax=vmax)
                 if self._spectro_cbar is not None:
                     self._spectro_cbar.update_normal(self._spectro_mesh)
             ax_sp.set_ylabel('Frequency (Hz)', fontsize=9)
@@ -1472,6 +1502,9 @@ class AnalyticsWidget(QTabWidget):
                     0.5, 0.5, 'STFT unavailable\n(scipy missing?)',
                     ha='center', va='center', transform=ax_sp.transAxes
                 )
+            else:
+                self._spectro_fail_text.set_text('STFT unavailable\n(scipy missing?)')
+            self._spectro_fail_text.set_visible(True)
 
         ax_sp.set_xlabel('Time (ms)', fontsize=9)
         ax_sp.set_title('STFT spectrogram (V_soma)', fontsize=10)
@@ -1495,6 +1528,7 @@ class AnalyticsWidget(QTabWidget):
         ax1, ax2, ax3, ax4 = self.ax_bif
         if not self._bif_lines:
             self._bif_lines["max_fallback"] = ax1.plot([], [], 'r.', ms=4)[0]
+            self._bif_lines["peaks"] = ax1.plot([], [], linestyle='None', marker='.', color='b', ms=4)[0]
             self._bif_lines["vmax"] = ax2.plot([], [], 'r-', lw=1.5, label='Vmax')[0]
             self._bif_lines["vmin"] = ax2.plot([], [], 'b-', lw=1.5, label='Vmin')[0]
             self._bif_lines["freq"] = ax3.plot([], [], 'g.-', lw=1.5)[0]
@@ -1511,11 +1545,7 @@ class AnalyticsWidget(QTabWidget):
                 fallback_x.append(d['val'])
                 fallback_y.append(d['max'])
 
-        if self._bif_peak_scatter is not None:
-            self._bif_peak_scatter.remove()
-            self._bif_peak_scatter = None
-        if peak_x:
-            self._bif_peak_scatter = ax1.scatter(peak_x, peak_y, c='b', s=12)
+        self._bif_lines["peaks"].set_data(peak_x, peak_y)
         self._bif_lines["max_fallback"].set_data(fallback_x, fallback_y)
 
         ax1.set_xlabel(param_name);  ax1.set_ylabel('V peaks (mV)')
@@ -1557,42 +1587,44 @@ class AnalyticsWidget(QTabWidget):
         cmap = plt.colormaps['plasma'](np.linspace(0.1, 0.9, n))
 
         param_vals, peaks, freqs, n_sps = [], [], [], []
-        for line in self._sweep_trace_lines:
-            try:
-                line.remove()
-            except Exception:
-                pass
-        self._sweep_trace_lines = []
+        trace_count = min(n, self._sweep_trace_max)
+        while len(self._sweep_trace_lines) < trace_count:
+            self._sweep_trace_lines.append(ax1.plot([], [], lw=1, alpha=0.8)[0])
 
+        used_trace_count = 0
         for i, (val, res) in enumerate(sweep_results):
             if res is None:
                 continue
             param_vals.append(val)
-            self._sweep_trace_lines.append(
-                ax1.plot(res.t, res.v_soma, color=cmap[i], lw=1, alpha=0.8)[0]
-            )
+            if used_trace_count < trace_count:
+                trace_line = self._sweep_trace_lines[used_trace_count]
+                trace_line.set_color(cmap[i])
+                trace_line.set_data(res.t, res.v_soma)
+                trace_line.set_visible(True)
+                used_trace_count += 1
             pks, sp_t, sp_amp = detect_spikes(
                 res.v_soma, res.t, **_spike_detect_kwargs_from_analysis(res.config.analysis)
             )
             peaks.append(float(np.max(res.v_soma)))
             n_sps.append(len(pks))
             freqs.append(1000.0 / float(np.mean(np.diff(sp_t))) if len(sp_t) > 1 else 0.0)
+        for i in range(used_trace_count, len(self._sweep_trace_lines)):
+            self._sweep_trace_lines[i].set_data([], [])
+            self._sweep_trace_lines[i].set_visible(False)
 
         ax1.set_xlabel('Time (ms)');  ax1.set_ylabel('V (mV)')
         ax1.set_title(f'Sweep traces  [{param_name}]')
 
-        if self._sweep_cbar is not None:
-            try:
-                self._sweep_cbar.remove()
-            except Exception:
-                pass
-            self._sweep_cbar = None
         if sweep_results:
-            sm = plt.cm.ScalarMappable(
-                cmap='plasma',
-                norm=plt.Normalize(sweep_results[0][0], sweep_results[-1][0])
-            )
-            self._sweep_cbar = self.fig_sweep.colorbar(sm, ax=ax1, label=param_name)
+            v0 = sweep_results[0][0]
+            v1 = sweep_results[-1][0]
+            if self._sweep_cbar is None:
+                sm = plt.cm.ScalarMappable(cmap='plasma', norm=plt.Normalize(v0, v1))
+                self._sweep_cbar = self.fig_sweep.colorbar(sm, ax=ax1, label=param_name)
+            else:
+                self._sweep_cbar.mappable.set_norm(plt.Normalize(v0, v1))
+                self._sweep_cbar.set_label(param_name)
+                self._sweep_cbar.update_normal(self._sweep_cbar.mappable)
 
         if "peaks" not in self._sweep_metric_lines:
             self._sweep_metric_lines["peaks"] = ax2.plot([], [], 'r.-', lw=1.5)[0]

@@ -362,7 +362,21 @@ class NeuronSolver:
                 **opts,
             )
 
-        sol = _solve("BDF", rtol=1e-5, atol=1e-7, use_jacobian=True)
+        try:
+            sol = _solve("BDF", rtol=1e-5, atol=1e-7, use_jacobian=True)
+            bdf_exception_message = None
+        except Exception as exc:
+            # Some sparse factorization failures (e.g., exactly singular Jacobian)
+            # can propagate from SciPy internals before `sol.success` is populated.
+            # Treat this path as a BDF failure and fall back to LSODA.
+            bdf_exception_message = f"{type(exc).__name__}: {exc}"
+            logger.warning("Primary integrator crashed during BDF step: %s", bdf_exception_message)
+            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            if not sol.success:
+                raise RuntimeError(
+                    "Integrator failed after fallback. "
+                    f"BDF exception='{bdf_exception_message}'; LSODA='{sol.message}'"
+                ) from exc
         
         # Report actual simulation time
         t_elapsed = time.time() - t_start
