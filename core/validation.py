@@ -102,6 +102,8 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
         raise SimulationParameterError("Ih is enabled but gIh_max <= 0.")
     if cfg.channels.enable_ICa and cfg.channels.gCa_max <= 0.0:
         raise SimulationParameterError("ICa is enabled but gCa_max <= 0.")
+    if cfg.channels.enable_ITCa and cfg.channels.gTCa_max <= 0.0:
+        raise SimulationParameterError("ITCa is enabled but gTCa_max <= 0.")
     if cfg.channels.enable_IA and cfg.channels.gA_max <= 0.0:
         raise SimulationParameterError("IA is enabled but gA_max <= 0.")
     if cfg.channels.enable_SK and cfg.channels.gSK_max <= 0.0:

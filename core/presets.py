@@ -41,7 +41,7 @@ def get_preset_names():
         "H: Severe Hyperkalemia (High EK)",
         "I: In Vitro Slice (Mammalian 23°C)",
         "J: C-Fiber (Pain / Unmyelinated)",
-        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "K: Thalamic Relay (Ih + IT + Burst)",
         "L: Hippocampal CA1 (Theta rhythm)",
         "M: Epilepsy (v10 SCN1A mutation)",
         "N: Alzheimer's (v10 Calcium Toxicity)",
@@ -80,20 +80,25 @@ def _copy_defaults(target, source) -> None:
 
 
 def _apply_k_mode(cfg: FullModelConfig) -> None:
-    """Apply thalamic relay mode variants."""
+    """Apply thalamic relay mode variants.
+
+    Baseline (sleep-like): hyperpolarized state → I_T de-inactivates → LTS bursting.
+    Activated (awake-like): depolarized relay mode → tonic single-spike throughput.
+    """
     if cfg.preset_modes.k_mode == "baseline":
-        # Baseline: low-throughput relay mode with theta-like global rate envelope.
+        # Sleep/drowsy: low tonic drive keeps cell near −70 mV so I_T can
+        # de-inactivate and fire rebound LTS bursts on synaptic input.
         cfg.stim.stim_type = "alpha"
         cfg.stim.alpha_tau = 8.0
-        cfg.stim.Iext = 24.0
+        cfg.stim.Iext = 3.0             # Weak drive → hyperpolarized → burst-ready
         cfg.channels.gIh_max = 0.02
-        cfg.channels.gCa_max = 0.06
+        cfg.channels.gTCa_max = 2.0
     else:
-        # Activated: task-driven relay state with stronger throughput.
+        # Activated: tonic relay firing (I_T mostly inactivated at depolarized Vm).
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 30.0
+        cfg.stim.Iext = 8.0             # Stronger drive → depolarized → tonic mode
         cfg.channels.gIh_max = 0.03
-        cfg.channels.gCa_max = 0.08
+        cfg.channels.gTCa_max = 2.5     # Slightly higher for robust relay
 
 
 def _apply_alzheimer_mode(cfg: FullModelConfig) -> None:
@@ -279,35 +284,37 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.alpha_tau = 2.0
         cfg.stim.Iext = 32.0
 
-    # --- 6. ТАЛАМИЧЕСКИЙ РЕЛЕ-НЕЙРОН (Ih + ICa + Ca-dynamics) ---
+    # --- 6. ТАЛАМИЧЕСКИЙ РЕЛЕ-НЕЙРОН (Ih + IT + Ca-dynamics) ---
     elif "Thalamic" in name:
-        # Single-compartment mode improves stable resting dynamics for this
-        # reduced relay model with Ih/ICa without introducing AIS-driven artifacts.
+        # Thalamocortical relay neuron: T-type Ca²⁺ (I_T) drives low-threshold
+        # spikes (LTS) and post-inhibitory rebound bursts.
+        # Reference: Destexhe et al. 1998, J Neurosci 18:3574;
+        #            McCormick & Huguenard 1992, J Neurophysiol 68:1384
         cfg.morphology.single_comp = True
-        cfg.stim_location.location = "dendritic_filtered"
-        cfg.dendritic_filter.enabled = True
-        cfg.dendritic_filter.distance_um = 180.0
-        cfg.dendritic_filter.space_constant_um = 120.0
-        cfg.dendritic_filter.tau_dendritic_ms = 12.0
-        # gNa=100 needed for full spikes through dendritic filter at 37°C
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 100.0, 10.0, 0.05
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 90.0, 12.0, 0.05
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -70.0
-        cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
+        cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 24.0, 2.3
+        # Ih: hyperpolarization-activated cation current — essential for sag and rebound
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.03
-        cfg.channels.enable_ICa = True
-        cfg.channels.gCa_max = 0.08  # Physiological L-type calcium conductance
-        cfg.channels.enable_SK = False  # Disable SK for now
+        # I_T: low-threshold T-type Ca²⁺ (CaV3.x) — replaces L-type for LTS bursting
+        cfg.channels.enable_ITCa = True
+        cfg.channels.gTCa_max = 2.0     # Destexhe 1998: 2.0 mS/cm² somatic density
+        cfg.channels.enable_ICa = False  # L-type NOT used in relay neurons
+        cfg.channels.enable_SK = False
         cfg.calcium.dynamic_Ca = True
+        cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
+        cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
         cfg.calcium.tau_Ca = 200.0
-        cfg.calcium.B_Ca = 1e-5  # Calibrated conversion: avoids unphysiological Ca overload
+        cfg.calcium.B_Ca = 1e-5
         cfg.morphology.d_soma = 25e-4
         cfg.stim.jacobian_mode = 'sparse_fd'
-        # Validated: 30 µA/cm² through dend filter (atten=0.22) → ~6.7 effective
-        # Produces ~21 spikes, 144 Hz, Vmax ≈ 41 mV with Ih + ICa + Ca dynamics
+        # Const stimulus drives tonic firing; k_mode overlay adjusts for burst/relay states
         cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 5.0
-        cfg.stim.Iext = 30.0
+        cfg.stim.Iext = 5.0             # Near-threshold: I_T + Ih shape LTS dynamics
 
     # --- 7. ПАТОЛОГИЯ: РАССЕЯННЫЙ СКЛЕРОЗ (Демиелинизация) ---
     elif "Multiple Sclerosis" in name:
