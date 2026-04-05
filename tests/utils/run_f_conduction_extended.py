@@ -23,10 +23,16 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from tests.utils.runtime_import_guard import dependency_diagnostic
 
-from core.models import FullModelConfig
-from core.presets import apply_preset
-from core.solver import NeuronSolver
+try:
+    from core.models import FullModelConfig
+    from core.presets import apply_preset
+    from core.solver import NeuronSolver
+except ModuleNotFoundError as exc:
+    _IMPORT_ERROR = exc
+else:
+    _IMPORT_ERROR = None
 
 
 def _parse_csv_floats(raw: str) -> list[float]:
@@ -95,6 +101,10 @@ def _run_case(
 
 
 def main() -> int:
+    if _IMPORT_ERROR is not None:
+        print(dependency_diagnostic("f-conduction-extended", _IMPORT_ERROR), file=sys.stderr)
+        return 2
+
     parser = argparse.ArgumentParser(description="Extended F-vs-D conduction validation")
     parser.add_argument("--temps", type=str, default="23,30,37")
     parser.add_argument("--f-ra-mults", type=str, default="0.9,1.0,1.2")
@@ -103,6 +113,12 @@ def main() -> int:
     parser.add_argument("--t-sim", type=float, default=320.0)
     parser.add_argument("--dt-eval", type=float, default=0.15)
     parser.add_argument("--delay-margin-ms", type=float, default=0.3)
+    parser.add_argument(
+        "--target-ratio",
+        type=float,
+        default=0.3,
+        help="Target upper bound for F propagation ratio (junction_peak/soma_peak).",
+    )
     parser.add_argument("--output", type=str, default="_test_results/pathology_f_conduction_extended.json")
     args = parser.parse_args()
 
@@ -145,10 +161,11 @@ def main() -> int:
                         and (f["term_delay_ms"] > d["term_delay_ms"] + args.delay_margin_ms)
                     )
                     ratio_ok = bool(f["prop_ratio"] < d["prop_ratio"])
+                    ratio_target_ok = bool(f["prop_ratio"] <= float(args.target_ratio))
                     abs_peak_ok = bool(f["junction_peak_mV"] < d["junction_peak_mV"] - 3.0)
                     spike_ok = bool(d["n_spikes"] >= 1 and f["n_spikes"] >= 1)
                     stable_ok = bool(d["stable"] and f["stable"])
-                    ok = bool(delay_ok and (ratio_ok or abs_peak_ok) and spike_ok and stable_ok)
+                    ok = bool(delay_ok and (ratio_target_ok or abs_peak_ok) and spike_ok and stable_ok)
 
                     row = {
                         "t_celsius": float(t_c),
@@ -175,6 +192,7 @@ def main() -> int:
                                 "i_mult": float(i_mult),
                                 "delay_ok": delay_ok,
                                 "ratio_ok": ratio_ok,
+                                "ratio_target_ok": ratio_target_ok,
                                 "abs_peak_ok": abs_peak_ok,
                                 "spike_ok": spike_ok,
                                 "stable_ok": stable_ok,

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
 )
+from .delay_target import resolve_delay_target
 
 
 class TopologyWidget(QWidget):
@@ -64,6 +65,7 @@ class TopologyWidget(QWidget):
         self._high_contrast = False
         self._line_scale = 1.0
         self._font_scale = 1.0
+        self._draw_items: list = []
 
         controls = QHBoxLayout()
         controls.setSpacing(6)
@@ -182,20 +184,19 @@ class TopologyWidget(QWidget):
         idx_fork: int,
         idx_terminal: int,
     ):
-        if n_comp_total <= 1:
+        idx, label, _ = resolve_delay_target(
+            target_name=self._delay_target_name,
+            custom_index=self._delay_custom_index,
+            n_comp=n_comp_total,
+            n_ais=int(mc.N_ais),
+            n_trunk=int(mc.N_trunk),
+            terminal_idx=idx_terminal,
+        )
+        if idx is None:
             return None, "n/a"
-
-        target = self._delay_target_name
-        if target == "AIS":
-            if int(mc.N_ais) > 0:
-                return 1, "AIS"
-            return idx_terminal, "terminal"
-        if target == "Trunk Junction":
+        if label == "junction":
             return max(0, min(idx_fork, idx_terminal)), "fork"
-        if target == "Custom Compartment":
-            idx = max(1, min(idx_terminal, int(self._delay_custom_index)))
-            return idx, f"comp[{idx}]"
-        return idx_terminal, "terminal"
+        return idx, label
 
     def draw_neuron(
         self,
@@ -212,8 +213,9 @@ class TopologyWidget(QWidget):
         self._last_config = config
         self._last_dual_config = dual_config
 
-        self._plot.clear()
-        self._plot.addLegend(offset=(10, 10), labelTextColor="#CDD6F4")
+        for item in self._draw_items:
+            self._plot.removeItem(item)
+        self._draw_items = []
         mc = config.morphology
         ch = config.channels
 
@@ -267,26 +269,27 @@ class TopologyWidget(QWidget):
             t.setFont(pg.Qt.QtGui.QFont("Segoe UI", _scaled_font(size)))
             t.setPos(x, y)
             self._plot.addItem(t)
+            self._draw_items.append(t)
 
         def _line(x0, y0, x1, y1, color, width=2, style=Qt.PenStyle.SolidLine):
-            self._plot.addItem(
-                pg.PlotCurveItem(
-                    [x0, x1],
-                    [y0, y1],
-                    pen=pg.mkPen(_map_color(color), width=_scaled_width(width), style=style),
-                )
+            item = pg.PlotCurveItem(
+                [x0, x1],
+                [y0, y1],
+                pen=pg.mkPen(_map_color(color), width=_scaled_width(width), style=style),
             )
+            self._plot.addItem(item)
+            self._draw_items.append(item)
 
         def _glow(x0, y0, x1, y1, color, gw=12, alpha=60):
             rgba = _map_color(color)
             rgba.setAlpha(alpha)
-            self._plot.addItem(
-                pg.PlotCurveItem(
-                    [x0, x1],
-                    [y0, y1],
-                    pen=pg.mkPen(rgba, width=_scaled_width(gw)),
-                )
+            item = pg.PlotCurveItem(
+                [x0, x1],
+                [y0, y1],
+                pen=pg.mkPen(rgba, width=_scaled_width(gw)),
             )
+            self._plot.addItem(item)
+            self._draw_items.append(item)
 
         def _marker(
             x,
@@ -298,16 +301,16 @@ class TopologyWidget(QWidget):
             symbol="t",
             size=11,
         ):
-            self._plot.addItem(
-                pg.ScatterPlotItem(
-                    x=[x],
-                    y=[y],
-                    size=max(5.0, size * self._line_scale),
-                    brush=pg.mkBrush(_map_color(color)),
-                    pen=pg.mkPen("#11111B", width=_scaled_width(1.5)),
-                    symbol=symbol,
-                )
+            item = pg.ScatterPlotItem(
+                x=[x],
+                y=[y],
+                size=max(5.0, size * self._line_scale),
+                brush=pg.mkBrush(_map_color(color)),
+                pen=pg.mkPen("#11111B", width=_scaled_width(1.5)),
+                symbol=symbol,
             )
+            self._plot.addItem(item)
+            self._draw_items.append(item)
             _txt(label, x + label_dx, y + label_dy, color=color, anchor=(0.0, 0.0))
 
         def _stim_location_coords(loc, stim_amp, bif_x_val):
@@ -319,17 +322,17 @@ class TopologyWidget(QWidget):
                 return bif_x_val + 8.0, 9.0, "@ Dendrite", color
             return 0.0, soma_r + 2.0, "@ Soma", color
 
-        self._plot.addItem(
-            pg.ScatterPlotItem(
-                x=[0],
-                y=[0],
-                size=max(8.0, soma_r * 2 * self._line_scale),
-                brush=pg.mkBrush(_map_color("#FA8C3C")),
-                pen=pg.mkPen(_map_color("#DC5A10"), width=_scaled_width(2)),
-                symbol="o",
-                name=f"Soma {mc.d_soma * 1e4:.0f}um",
-            )
+        soma_item = pg.ScatterPlotItem(
+            x=[0],
+            y=[0],
+            size=max(8.0, soma_r * 2 * self._line_scale),
+            brush=pg.mkBrush(_map_color("#FA8C3C")),
+            pen=pg.mkPen(_map_color("#DC5A10"), width=_scaled_width(2)),
+            symbol="o",
+            name=f"Soma {mc.d_soma * 1e4:.0f}um",
         )
+        self._plot.addItem(soma_item)
+        self._draw_items.append(soma_item)
         _txt(
             f"Soma\nCm={ch.Cm}uF/cm2\ntm={tau_m:.1f}ms",
             0,
@@ -427,17 +430,17 @@ class TopologyWidget(QWidget):
             x += trunk_len
 
         bif_x = x
-        self._plot.addItem(
-            pg.ScatterPlotItem(
-                x=[bif_x],
-                y=[0],
-                size=max(6.0, 8 * self._line_scale),
-                brush=pg.mkBrush(_map_color("#FAF060")),
-                pen=pg.mkPen(_map_color("#C0A020"), width=_scaled_width(1.5)),
-                symbol="d",
-                name="Fork",
-            )
+        fork_item = pg.ScatterPlotItem(
+            x=[bif_x],
+            y=[0],
+            size=max(6.0, 8 * self._line_scale),
+            brush=pg.mkBrush(_map_color("#FAF060")),
+            pen=pg.mkPen(_map_color("#C0A020"), width=_scaled_width(1.5)),
+            symbol="d",
+            name="Fork",
         )
+        self._plot.addItem(fork_item)
+        self._draw_items.append(fork_item)
         _txt("Fork", bif_x, 2.5, color="#FAF060", anchor=(0.5, 0.0), size=7)
         _txt(
             f"idx {idx_fork}",
@@ -453,16 +456,16 @@ class TopologyWidget(QWidget):
             b1_x, b1_y = bif_x + b1_len * 0.85, b1_len * 0.5
             _glow(bif_x, 0, b1_x, b1_y, "#40CC60", gw=6, alpha=40)
             _line(bif_x, 0, b1_x, b1_y, "#40CC60", width=b1_w)
-            self._plot.addItem(
-                pg.ScatterPlotItem(
-                    x=[b1_x],
-                    y=[b1_y],
-                    size=max(6.0, 7 * self._line_scale),
-                    brush=pg.mkBrush(_map_color("#40CC60")),
-                    pen=pg.mkPen(_map_color("#208040"), width=_scaled_width(2)),
-                    symbol="o",
-                )
+            b1_item = pg.ScatterPlotItem(
+                x=[b1_x],
+                y=[b1_y],
+                size=max(6.0, 7 * self._line_scale),
+                brush=pg.mkBrush(_map_color("#40CC60")),
+                pen=pg.mkPen(_map_color("#208040"), width=_scaled_width(2)),
+                symbol="o",
             )
+            self._plot.addItem(b1_item)
+            self._draw_items.append(b1_item)
             _txt(
                 f"B1 ({mc.N_b1})\nd={mc.d_b1 * 1e4:.1f}um",
                 b1_x + 2,
@@ -485,16 +488,16 @@ class TopologyWidget(QWidget):
             b2_x, b2_y = bif_x + b2_len * 0.85, -b2_len * 0.5
             _glow(bif_x, 0, b2_x, b2_y, "#B040DC", gw=6, alpha=40)
             _line(bif_x, 0, b2_x, b2_y, "#B040DC", width=b2_w)
-            self._plot.addItem(
-                pg.ScatterPlotItem(
-                    x=[b2_x],
-                    y=[b2_y],
-                    size=max(6.0, 7 * self._line_scale),
-                    brush=pg.mkBrush(_map_color("#B040DC")),
-                    pen=pg.mkPen(_map_color("#702090"), width=_scaled_width(2)),
-                    symbol="o",
-                )
+            b2_item = pg.ScatterPlotItem(
+                x=[b2_x],
+                y=[b2_y],
+                size=max(6.0, 7 * self._line_scale),
+                brush=pg.mkBrush(_map_color("#B040DC")),
+                pen=pg.mkPen(_map_color("#702090"), width=_scaled_width(2)),
+                symbol="o",
             )
+            self._plot.addItem(b2_item)
+            self._draw_items.append(b2_item)
             _txt(
                 f"B2 ({mc.N_b2})\nd={mc.d_b2 * 1e4:.1f}um",
                 b2_x + 2,
@@ -605,16 +608,16 @@ class TopologyWidget(QWidget):
         )
         if delay_idx is not None:
             tx, ty = _coord_for_index(delay_idx)
-            self._plot.addItem(
-                pg.ScatterPlotItem(
-                    x=[tx],
-                    y=[ty],
-                    size=max(10.0, 18 * self._line_scale),
-                    brush=pg.mkBrush(0, 0, 0, 0),
-                    pen=pg.mkPen(_map_color("#F9E2AF"), width=_scaled_width(2.2)),
-                    symbol="o",
-                )
+            delay_item = pg.ScatterPlotItem(
+                x=[tx],
+                y=[ty],
+                size=max(10.0, 18 * self._line_scale),
+                brush=pg.mkBrush(0, 0, 0, 0),
+                pen=pg.mkPen(_map_color("#F9E2AF"), width=_scaled_width(2.2)),
+                symbol="o",
             )
+            self._plot.addItem(delay_item)
+            self._draw_items.append(delay_item)
             _txt(
                 f"Delay target: {delay_label}\nidx {delay_idx}",
                 tx + 1.2,

@@ -324,8 +324,7 @@ class AnalysisParams(BaseModel):
     excmap_D_max: float = Field(default=5.0,   description="Excitability map: max duration (ms)")
     excmap_ND:    int   = Field(default=15,   ge=2, description="Excitability map: duration resolution")
 
-    # Lyapunov / FTLE analysis (default OFF)
-    enable_lyapunov: bool = Field(default=False, description="Enable FTLE/LLE stability analysis")
+    # Lyapunov / FTLE analysis parameters (execution is action-driven)
     lyapunov_embedding_dim: int = Field(default=3, ge=2, le=8, description="Delay-embedding dimension for FTLE/LLE")
     lyapunov_lag_steps: int = Field(default=2, ge=1, le=50, description="Delay-embedding lag in samples")
     lyapunov_min_separation_ms: float = Field(default=10.0, ge=0.0, description="Minimum temporal separation for neighbor search (ms)")
