@@ -112,6 +112,11 @@ class EnvironmentParams(BaseModel):
     Q10_NaR:   float = Field(default=2.2,              description="Q10 for resurgent Na channel (y,j gates)")
     # NMDA Mg²⁺ block: Jahr & Stevens 1990, J Neurosci 10:1830
     Mg_ext:    float = Field(default=1.0,              description="Extracellular [Mg²⁺] (mM, for NMDA block)")
+    # Thermal gradient: soma–dendrite temperature offset (°C).
+    # Positive = dendrites warmer than soma (rare), negative = cooler (typical for in vitro slices).
+    # Bhattacharyya et al. 2008 (J Neurophysiol 100:927) measured ~0.5–1.5°C axial gradients.
+    T_dend_offset: float = Field(default=0.0, ge=-15.0, le=15.0,
+                                  description="Dendrite–soma temperature offset (°C, positive=dendrites warmer)")
 
     @property
     def phi(self) -> float:
@@ -119,8 +124,22 @@ class EnvironmentParams(BaseModel):
         return self.Q10 ** ((self.T_celsius - self.T_ref) / 10.0)
 
     def phi_channel(self, q10: float) -> float:
-        """Per-channel temperature scaling: q10^((T - T_ref)/10)."""
+        """Per-channel temperature scaling at soma temperature: q10^((T_soma - T_ref)/10)."""
         return q10 ** ((self.T_celsius - self.T_ref) / 10.0)
+
+    def build_phi_vector(self, q10: float, n_comp: int) -> 'np.ndarray':
+        """Per-compartment temperature scaling vector (length n_comp).
+
+        When T_dend_offset == 0 (uniform temperature), all elements equal phi_channel(q10).
+        Otherwise, temperature is linearly interpolated from T_celsius (soma, i=0) to
+        T_celsius + T_dend_offset (distal, i=n_comp-1).
+        """
+        import numpy as np
+        if n_comp == 1 or self.T_dend_offset == 0.0:
+            return np.full(n_comp, self.phi_channel(q10))
+        frac = np.linspace(0.0, 1.0, n_comp)
+        T_comp = self.T_celsius + frac * self.T_dend_offset
+        return q10 ** ((T_comp - self.T_ref) / 10.0)
 
 
 class DendriticFilterParams(BaseModel):
@@ -224,6 +243,18 @@ class SimulationParams(BaseModel):
     pulse_dur:   float  = Field(default=1.0,         description="Pulse duration (ms)")
     alpha_tau:   float  = Field(default=2.0,         description="Alpha-synapse time constant (ms)")
     stim_comp:   int    = Field(default=0,           description="Compartment index to inject current")
+    # Event-driven synaptic queue (Stage 6.3, preparation for network connectivity)
+    # Each entry is a spike-arrival timestamp in ms. When non-empty and stim_type is
+    # a conductance-based synapse (AMPA/NMDA/GABAA/GABAB/Kainate/Nicotinic), the
+    # conductance waveforms are summed for every event, overriding pulse_start.
+    event_times: List[float] = Field(
+        default_factory=list,
+        description=(
+            "Synaptic event queue: spike-arrival timestamps (ms). "
+            "When non-empty with AMPA/NMDA/GABA stim types, "
+            "conductance waveforms are summed for each event (overrides pulse_start)."
+        )
+    )
 
     # Stochastic
     stoch_gating: bool  = Field(default=False, description="Langevin gate noise (Euler-Maruyama solver)")

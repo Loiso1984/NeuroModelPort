@@ -233,6 +233,14 @@ class AnalyticsWidget(QTabWidget):
         self.addTab(self.tab_excmap, "🗺 Excit. Map")
         self.cvs_excmap = cvs
 
+        # 12 — Spectrogram (STFT of soma membrane potential)
+        self.fig_spectro, cvs = _mpl_fig(2, 1)
+        self.ax_spectro = [self.fig_spectro.add_subplot(2, 1, k) for k in range(1, 3)]
+        self.fig_spectro.set_tight_layout({'pad': 2.5})
+        self.addTab(_tab_with_toolbar(cvs), "🌈 Spectrogram")
+        self.cvs_spectro = cvs
+        self._spectro_cbar = None  # colorbar handle for safe removal
+
     def _build_traces_tab(self):
         """pyqtgraph multi-compartment detail traces tab."""
         win = pg.GraphicsLayoutWidget()
@@ -269,6 +277,7 @@ class AnalyticsWidget(QTabWidget):
         self._update_phase(result, stats)
         self._update_kymo(result)
         self._update_energy(result)
+        self._update_spectrogram(result)
         if result.morph:
             self._update_balance(result)
 
@@ -1030,6 +1039,72 @@ class AnalyticsWidget(QTabWidget):
 
         self.fig_energy.tight_layout()
         self.cvs_energy.draw_idle()
+
+    # ─────────────────────────────────────────────────────────────────
+    #  12 — SPECTROGRAM  (STFT of soma Vm)
+    # ─────────────────────────────────────────────────────────────────
+    def _update_spectrogram(self, result):
+        from scipy.signal import stft
+        t  = result.t
+        v  = result.v_soma
+        ax_v, ax_sp = self.ax_spectro
+
+        # Remove previous colorbar before clearing axes (prevents accumulation)
+        if self._spectro_cbar is not None:
+            try:
+                self._spectro_cbar.remove()
+            except Exception:
+                pass
+            self._spectro_cbar = None
+
+        ax_v.cla()
+        ax_sp.cla()
+
+        # Top: raw Vm trace
+        ax_v.plot(t, v, color='#2060C0', lw=0.8)
+        ax_v.set_ylabel('V (mV)', fontsize=9)
+        ax_v.set_title('Membrane potential — soma', fontsize=10)
+        ax_v.grid(alpha=0.25)
+        ax_v.set_xlim(t[0], t[-1])
+
+        # STFT — fs in Hz, dt in ms → fs = 1000/dt
+        dt_ms = float(t[1] - t[0]) if len(t) > 1 else 0.05
+        fs_hz = 1000.0 / dt_ms
+
+        # Adaptive window: ~10 ms or 256 samples, whichever is smaller
+        n_seg = min(256, max(32, int(10.0 / dt_ms)))
+        n_overlap = n_seg * 3 // 4
+
+        try:
+            freqs, times_stft, Zxx = stft(v, fs=fs_hz, nperseg=n_seg,
+                                           noverlap=n_overlap, window='hann')
+            # Convert STFT output times to simulation time axis
+            t_stft = t[0] + times_stft * 1000.0  # seconds → ms
+
+            power_db = 10.0 * np.log10(np.abs(Zxx) ** 2 + 1e-12)
+
+            # Limit display to biologically relevant range: 0–1000 Hz
+            f_max_disp = min(1000.0, freqs[-1])
+            freq_mask = freqs <= f_max_disp
+
+            im = ax_sp.pcolormesh(
+                t_stft, freqs[freq_mask], power_db[freq_mask, :],
+                cmap='inferno', shading='auto',
+                vmin=np.percentile(power_db[freq_mask, :], 5),
+                vmax=np.percentile(power_db[freq_mask, :], 99),
+            )
+            self._spectro_cbar = self.fig_spectro.colorbar(im, ax=ax_sp, label='Power (dB)', pad=0.02)
+            ax_sp.set_ylabel('Frequency (Hz)', fontsize=9)
+        except Exception:
+            ax_sp.text(0.5, 0.5, 'STFT unavailable\n(scipy missing?)',
+                       ha='center', va='center', transform=ax_sp.transAxes)
+
+        ax_sp.set_xlabel('Time (ms)', fontsize=9)
+        ax_sp.set_title('STFT spectrogram (V_soma)', fontsize=10)
+        ax_sp.set_xlim(t[0], t[-1])
+
+        self.fig_spectro.tight_layout(pad=2.5)
+        self.cvs_spectro.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  8 — BIFURCATION

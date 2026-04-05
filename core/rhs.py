@@ -77,6 +77,35 @@ def _get_syn_reversal(stype):
     return 0.0
 
 @njit(cache=True)
+def get_event_driven_conductance(t, stype, iext, event_times, n_events):
+    """Sum biexponential conductance [mS/cm²] from all events in the synaptic queue.
+
+    Stage 6.3 — event-driven synaptic stimulation (preparation for network connectivity).
+    Returns 0.0 if n_events == 0 or stype is not a conductance-based type.
+    """
+    if n_events == 0:
+        return 0.0
+    if stype == 4:          # AMPA
+        tau_r, tau_d = 0.5, 3.0
+    elif stype == 5:        # NMDA
+        tau_r, tau_d = 5.0, 80.0
+    elif stype == 6:        # GABA-A
+        tau_r, tau_d = 1.0, 7.0
+    elif stype == 7:        # GABA-B
+        tau_r, tau_d = 50.0, 300.0
+    elif stype == 8:        # Kainate
+        tau_r, tau_d = 1.5, 12.0
+    elif stype == 9:        # Nicotinic
+        tau_r, tau_d = 3.0, 25.0
+    else:
+        return 0.0
+    g = 0.0
+    for k in range(n_events):
+        g += _biexp_waveform(t, event_times[k], tau_r, tau_d)
+    return abs(iext) * g
+
+
+@njit(cache=True)
 def rhs_multicompartment(
     t, y, n_comp,
     # Флаги включения каналов
@@ -90,7 +119,7 @@ def rhs_multicompartment(
     phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
     # Стимуляция (primary)
-    stype, iext, t0, td, atau, stim_comp, stim_mode,
+    stype, iext, t0, td, atau, event_times_arr, n_events, stim_comp, stim_mode,
     use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
     # Dual stimulation (secondary) - optional
     dual_stim_enabled,
@@ -170,7 +199,11 @@ def rhs_multicompartment(
     # For stype < 4 (const/pulse/alpha): base_current is raw current [µA/cm²].
     is_conductance_based = (stype >= 4)
     i_stim = np.zeros(n_comp)
-    base_current = get_stim_current(t, stype, iext, t0, td, atau)
+    # Stage 6.3: event-driven mode if queue is non-empty and stim is synaptic
+    if n_events > 0 and is_conductance_based:
+        base_current = get_event_driven_conductance(t, stype, iext, event_times_arr, n_events)
+    else:
+        base_current = get_stim_current(t, stype, iext, t0, td, atau)
     e_syn = _get_syn_reversal(stype) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
@@ -317,47 +350,47 @@ def rhs_multicompartment(
         # dV/dt
         dydt[off_v + i] = (i_stim_eff - i_ion + i_ax) / cm_v[i]
 
-        # Gate derivatives (HH core) — channel-specific Q10
-        dydt[off_m + i] = phi_na * (am(vi) * (1.0 - mi) - bm(vi) * mi)
-        dydt[off_h + i] = phi_na * (ah(vi) * (1.0 - hi) - bh(vi) * hi)
-        dydt[off_n + i] = phi_k * (an(vi) * (1.0 - ni) - bn(vi) * ni)
+        # Gate derivatives (HH core) — per-compartment Q10 (Stage 6.2: thermal gradient)
+        dydt[off_m + i] = phi_na[i] * (am(vi) * (1.0 - mi) - bm(vi) * mi)
+        dydt[off_h + i] = phi_na[i] * (ah(vi) * (1.0 - hi) - bh(vi) * hi)
+        dydt[off_n + i] = phi_k[i] * (an(vi) * (1.0 - ni) - bn(vi) * ni)
 
         # Optional gate derivatives
         if en_ih:
             ri = y[off_r + i]
-            dydt[off_r + i] = phi_ih * (ar_Ih(vi) * (1.0 - ri) - br_Ih(vi) * ri)
+            dydt[off_r + i] = phi_ih[i] * (ar_Ih(vi) * (1.0 - ri) - br_Ih(vi) * ri)
 
         if en_ica:
             si = y[off_s + i]
             ui = y[off_u + i]
-            dydt[off_s + i] = phi_ca * (as_Ca(vi) * (1.0 - si) - bs_Ca(vi) * si)
-            dydt[off_u + i] = phi_ca * (au_Ca(vi) * (1.0 - ui) - bu_Ca(vi) * ui)
+            dydt[off_s + i] = phi_ca[i] * (as_Ca(vi) * (1.0 - si) - bs_Ca(vi) * si)
+            dydt[off_u + i] = phi_ca[i] * (au_Ca(vi) * (1.0 - ui) - bu_Ca(vi) * ui)
 
         if en_ia:
             ai = y[off_a + i]
             bi = y[off_b + i]
-            dydt[off_a + i] = phi_ia * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
-            dydt[off_b + i] = phi_ia * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
+            dydt[off_a + i] = phi_ia[i] * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
+            dydt[off_b + i] = phi_ia[i] * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
 
         if en_itca:
             pi = y[off_p + i]
             qi = y[off_q + i]
-            dydt[off_p + i] = phi_tca * (am_TCa(vi) * (1.0 - pi) - bm_TCa(vi) * pi)
-            dydt[off_q + i] = phi_tca * (ah_TCa(vi) * (1.0 - qi) - bh_TCa(vi) * qi)
+            dydt[off_p + i] = phi_tca[i] * (am_TCa(vi) * (1.0 - pi) - bm_TCa(vi) * pi)
+            dydt[off_q + i] = phi_tca[i] * (ah_TCa(vi) * (1.0 - qi) - bh_TCa(vi) * qi)
 
         if en_im:
             wi = y[off_w + i]
-            dydt[off_w + i] = phi_im * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
+            dydt[off_w + i] = phi_im[i] * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
 
         if en_nap:
             xi = y[off_x + i]
-            dydt[off_x + i] = phi_nap * (ax_NaP(vi) * (1.0 - xi) - bx_NaP(vi) * xi)
+            dydt[off_x + i] = phi_nap[i] * (ax_NaP(vi) * (1.0 - xi) - bx_NaP(vi) * xi)
 
         if en_nar:
             yi = y[off_y + i]
             ji = y[off_j + i]
-            dydt[off_y + i] = phi_nar * (ay_NaR(vi) * (1.0 - yi) - by_NaR(vi) * yi)
-            dydt[off_j + i] = phi_nar * (aj_NaR(vi) * (1.0 - ji) - bj_NaR(vi) * ji)
+            dydt[off_y + i] = phi_nar[i] * (ay_NaR(vi) * (1.0 - yi) - by_NaR(vi) * yi)
+            dydt[off_j + i] = phi_nar[i] * (aj_NaR(vi) * (1.0 - ji) - bj_NaR(vi) * ji)
 
         # SK gate ODE: dz/dt = (z_inf(Ca) - z) / tau_SK
         # Hirschberg et al. 1998, J Gen Physiol 111:565

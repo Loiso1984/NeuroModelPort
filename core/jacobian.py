@@ -336,7 +336,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         cm_v, l_data, l_indices, l_indptr,
         phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
         t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
-        stype, iext, t0, td, atau, stim_comp, stim_mode,
+        stype, iext, t0, td, atau, event_times_arr, n_events, stim_comp, stim_mode,
         use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
         dual_stim_enabled,
         stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
@@ -509,59 +509,59 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             m_row = idx["m"].start + i
             h_row = idx["h"].start + i
             n_row = idx["n"].start + i
-            _set(m_row, v_col, phi_na * (dam_v[i] * (1.0 - m[i]) - dbm_v[i] * m[i]))
-            _set(m_row, m_row, -phi_na * (am_v[i] + bm_v[i]))
-            _set(h_row, v_col, phi_na * (dah_v[i] * (1.0 - h[i]) - dbh_v[i] * h[i]))
-            _set(h_row, h_row, -phi_na * (ah_v[i] + bh_v[i]))
-            _set(n_row, v_col, phi_k * (dan_v[i] * (1.0 - n[i]) - dbn_v[i] * n[i]))
-            _set(n_row, n_row, -phi_k * (an_v[i] + bn_v[i]))
+            _set(m_row, v_col, phi_na[i] * (dam_v[i] * (1.0 - m[i]) - dbm_v[i] * m[i]))
+            _set(m_row, m_row, -phi_na[i] * (am_v[i] + bm_v[i]))
+            _set(h_row, v_col, phi_na[i] * (dah_v[i] * (1.0 - h[i]) - dbh_v[i] * h[i]))
+            _set(h_row, h_row, -phi_na[i] * (ah_v[i] + bh_v[i]))
+            _set(n_row, v_col, phi_k[i] * (dan_v[i] * (1.0 - n[i]) - dbn_v[i] * n[i]))
+            _set(n_row, n_row, -phi_k[i] * (an_v[i] + bn_v[i]))
 
             if en_ih and idx["r"] is not None:
                 r_row = idx["r"].start + i
-                _set(r_row, v_col, phi_ih * (dar_v[i] * (1.0 - r[i]) - dbr_v[i] * r[i]))
-                _set(r_row, r_row, -phi_ih * (ar_v[i] + br_v[i]))
+                _set(r_row, v_col, phi_ih[i] * (dar_v[i] * (1.0 - r[i]) - dbr_v[i] * r[i]))
+                _set(r_row, r_row, -phi_ih[i] * (ar_v[i] + br_v[i]))
 
             if en_ica and idx["s"] is not None:
                 s_row = idx["s"].start + i
                 u_row = idx["u"].start + i
-                _set(s_row, v_col, phi_ca * (das_v[i] * (1.0 - s[i]) - dbs_v[i] * s[i]))
-                _set(s_row, s_row, -phi_ca * (as_v[i] + bs_v[i]))
-                _set(u_row, v_col, phi_ca * (dau_v[i] * (1.0 - u[i]) - dbu_v[i] * u[i]))
-                _set(u_row, u_row, -phi_ca * (au_v[i] + bu_v[i]))
+                _set(s_row, v_col, phi_ca[i] * (das_v[i] * (1.0 - s[i]) - dbs_v[i] * s[i]))
+                _set(s_row, s_row, -phi_ca[i] * (as_v[i] + bs_v[i]))
+                _set(u_row, v_col, phi_ca[i] * (dau_v[i] * (1.0 - u[i]) - dbu_v[i] * u[i]))
+                _set(u_row, u_row, -phi_ca[i] * (au_v[i] + bu_v[i]))
 
             if en_ia and idx["a"] is not None:
                 a_row = idx["a"].start + i
                 b_row = idx["b"].start + i
-                _set(a_row, v_col, phi_ia * (daa_v[i] * (1.0 - a[i]) - dba_v[i] * a[i]))
-                _set(a_row, a_row, -phi_ia * (aa_v[i] + ba_v[i]))
-                _set(b_row, v_col, phi_ia * (dab_v[i] * (1.0 - b[i]) - dbb_v[i] * b[i]))
-                _set(b_row, b_row, -phi_ia * (ab_v[i] + bb_v[i]))
+                _set(a_row, v_col, phi_ia[i] * (daa_v[i] * (1.0 - a[i]) - dba_v[i] * a[i]))
+                _set(a_row, a_row, -phi_ia[i] * (aa_v[i] + ba_v[i]))
+                _set(b_row, v_col, phi_ia[i] * (dab_v[i] * (1.0 - b[i]) - dbb_v[i] * b[i]))
+                _set(b_row, b_row, -phi_ia[i] * (ab_v[i] + bb_v[i]))
 
             if en_itca and idx["p"] is not None:
                 p_row = idx["p"].start + i
                 q_row = idx["q"].start + i
-                _set(p_row, v_col, phi_tca * (damt_v[i] * (1.0 - p_g[i]) - dbmt_v[i] * p_g[i]))
-                _set(p_row, p_row, -phi_tca * (amt_v[i] + bmt_v[i]))
-                _set(q_row, v_col, phi_tca * (daht_v[i] * (1.0 - q_g[i]) - dbht_v[i] * q_g[i]))
-                _set(q_row, q_row, -phi_tca * (aht_v[i] + bht_v[i]))
+                _set(p_row, v_col, phi_tca[i] * (damt_v[i] * (1.0 - p_g[i]) - dbmt_v[i] * p_g[i]))
+                _set(p_row, p_row, -phi_tca[i] * (amt_v[i] + bmt_v[i]))
+                _set(q_row, v_col, phi_tca[i] * (daht_v[i] * (1.0 - q_g[i]) - dbht_v[i] * q_g[i]))
+                _set(q_row, q_row, -phi_tca[i] * (aht_v[i] + bht_v[i]))
 
             if en_im and idx["w"] is not None:
                 w_row = idx["w"].start + i
-                _set(w_row, v_col, phi_im * (dawm_v[i] * (1.0 - w_g[i]) - dbwm_v[i] * w_g[i]))
-                _set(w_row, w_row, -phi_im * (awm_v[i] + bwm_v[i]))
+                _set(w_row, v_col, phi_im[i] * (dawm_v[i] * (1.0 - w_g[i]) - dbwm_v[i] * w_g[i]))
+                _set(w_row, w_row, -phi_im[i] * (awm_v[i] + bwm_v[i]))
 
             if en_nap and idx["x"] is not None:
                 x_row = idx["x"].start + i
-                _set(x_row, v_col, phi_nap * (daxp_v[i] * (1.0 - x_g[i]) - dbxp_v[i] * x_g[i]))
-                _set(x_row, x_row, -phi_nap * (axp_v[i] + bxp_v[i]))
+                _set(x_row, v_col, phi_nap[i] * (daxp_v[i] * (1.0 - x_g[i]) - dbxp_v[i] * x_g[i]))
+                _set(x_row, x_row, -phi_nap[i] * (axp_v[i] + bxp_v[i]))
 
             if en_nar and idx["y_nr"] is not None:
                 y_row = idx["y_nr"].start + i
                 j_row = idx["j_nr"].start + i
-                _set(y_row, v_col, phi_nar * (dayr_v[i] * (1.0 - y_nr[i]) - dbyr_v[i] * y_nr[i]))
-                _set(y_row, y_row, -phi_nar * (ayr_v[i] + byr_v[i]))
-                _set(j_row, v_col, phi_nar * (dajr_v[i] * (1.0 - j_nr[i]) - dbjr_v[i] * j_nr[i]))
-                _set(j_row, j_row, -phi_nar * (ajr_v[i] + bjr_v[i]))
+                _set(y_row, v_col, phi_nar[i] * (dayr_v[i] * (1.0 - y_nr[i]) - dbyr_v[i] * y_nr[i]))
+                _set(y_row, y_row, -phi_nar[i] * (ayr_v[i] + byr_v[i]))
+                _set(j_row, v_col, phi_nar[i] * (dajr_v[i] * (1.0 - j_nr[i]) - dbjr_v[i] * j_nr[i]))
+                _set(j_row, j_row, -phi_nar[i] * (ajr_v[i] + bjr_v[i]))
 
             if en_sk and idx["z_sk"] is not None:
                 zsk_row = idx["z_sk"].start + i
@@ -607,8 +607,8 @@ def analytic_sparse_jacobian(*args, **kwargs):
     # Extract enough args to build slices
     (t, y, n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
      en_nap, en_nar) = args[:12]
-    use_dfp = args[46] if len(args) > 46 else 0
-    use_dfs = args[57] if len(args) > 57 else 0
+    use_dfp = args[57] if len(args) > 57 else 0   # use_dfilter_primary position (after Stage 6.3)
+    use_dfs = args[68] if len(args) > 68 else 0   # use_dfilter_secondary position (after Stage 6.3)
     idx, n_state = _state_slices(
         n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfp, use_dfs,
         en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar, en_sk=en_sk,

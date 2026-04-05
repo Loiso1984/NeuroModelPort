@@ -261,6 +261,18 @@ class MainWindow(QMainWindow):
         """)
         self.btn_export.clicked.connect(self.export_csv)
 
+        self.btn_export_nml = QPushButton("📄 NeuroML")
+        self.btn_export_nml.setMinimumHeight(46)
+        self.btn_export_nml.setToolTip("Export model config to NeuroML 2.2 XML (Stage 6.4)")
+        self.btn_export_nml.setStyleSheet("""
+            QPushButton {
+                background: #313244; color: #CBA6F7; border-radius: 6px;
+                font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background: #45475A; }
+        """)
+        self.btn_export_nml.clicked.connect(self.export_neuroml)
+
         # ── Preset selector ───────────────────────────────────────────
         self.lbl_preset = QLabel("Preset:")
         self.combo_presets = QComboBox()
@@ -283,6 +295,7 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.btn_excmap, 2)
         bar.addWidget(self.btn_export_plot, 2)
         bar.addWidget(self.btn_export, 2)
+        bar.addWidget(self.btn_export_nml, 2)
         bar.addStretch(1)
         bar.addWidget(self.lbl_preset)
         bar.addWidget(self.combo_presets, 3)
@@ -1178,6 +1191,26 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Export", f"Saved to:\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
+
+    # ─────────────────────────────────────────────────────────────────
+    #  EXPORT NEUROML (Stage 6.4)
+    # ─────────────────────────────────────────────────────────────────
+    def export_neuroml(self):
+        """Export current FullModelConfig to NeuroML 2.2 XML."""
+        from core.neuroml_export import export_neuroml as _export
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export NeuroML", "neuron_model.nml",
+            "NeuroML 2 Files (*.nml *.xml);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            _export(self.config, path=path)
+            self._status(f"NeuroML exported: {path}")
+            QMessageBox.information(self, "NeuroML Export",
+                                    f"Model exported to NeuroML 2.2:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "NeuroML Export Error", str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────
