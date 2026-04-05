@@ -2,8 +2,7 @@ import numpy as np
 from numba import njit, float64, int32
 from .kinetics import *
 from .dual_stimulation import (
-    apply_primary_stimulus_current,
-    apply_secondary_stimulus_current,
+    distributed_stimulus_current_for_comp,
 )
 
 # Константы | Constants
@@ -27,8 +26,8 @@ def _biexp_waveform(t, t0, tau_rise, tau_decay):
     norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
     return (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
 
-@njit(float64(float64, int32, float64, float64, float64, float64), cache=True)
-def get_stim_current(t, stype, iext, t0, td, atau):
+@njit(float64(float64, int32, float64, float64, float64, float64, float64, float64), cache=True)
+def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     """Stimulus waveform for all types.
 
     For synaptic types (stype >= 4): returns CONDUCTANCE waveform g(t)
@@ -54,6 +53,13 @@ def get_stim_current(t, stype, iext, t0, td, atau):
         return abs(iext) * _biexp_waveform(t, t0, 1.5, 12.0)
     elif stype == 9:  # Nicotinic ACh (conductance-based)
         return abs(iext) * _biexp_waveform(t, t0, 3.0, 25.0)
+    elif stype == 10:  # ZAP/Chirp current (frequency sweep)
+        if td <= 0.0 or t < t0 or t > (t0 + td):
+            return 0.0
+        dt = t - t0  # ms
+        k_hz_per_ms = (zap_f1_hz - zap_f0_hz) / td
+        phase = 2.0 * np.pi * ((zap_f0_hz * dt / 1000.0) + 0.5 * (k_hz_per_ms * dt * dt / 1000.0))
+        return iext * np.sin(phase)
     # Default: const (stype == 0)
     return iext
 
@@ -119,11 +125,11 @@ def rhs_multicompartment(
     phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
     # Стимуляция (primary)
-    stype, iext, t0, td, atau, event_times_arr, n_events, stim_comp, stim_mode,
+    stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
     use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
     # Dual stimulation (secondary) - optional
     dual_stim_enabled,
-    stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
+    stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, stim_comp_2, stim_mode_2,
     use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2
 ):
     """
@@ -198,12 +204,11 @@ def rhs_multicompartment(
     # and will be multiplied by (V - E_syn) per-compartment in the main loop.
     # For stype < 4 (const/pulse/alpha): base_current is raw current [µA/cm²].
     is_conductance_based = (stype >= 4)
-    i_stim = np.zeros(n_comp)
     # Stage 6.3: event-driven mode if queue is non-empty and stim is synaptic
     if n_events > 0 and is_conductance_based:
         base_current = get_event_driven_conductance(t, stype, iext, event_times_arr, n_events)
     else:
-        base_current = get_stim_current(t, stype, iext, t0, td, atau)
+        base_current = get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz)
     e_syn = _get_syn_reversal(stype) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
@@ -215,31 +220,24 @@ def rhs_multicompartment(
     if use_dfilter_secondary == 1:
         v_filtered_secondary = y[off_vfilt_secondary]
 
-    d_vfiltered_dt_primary = apply_primary_stimulus_current(
-        i_stim, n_comp, base_current,
-        stim_comp, stim_mode,
-        use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
-        v_filtered_primary,
-    )
-    # For conductance-based: i_stim will hold g_syn values after distribution.
-    # We need a separate array for dual stim conductance to keep them independent.
-    i_stim_2 = np.zeros(n_comp)
+    d_vfiltered_dt_primary = 0.0
+    if stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 0.0:
+        attenuated_current = dfilter_attenuation * base_current
+        d_vfiltered_dt_primary = (attenuated_current - v_filtered_primary) / dfilter_tau_ms
+
     is_cond_2 = False
     e_syn_2 = 0.0
     is_nmda_2 = False
     d_vfiltered_dt_secondary = 0.0
+    base_current_2 = 0.0
     if dual_stim_enabled == 1:
         is_cond_2 = (stype_2 >= 4)
         e_syn_2 = _get_syn_reversal(stype_2) if is_cond_2 else 0.0
         is_nmda_2 = (stype_2 == 5)
-        base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2)
-        d_vfiltered_dt_secondary = apply_secondary_stimulus_current(
-            i_stim_2 if is_cond_2 else i_stim,
-            n_comp, base_current_2,
-            stim_comp_2, stim_mode_2,
-            use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
-            v_filtered_secondary,
-        )
+        base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2)
+        if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 0.0:
+            attenuated_current_2 = dfilter_attenuation_2 * base_current_2
+            d_vfiltered_dt_secondary = (attenuated_current_2 - v_filtered_secondary) / dfilter_tau_ms_2
 
     # --- Output array ---
     dydt = np.zeros_like(y)
@@ -325,27 +323,32 @@ def rhs_multicompartment(
             col = l_indices[j_idx]
             i_ax += l_data[j_idx] * y[off_v + col]
 
-        # Synaptic current: conductance-based or current-based
-        i_syn = 0.0
+        # Stimulus current: evaluate distributed contribution per-compartment.
+        i_stim_primary = distributed_stimulus_current_for_comp(
+            i, n_comp, base_current, stim_comp, stim_mode,
+            use_dfilter_primary, dfilter_attenuation, v_filtered_primary,
+        )
         if is_conductance_based:
-            g_syn = i_stim[i]  # distributed conductance [mS/cm²]
+            g_syn = i_stim_primary  # distributed conductance [mS/cm²]
             if is_nmda:
                 g_syn *= nmda_mg_block(vi, mg_ext)
-            i_syn = g_syn * (vi - e_syn)  # outward convention: positive = depolarizing at V < E_syn
-            # Flip sign: g*(V-E) is positive when V>E (outward for excitatory)
-            # We need inward current for excitation → subtract from i_ion
-            i_stim_eff = -i_syn
+            i_stim_eff = -(g_syn * (vi - e_syn))
         else:
-            i_stim_eff = i_stim[i]
+            i_stim_eff = i_stim_primary
+
         # Dual stim contribution
         if dual_stim_enabled == 1:
+            i_stim_secondary = distributed_stimulus_current_for_comp(
+                i, n_comp, base_current_2, stim_comp_2, stim_mode_2,
+                use_dfilter_secondary, dfilter_attenuation_2, v_filtered_secondary,
+            )
             if is_cond_2:
-                g2 = i_stim_2[i]
+                g2 = i_stim_secondary
                 if is_nmda_2:
                     g2 *= nmda_mg_block(vi, mg_ext)
                 i_stim_eff -= g2 * (vi - e_syn_2)
             else:
-                i_stim_eff += i_stim_2[i]
+                i_stim_eff += i_stim_secondary
 
         # dV/dt
         dydt[off_v + i] = (i_stim_eff - i_ion + i_ax) / cm_v[i]

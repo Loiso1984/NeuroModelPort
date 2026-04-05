@@ -34,6 +34,17 @@ from .kinetics import (
     by_NaR,
 )
 from .rhs import F_CONST, R_GAS
+from .rhs_contract import RHS_ARG_COUNT, unpack_rhs_args
+
+_LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
+
+
+def _sparse_structure_signature(l_indices: np.ndarray, l_indptr: np.ndarray) -> tuple:
+    """Hashable signature for cache keying by sparse topology content."""
+    return (
+        tuple(np.asarray(l_indices, dtype=np.int64).tolist()),
+        tuple(np.asarray(l_indptr, dtype=np.int64).tolist()),
+    )
 
 
 def _state_slices(
@@ -336,10 +347,10 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         cm_v, l_data, l_indices, l_indptr,
         phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
         t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
-        stype, iext, t0, td, atau, event_times_arr, n_events, stim_comp, stim_mode,
+        stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
         use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
         dual_stim_enabled,
-        stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
+        stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, stim_comp_2, stim_mode_2,
         use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
     ):
         # Zero all entries
@@ -604,20 +615,43 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 # Legacy interface for backward compatibility
 def analytic_sparse_jacobian(*args, **kwargs):
     """Fallback: creates lil_matrix each call. Use make_analytic_jacobian instead."""
-    # Extract enough args to build slices
-    (t, y, n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
-     en_nap, en_nar) = args[:12]
-    use_dfp = args[57] if len(args) > 57 else 0   # use_dfilter_primary position (after Stage 6.3)
-    use_dfs = args[68] if len(args) > 68 else 0   # use_dfilter_secondary position (after Stage 6.3)
-    idx, n_state = _state_slices(
-        n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfp, use_dfs,
-        en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar, en_sk=en_sk,
+    if len(args) < 2:
+        raise ValueError("analytic_sparse_jacobian expects (t, y, *rhs_args)")
+    rhs_args = args[2:]
+    if len(rhs_args) != RHS_ARG_COUNT:
+        raise ValueError(
+            f"analytic_sparse_jacobian expected {RHS_ARG_COUNT} rhs args, got {len(rhs_args)}"
+        )
+    rhs = unpack_rhs_args(tuple(rhs_args))
+    n_comp = rhs["n_comp"]
+    en_ih = rhs["en_ih"]
+    en_ica = rhs["en_ica"]
+    en_ia = rhs["en_ia"]
+    en_sk = rhs["en_sk"]
+    dyn_ca = rhs["dyn_ca"]
+    en_itca = rhs["en_itca"]
+    en_im = rhs["en_im"]
+    en_nap = rhs["en_nap"]
+    en_nar = rhs["en_nar"]
+    use_dfp = rhs["use_dfilter_primary"]
+    use_dfs = rhs["use_dfilter_secondary"]
+    cache_key = (
+        n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
+        use_dfp, use_dfs, _sparse_structure_signature(rhs["l_indices"], rhs["l_indptr"]),
     )
-    sp = build_jacobian_sparsity(
-        n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca,
-        args[29], args[30],  # l_indices, l_indptr
-        use_dfp, use_dfs,
-        en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
-    )
-    fn = make_analytic_jacobian(sp)
+    fn = _LEGACY_JACOBIAN_CACHE.get(cache_key)
+    if fn is None:
+        sp = build_jacobian_sparsity(
+            n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca,
+            rhs["l_indices"], rhs["l_indptr"],
+            use_dfp, use_dfs,
+            en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
+        )
+        fn = make_analytic_jacobian(sp)
+        _LEGACY_JACOBIAN_CACHE[cache_key] = fn
     return fn(*args)
+
+
+def clear_legacy_jacobian_cache() -> None:
+    """Clear cached legacy Jacobian callables (test/debug helper)."""
+    _LEGACY_JACOBIAN_CACHE.clear()

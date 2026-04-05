@@ -9,6 +9,7 @@ from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import rhs_multicompartment, F_CONST, R_GAS
+from core.rhs_contract import pack_rhs_args, validate_rhs_args_values
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
 
@@ -142,7 +143,7 @@ class NeuronSolver:
         s_map = {
             'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 3,
             'AMPA': 4, 'NMDA': 5, 'GABAA': 6, 'GABAB': 7,
-            'Kainate': 8, 'Nicotinic': 9,
+            'Kainate': 8, 'Nicotinic': 9, 'zap': 10,
         }
         t_kelvin = cfg.env.T_celsius + 273.15
 
@@ -153,6 +154,8 @@ class NeuronSolver:
         primary_t0 = cfg.stim.pulse_start
         primary_td = cfg.stim.pulse_dur
         primary_atau = cfg.stim.alpha_tau
+        primary_zap_f0 = cfg.stim.zap_f0_hz
+        primary_zap_f1 = cfg.stim.zap_f1_hz
         primary_stim_comp = cfg.stim.stim_comp
         primary_location = cfg.stim_location.location
 
@@ -169,6 +172,8 @@ class NeuronSolver:
             primary_atau = getattr(dual_cfg, "primary_alpha_tau", primary_atau)
             primary_location = getattr(dual_cfg, "primary_location", primary_location)
             primary_stim_comp = 0
+            primary_zap_f0 = getattr(dual_cfg, "primary_zap_f0_hz", primary_zap_f0)
+            primary_zap_f1 = getattr(dual_cfg, "primary_zap_f1_hz", primary_zap_f1)
 
         stype = s_map.get(primary_stim_type, 0)
         stim_mode = stim_mode_map.get(primary_location, 0)
@@ -189,6 +194,7 @@ class NeuronSolver:
 
         # Secondary stimulus defaults.
         stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 0.0
+        zap_f0_2, zap_f1_2 = primary_zap_f0, primary_zap_f1
         stim_comp_2, stim_mode_2 = 0, 0
         use_dfilter_secondary = 0
         dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
@@ -201,6 +207,8 @@ class NeuronSolver:
             atau_2 = dual_cfg.secondary_alpha_tau
             stim_comp_2 = 0
             stim_mode_2 = stim_mode_map.get(dual_cfg.secondary_location, 0)
+            zap_f0_2 = getattr(dual_cfg, "secondary_zap_f0_hz", zap_f0_2)
+            zap_f1_2 = getattr(dual_cfg, "secondary_zap_f1_hz", zap_f1_2)
             dfilter_tau_ms_2 = dual_cfg.secondary_tau_dendritic_ms
             use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
             if use_dfilter_secondary == 1:
@@ -210,46 +218,83 @@ class NeuronSolver:
                     -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
                 )
 
-        args = (
-            n_comp,
-            cfg.channels.enable_Ih, cfg.channels.enable_ICa,
-            cfg.channels.enable_IA, cfg.channels.enable_SK,
-            cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa,
-            cfg.channels.enable_IM, cfg.channels.enable_NaP, cfg.channels.enable_NaR,
-            morph['gNa_v'], morph['gK_v'], morph['gL_v'],
-            morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'],
-            morph['gIM_v'], morph['gNaP_v'], morph['gNaR_v'],
-            cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL,
-            cfg.channels.E_Ih, cfg.channels.E_A,
-            morph['Cm_v'],
-            morph['L_data'], morph['L_indices'], morph['L_indptr'],
-            cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
-            cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
-            t_kelvin,
-            cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
-            cfg.calcium.tau_Ca,
-            self._build_b_ca_vector(cfg, morph),
-            cfg.env.Mg_ext,
-            cfg.channels.tau_SK,
-            stype, primary_iext,
-            primary_t0, primary_td,
-            primary_atau,
-            np.array(cfg.stim.event_times or [], dtype=np.float64),
-            int(len(cfg.stim.event_times or [])),
-            primary_stim_comp, stim_mode,
-            use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
-            # Dual stimulation parameters (optional)
-            dual_stim_enabled,
-            stype_2, iext_2, t0_2, td_2, atau_2, stim_comp_2, stim_mode_2,
-            use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
-        )
+        rhs_values = {
+            "n_comp": n_comp,
+            "en_ih": cfg.channels.enable_Ih,
+            "en_ica": cfg.channels.enable_ICa,
+            "en_ia": cfg.channels.enable_IA,
+            "en_sk": cfg.channels.enable_SK,
+            "dyn_ca": cfg.calcium.dynamic_Ca,
+            "en_itca": cfg.channels.enable_ITCa,
+            "en_im": cfg.channels.enable_IM,
+            "en_nap": cfg.channels.enable_NaP,
+            "en_nar": cfg.channels.enable_NaR,
+            "gna_v": morph['gNa_v'],
+            "gk_v": morph['gK_v'],
+            "gl_v": morph['gL_v'],
+            "gih_v": morph['gIh_v'],
+            "gca_v": morph['gCa_v'],
+            "ga_v": morph['gA_v'],
+            "gsk_v": morph['gSK_v'],
+            "gtca_v": morph['gTCa_v'],
+            "gim_v": morph['gIM_v'],
+            "gnap_v": morph['gNaP_v'],
+            "gnar_v": morph['gNaR_v'],
+            "ena": cfg.channels.ENa,
+            "ek": cfg.channels.EK,
+            "el": cfg.channels.EL,
+            "eih": cfg.channels.E_Ih,
+            "ea": cfg.channels.E_A,
+            "cm_v": morph['Cm_v'],
+            "l_data": morph['L_data'],
+            "l_indices": morph['L_indices'],
+            "l_indptr": morph['L_indptr'],
+            "phi_na": cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
+            "phi_k": cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
+            "phi_ih": cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
+            "phi_ca": cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
+            "phi_ia": cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
+            "phi_tca": cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
+            "phi_im": cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
+            "phi_nap": cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
+            "phi_nar": cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
+            "t_kelvin": t_kelvin,
+            "ca_ext": cfg.calcium.Ca_ext,
+            "ca_rest": cfg.calcium.Ca_rest,
+            "tau_ca": cfg.calcium.tau_Ca,
+            "b_ca": self._build_b_ca_vector(cfg, morph),
+            "mg_ext": cfg.env.Mg_ext,
+            "tau_sk": cfg.channels.tau_SK,
+            "stype": stype,
+            "iext": primary_iext,
+            "t0": primary_t0,
+            "td": primary_td,
+            "atau": primary_atau,
+            "zap_f0_hz": primary_zap_f0,
+            "zap_f1_hz": primary_zap_f1,
+            "event_times_arr": np.array(cfg.stim.event_times or [], dtype=np.float64),
+            "n_events": int(len(cfg.stim.event_times or [])),
+            "stim_comp": primary_stim_comp,
+            "stim_mode": stim_mode,
+            "use_dfilter_primary": use_dfilter_primary,
+            "dfilter_attenuation": dfilter_attenuation,
+            "dfilter_tau_ms": dfilter_tau_ms,
+            "dual_stim_enabled": dual_stim_enabled,
+            "stype_2": stype_2,
+            "iext_2": iext_2,
+            "t0_2": t0_2,
+            "td_2": td_2,
+            "atau_2": atau_2,
+            "zap_f0_hz_2": zap_f0_2,
+            "zap_f1_hz_2": zap_f1_2,
+            "stim_comp_2": stim_comp_2,
+            "stim_mode_2": stim_mode_2,
+            "use_dfilter_secondary": use_dfilter_secondary,
+            "dfilter_attenuation_2": dfilter_attenuation_2,
+            "dfilter_tau_ms_2": dfilter_tau_ms_2,
+        }
+        validate_rhs_args_values(rhs_values)
+        args = pack_rhs_args(rhs_values)
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
         
