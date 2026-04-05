@@ -33,7 +33,7 @@ from .kinetics import (
     bx_NaP,
     by_NaR,
 )
-from .rhs import F_CONST, R_GAS
+from .rhs import CA_I_MAX_M_M, CA_I_MIN_M_M, F_CONST, R_GAS
 from .rhs_contract import RHS_ARG_COUNT, unpack_rhs_args
 
 _LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
@@ -537,7 +537,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             i_ca_val = 0.0
             if en_ica:
                 if dyn_ca:
-                    ca_safe = max(ca_i[i], 1e-9)
+                    ca_safe = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
                     eca = k_nernst * np.log(ca_ext / ca_safe)
                     deca_dca = -k_nernst / ca_safe
                 else:
@@ -562,7 +562,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             i_tca_val = 0.0
             if en_itca and idx["p"] is not None:
                 if dyn_ca:
-                    ca_safe_t = max(ca_i[i], 1e-9)
+                    ca_safe_t = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
                     eca_t = k_nernst * np.log(ca_ext / ca_safe_t)
                     deca_t_dca = -k_nernst / ca_safe_t
                 else:
@@ -570,8 +570,9 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                     deca_t_dca = 0.0
                 # If ICa already computed eca for this compartment, reuse it
                 if en_ica and dyn_ca:
-                    eca_t = k_nernst * np.log(ca_ext / max(ca_i[i], 1e-9))
-                    deca_t_dca = -k_nernst / max(ca_i[i], 1e-9)
+                    ca_safe_t = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
+                    eca_t = k_nernst * np.log(ca_ext / ca_safe_t)
+                    deca_t_dca = -k_nernst / ca_safe_t
                 dItdv = gtca_v[i] * (p_g[i] ** 2) * q_g[i]
                 dItdp = gtca_v[i] * 2.0 * p_g[i] * q_g[i] * (v[i] - eca_t)
                 dItdq = gtca_v[i] * (p_g[i] ** 2) * (v[i] - eca_t)

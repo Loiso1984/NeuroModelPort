@@ -39,6 +39,38 @@ RHS_ARG_INDEX: dict[str, int] = {name: i for i, name in enumerate(RHS_ARG_ORDER)
 RHS_ARG_COUNT: int = len(RHS_ARG_ORDER)
 
 
+def _as_float(values: Mapping[str, Any], key: str) -> float:
+    return float(values[key])
+
+
+def _require_finite(values: Mapping[str, Any], key: str) -> float:
+    v = _as_float(values, key)
+    if not math.isfinite(v):
+        raise ValueError(f"Invalid {key}: must be finite")
+    return v
+
+
+def _require_positive(values: Mapping[str, Any], key: str) -> float:
+    v = _require_finite(values, key)
+    if v <= 0.0:
+        raise ValueError(f"Invalid {key}: must be finite and > 0")
+    return v
+
+
+def _require_nonnegative(values: Mapping[str, Any], key: str) -> float:
+    v = _require_finite(values, key)
+    if v < 0.0:
+        raise ValueError(f"Invalid {key}: must be finite and >= 0")
+    return v
+
+
+def _require_binary_flag(values: Mapping[str, Any], key: str) -> int:
+    v = int(values[key])
+    if v not in (0, 1):
+        raise ValueError(f"Invalid {key}: expected 0|1")
+    return v
+
+
 def pack_rhs_args(values: Mapping[str, Any]) -> tuple[Any, ...]:
     """Pack named RHS/Jacobian arguments into canonical positional tuple.
 
@@ -166,11 +198,13 @@ def validate_rhs_args_values(values: Mapping[str, Any]) -> None:
         prev_evt = evt
 
     stim_mode = int(values["stim_mode"])
-    stim_mode_2 = int(values["stim_mode_2"])
     if stim_mode not in (0, 1, 2):
         raise ValueError(f"Invalid stim_mode={stim_mode}: expected 0|1|2")
-    if stim_mode_2 not in (0, 1, 2):
-        raise ValueError(f"Invalid stim_mode_2={stim_mode_2}: expected 0|1|2")
+
+    valid_stypes = (0, 1, 2, 4, 5, 6, 7, 8, 9, 10)
+    stype = int(values["stype"])
+    if stype not in valid_stypes:
+        raise ValueError(f"Invalid stype={stype}: unsupported stimulation type")
 
     valid_stypes = (0, 1, 2, 4, 5, 6, 7, 8, 9, 10)
     stype = int(values["stype"])
@@ -181,49 +215,55 @@ def validate_rhs_args_values(values: Mapping[str, Any]) -> None:
         raise ValueError(f"Invalid stype_2={stype_2}: unsupported stimulation type")
 
     stim_comp = int(values["stim_comp"])
-    stim_comp_2 = int(values["stim_comp_2"])
     if not (0 <= stim_comp < n_comp):
         raise ValueError(f"Invalid stim_comp={stim_comp} for n_comp={n_comp}")
-    if not (0 <= stim_comp_2 < n_comp):
-        raise ValueError(f"Invalid stim_comp_2={stim_comp_2} for n_comp={n_comp}")
 
-    dual_stim_enabled = int(values["dual_stim_enabled"])
-    use_dfilter_primary = int(values["use_dfilter_primary"])
-    use_dfilter_secondary = int(values["use_dfilter_secondary"])
-    if dual_stim_enabled not in (0, 1):
-        raise ValueError("Invalid dual_stim_enabled: expected 0|1")
-    if use_dfilter_primary not in (0, 1):
-        raise ValueError("Invalid use_dfilter_primary: expected 0|1")
-    if use_dfilter_secondary not in (0, 1):
-        raise ValueError("Invalid use_dfilter_secondary: expected 0|1")
+    dual_stim_enabled = _require_binary_flag(values, "dual_stim_enabled")
+    use_dfilter_primary = _require_binary_flag(values, "use_dfilter_primary")
+    use_dfilter_secondary = _require_binary_flag(values, "use_dfilter_secondary")
 
-    if float(values["dfilter_tau_ms"]) < 0.0:
+    if _require_finite(values, "dfilter_tau_ms") < 0.0:
         raise ValueError("Invalid dfilter_tau_ms: must be >= 0")
-    if float(values["dfilter_tau_ms_2"]) < 0.0:
-        raise ValueError("Invalid dfilter_tau_ms_2: must be >= 0")
-
-    scalar_positive = ("t_kelvin", "tau_ca", "tau_sk", "atau", "atau_2")
+    scalar_positive = ("t_kelvin", "tau_ca", "tau_sk", "atau")
     for key in scalar_positive:
-        v = float(values[key])
-        if (not math.isfinite(v)) or v <= 0.0:
-            raise ValueError(f"Invalid {key}: must be finite and > 0")
+        _require_positive(values, key)
 
     scalar_nonnegative = ("ca_ext", "ca_rest", "mg_ext")
     for key in scalar_nonnegative:
-        v = float(values[key])
-        if (not math.isfinite(v)) or v < 0.0:
-            raise ValueError(f"Invalid {key}: must be finite and >= 0")
+        _require_nonnegative(values, key)
 
-    finite_scalars = (
-        "iext", "t0", "td", "zap_f0_hz", "zap_f1_hz",
-        "iext_2", "t0_2", "td_2", "zap_f0_hz_2", "zap_f1_hz_2",
-    )
+    finite_scalars = ("iext", "t0", "td", "zap_f0_hz", "zap_f1_hz")
     for key in finite_scalars:
-        v = float(values[key])
-        if not math.isfinite(v):
-            raise ValueError(f"Invalid {key}: must be finite")
+        _require_finite(values, key)
 
-    nonnegative_durations = ("td", "td_2", "zap_f0_hz", "zap_f1_hz", "zap_f0_hz_2", "zap_f1_hz_2")
+    nonnegative_durations = ("td", "zap_f0_hz", "zap_f1_hz")
     for key in nonnegative_durations:
-        if float(values[key]) < 0.0:
+        if _as_float(values, key) < 0.0:
             raise ValueError(f"Invalid {key}: must be >= 0")
+
+    if dual_stim_enabled == 1:
+        stim_mode_2 = int(values["stim_mode_2"])
+        if stim_mode_2 not in (0, 1, 2):
+            raise ValueError(f"Invalid stim_mode_2={stim_mode_2}: expected 0|1|2")
+
+        stype_2 = int(values["stype_2"])
+        if stype_2 not in valid_stypes:
+            raise ValueError(f"Invalid stype_2={stype_2}: unsupported stimulation type")
+
+        stim_comp_2 = int(values["stim_comp_2"])
+        if not (0 <= stim_comp_2 < n_comp):
+            raise ValueError(f"Invalid stim_comp_2={stim_comp_2} for n_comp={n_comp}")
+
+        if _require_finite(values, "dfilter_tau_ms_2") < 0.0:
+            raise ValueError("Invalid dfilter_tau_ms_2: must be >= 0")
+
+        _require_positive(values, "atau_2")
+
+        secondary_finite_scalars = ("iext_2", "t0_2", "td_2", "zap_f0_hz_2", "zap_f1_hz_2")
+        for key in secondary_finite_scalars:
+            _require_finite(values, key)
+
+        secondary_nonnegative = ("td_2", "zap_f0_hz_2", "zap_f1_hz_2")
+        for key in secondary_nonnegative:
+            if _as_float(values, key) < 0.0:
+                raise ValueError(f"Invalid {key}: must be >= 0")

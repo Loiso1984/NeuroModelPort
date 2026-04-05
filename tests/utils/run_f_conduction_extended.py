@@ -100,6 +100,12 @@ def _run_case(
     }
 
 
+def _exit_code_for_anomalies(anomaly_count: int, fail_on_anomaly: bool) -> int:
+    if fail_on_anomaly and anomaly_count > 0:
+        return 1
+    return 0
+
+
 def main() -> int:
     if _IMPORT_ERROR is not None:
         print(dependency_diagnostic("f-conduction-extended", _IMPORT_ERROR), file=sys.stderr)
@@ -114,6 +120,12 @@ def main() -> int:
     parser.add_argument("--dt-eval", type=float, default=0.15)
     parser.add_argument("--delay-margin-ms", type=float, default=0.3)
     parser.add_argument(
+        "--fail-on-anomaly",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Return non-zero exit code when any anomaly is detected (default: enabled).",
+    )
+    parser.add_argument(
         "--target-ratio",
         type=float,
         default=0.3,
@@ -121,6 +133,29 @@ def main() -> int:
     )
     parser.add_argument("--output", type=str, default="_test_results/pathology_f_conduction_extended.json")
     args = parser.parse_args()
+
+    if _IMPORT_ERROR is not None:
+        msg = dependency_diagnostic("f-conduction-extended", _IMPORT_ERROR)
+        print(msg, file=sys.stderr)
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(
+                {
+                    "status": "dependency_error",
+                    "tool": "f-conduction-extended",
+                    "message": msg,
+                    "gate": {
+                        "fail_on_anomaly": bool(args.fail_on_anomaly),
+                        "exit_code": 2,
+                    },
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return 2
 
     temps = _parse_csv_floats(args.temps)
     f_ra = _parse_csv_floats(args.f_ra_mults)
@@ -202,6 +237,7 @@ def main() -> int:
                         )
 
     out = {
+        "status": "PASS" if len(anomalies) == 0 else "FAIL",
         "config": {
             "temps": temps,
             "f_ra_mults": f_ra,
@@ -210,6 +246,7 @@ def main() -> int:
             "t_sim": float(args.t_sim),
             "dt_eval": float(args.dt_eval),
             "delay_margin_ms": float(args.delay_margin_ms),
+            "fail_on_anomaly": bool(args.fail_on_anomaly),
         },
         "summary": {
             "total_cases": len(rows),
@@ -220,12 +257,18 @@ def main() -> int:
         "rows": rows,
     }
 
+    exit_code = _exit_code_for_anomalies(len(anomalies), bool(args.fail_on_anomaly))
+    out["summary"]["gate_exit_code"] = int(exit_code)
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nSaved: {out_path}")
     print(f"Anomalies: {len(anomalies)} / {len(rows)}")
-    return 0
+    if exit_code != 0:
+        print("Result status: FAIL (anomalies detected and fail-on-anomaly is enabled).")
+    else:
+        print("Result status: PASS/WARN (no blocking anomaly gate).")
+    return exit_code
 
 
 if __name__ == "__main__":

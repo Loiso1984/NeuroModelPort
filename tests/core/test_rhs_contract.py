@@ -137,6 +137,7 @@ def test_validate_rhs_args_values_rejects_shape_mismatch():
         assert "stim_mode" in str(exc)
 
     bad5 = dict(values)
+    bad5["dual_stim_enabled"] = 1
     bad5["stim_comp_2"] = n
     try:
         validate_rhs_args_values(bad5)
@@ -245,6 +246,7 @@ def test_validate_rhs_args_values_rejects_shape_mismatch():
         assert "stype" in str(exc)
 
     bad18 = dict(values)
+    bad18["dual_stim_enabled"] = 1
     bad18["stype_2"] = 42
     try:
         validate_rhs_args_values(bad18)
@@ -261,9 +263,33 @@ def test_validate_rhs_args_values_rejects_shape_mismatch():
         assert "iext" in str(exc)
 
     bad20 = dict(values)
-    bad20["td_2"] = -1.0
+    bad20["dual_stim_enabled"] = 0
+    bad20["atau_2"] = 0.0
+    bad20["stim_comp_2"] = n + 10
+    bad20["stype_2"] = 999
+    # Secondary fields should not block when dual stimulation is disabled.
+    validate_rhs_args_values(bad20)
+
+    bad21 = dict(values)
+    bad21["dual_stim_enabled"] = 1
+    bad21["td_2"] = -1.0
     try:
-        validate_rhs_args_values(bad20)
+        validate_rhs_args_values(bad21)
         assert False, "Expected ValueError for negative td_2"
     except ValueError as exc:
         assert "td_2" in str(exc)
+
+    bad22 = dict(values)
+    bad22["dual_stim_enabled"] = 1
+    bad22["stim_mode_2"] = 7
+    try:
+        validate_rhs_args_values(bad22)
+        assert False, "Expected ValueError for invalid stim_mode_2 when dual stim is enabled"
+    except ValueError as exc:
+        assert "stim_mode_2" in str(exc)
+
+    ok23 = dict(values)
+    ok23["dual_stim_enabled"] = 0
+    ok23["stim_mode_2"] = 7
+    # Secondary stim_mode should not block when dual stimulation is disabled.
+    validate_rhs_args_values(ok23)

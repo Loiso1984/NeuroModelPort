@@ -193,7 +193,9 @@ class NeuronSolver:
         dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
 
         # Secondary stimulus defaults.
-        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 0.0
+        # Keep secondary defaults physically valid even when dual stimulation is disabled.
+        # This protects against stricter external validators and stale serialized configs.
+        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
         zap_f0_2, zap_f1_2 = primary_zap_f0, primary_zap_f1
         stim_comp_2, stim_mode_2 = 0, 0
         use_dfilter_secondary = 0

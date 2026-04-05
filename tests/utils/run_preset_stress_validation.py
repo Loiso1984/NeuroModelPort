@@ -46,6 +46,28 @@ class StressCase:
     note: str
 
 
+def _exit_code_for_summary(
+    fail_count: int,
+    warn_count: int,
+    *,
+    fail_on_fail: bool,
+    fail_on_warn: bool,
+) -> int:
+    if fail_on_fail and fail_count > 0:
+        return 1
+    if fail_on_warn and warn_count > 0:
+        return 1
+    return 0
+
+
+def _overall_status(fail_count: int, warn_count: int) -> str:
+    if fail_count > 0:
+        return "FAIL"
+    if warn_count > 0:
+        return "WARN"
+    return "PASS"
+
+
 def _load_reference_ranges(path: Path) -> dict:
     if not path.exists():
         return {
@@ -172,16 +194,60 @@ def _run_case(
 
 
 def main() -> int:
-    if _IMPORT_ERROR is not None:
-        print(dependency_diagnostic("preset-stress", _IMPORT_ERROR))
-        return 2
-
     ap = argparse.ArgumentParser(description="Run wide-range stress validation for all presets.")
     ap.add_argument("--out", default="tests/artifacts/preset_stress_validation.json")
     ap.add_argument("--report-md", default="tests/artifacts/preset_stress_validation.md")
     ap.add_argument("--reference", default="tests/utils/preset_reference_ranges.json")
     ap.add_argument("--limit-presets", type=int, default=0, help="Optional cap for quick local runs.")
+    ap.add_argument(
+        "--fail-on-fail",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Return non-zero when FAIL rows exist (default: enabled).",
+    )
+    ap.add_argument(
+        "--fail-on-warn",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Return non-zero when WARN rows exist (default: disabled).",
+    )
     args = ap.parse_args()
+
+    if _IMPORT_ERROR is not None:
+        msg = dependency_diagnostic("preset-stress", _IMPORT_ERROR)
+        print(msg)
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(
+                {
+                    "status": "dependency_error",
+                    "tool": "preset-stress",
+                    "message": msg,
+                    "reference_path": args.reference,
+                    "gate": {
+                        "fail_on_fail": bool(args.fail_on_fail),
+                        "fail_on_warn": bool(args.fail_on_warn),
+                        "exit_code": 2,
+                    },
+                    "rows": [],
+                    "by_preset": {},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        report_path = Path(args.report_md)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            "# Preset stress validation\n\n"
+            "Status: dependency_error\n\n"
+            f"{msg}\n",
+            encoding="utf-8",
+        )
+        return 2
+
     reference = _load_reference_ranges(Path(args.reference))
 
     presets = list(get_preset_names())
@@ -202,11 +268,19 @@ def main() -> int:
                         rows.append(_run_case(p, s, t_sim, tc, ns, reference))
 
     summary = {
+        "status": _overall_status(
+            fail_count=sum(r.status == "FAIL" for r in rows),
+            warn_count=sum(r.status == "WARN" for r in rows),
+        ),
         "total": len(rows),
         "pass": sum(r.status == "PASS" for r in rows),
         "warn": sum(r.status == "WARN" for r in rows),
         "fail": sum(r.status == "FAIL" for r in rows),
         "reference_path": args.reference,
+        "gate": {
+            "fail_on_fail": bool(args.fail_on_fail),
+            "fail_on_warn": bool(args.fail_on_warn),
+        },
         "rows": [asdict(r) for r in rows],
     }
     by_preset: dict[str, dict[str, int]] = {}
@@ -217,7 +291,6 @@ def main() -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     report_md = Path(args.report_md)
     report_md.parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +298,7 @@ def main() -> int:
         "# Preset Stress Validation Report",
         "",
         f"- Total cases: **{summary['total']}**",
+        f"- Overall status: **{summary['status']}**",
         f"- PASS: **{summary['pass']}**",
         f"- WARN: **{summary['warn']}**",
         f"- FAIL: **{summary['fail']}**",
@@ -248,9 +322,21 @@ def main() -> int:
             )
     report_md.write_text("\n".join(lines), encoding="utf-8")
 
+    exit_code = _exit_code_for_summary(
+        fail_count=int(summary["fail"]),
+        warn_count=int(summary["warn"]),
+        fail_on_fail=bool(args.fail_on_fail),
+        fail_on_warn=bool(args.fail_on_warn),
+    )
+    summary["gate"]["exit_code"] = int(exit_code)
+    out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[preset-stress] wrote {out} | PASS={summary['pass']} WARN={summary['warn']} FAIL={summary['fail']}")
     print(f"[preset-stress] wrote {report_md}")
-    return 0 if summary["fail"] == 0 else 1
+    if exit_code != 0:
+        print("[preset-stress] Result status: FAIL gate triggered.")
+    else:
+        print("[preset-stress] Result status: PASS/WARN gate not triggered.")
+    return exit_code
 
 
 if __name__ == "__main__":

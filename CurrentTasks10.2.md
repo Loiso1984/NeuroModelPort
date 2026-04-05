@@ -188,6 +188,8 @@
 - ✅ Stress-harness UX improved: missing runtime dependencies now produce explicit diagnostic message/exit code instead of raw traceback, simplifying CI/environment triage.
 - ✅ Preset stress harness now emits both JSON and Markdown reports (`by_preset` summary + WARN/FAIL samples) for direct inclusion into validation docs/review notes.
 - ✅ Stress-harness reference ranges externalized to `tests/utils/preset_reference_ranges.json` (keyword rules + default envelopes), enabling iterative literature alignment without code edits.
+- ✅ RHS contract secondary-stim validation is now conditional on `dual_stim_enabled==1`; single-stim launches no longer fail on irrelevant secondary fields (fix for `Invalid atau_2` on regular runs).
+- ✅ Jacobian Nernst path aligned with RHS calcium safety envelope: ICa/ITCa now clamp `Ca_i` to `[CA_I_MIN_M_M, CA_I_MAX_M_M]`, reducing Jacobian/RHS mismatch risk on long pathological simulations.
 
 ## Low-Priority GUI Backlog (compiled from AIDER + new recommendations)
 > Ниже — только уникальные, реализуемые пункты (без дублей уже закрытых задач).
