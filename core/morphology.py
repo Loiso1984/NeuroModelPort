@@ -82,6 +82,7 @@ class MorphologyBuilder:
         gA_v   = np.zeros(N_comp, dtype=np.float64)
         gSK_v  = np.zeros(N_comp, dtype=np.float64)
         gTCa_v = np.zeros(N_comp, dtype=np.float64)
+        gM_v   = np.zeros(N_comp, dtype=np.float64)
 
         if cc.enable_Ih:
             gIh_v.fill(cc.gIh_max)
@@ -93,6 +94,8 @@ class MorphologyBuilder:
             gSK_v.fill(cc.gSK_max)
         if cc.enable_ITCa:
             gTCa_v.fill(cc.gTCa_max)
+        if cc.enable_IM:
+            gM_v.fill(cc.gM_max)
         
         # Membrane capacitance [µF/cm²]
         Cm_v = np.full(N_comp, cc.Cm, dtype=np.float64)
@@ -106,6 +109,7 @@ class MorphologyBuilder:
             gCa_v[ais_slice]  *= mc.gCa_ais_mult
             gA_v[ais_slice]   *= mc.gA_ais_mult
             gTCa_v[ais_slice] *= mc.gCa_ais_mult  # T-type uses same AIS mult as L-type
+            gM_v[ais_slice]   *= mc.gM_ais_mult
 
         # 3. Матрица Лапласа (LIL формат для быстрого заполнения) | 3. Laplacian matrix (LIL format for fast filling)
         L_matrix = lil_matrix((N_comp, N_comp), dtype=np.float64)
@@ -155,7 +159,7 @@ class MorphologyBuilder:
             'areas': areas,
             'diameters': diameters,
             'gNa_v': gNa_v, 'gK_v': gK_v, 'gL_v': gL_v,
-            'gIh_v': gIh_v, 'gCa_v': gCa_v, 'gA_v': gA_v, 'gSK_v': gSK_v, 'gTCa_v': gTCa_v,
+            'gIh_v': gIh_v, 'gCa_v': gCa_v, 'gA_v': gA_v, 'gSK_v': gSK_v, 'gTCa_v': gTCa_v, 'gM_v': gM_v,
             'Cm_v': Cm_v,
             'L_data': L_csr.data,
             'L_indices': L_csr.indices,

@@ -18,6 +18,7 @@ class MorphologyParams(BaseModel):
     gIh_ais_mult: float = Field(default=1.0,           description="gIh multiplier in AIS")
     gCa_ais_mult: float = Field(default=2.0,           description="gCa multiplier in AIS")
     gA_ais_mult:  float = Field(default=3.0,           description="gA multiplier in AIS")
+    gM_ais_mult:  float = Field(default=1.0,           description="gM multiplier in AIS")
 
     # Axon trunk
     N_trunk: int   = Field(default=35, ge=0, description="Number of trunk segments")
@@ -65,6 +66,9 @@ class ChannelParams(BaseModel):
     enable_ITCa: bool  = Field(default=False, description="Enable T-type Ca²⁺ current (low-threshold, CaV3.x)")
     gTCa_max:    float = Field(default=2.0,  description="Max T-type Ca conductance (mS/cm², Destexhe 1998)")
 
+    enable_IM: bool  = Field(default=False, description="Enable M-current (KCNQ/Kv7, spike-frequency adaptation)")
+    gM_max:    float = Field(default=0.02, description="Max M-current conductance (mS/cm², Yamada/Koch/Adams 1989)")
+
 
 class CalciumParams(BaseModel):
     """Intracellular calcium dynamics."""
@@ -94,6 +98,8 @@ class EnvironmentParams(BaseModel):
     # T-type Ca: Destexhe 1998, J Neurosci 18:3574 — Q10_m=5.0, Q10_h=3.0 at 24°C ref.
     # Using geometric mean ~3.9 for combined gate scaling in single-phi model.
     Q10_TCa:   float = Field(default=3.9,              description="Q10 for T-type Ca channel (m,h gates)")
+    # I_M: Yamada, Koch & Adams 1989; Destexhe IM.mod (Q10 = 2.3, ref 36°C)
+    Q10_M:     float = Field(default=2.3,              description="Q10 for M-current (w gate)")
 
     @property
     def phi(self) -> float:

@@ -213,9 +213,9 @@ class NeuronSolver:
             n_comp,
             cfg.channels.enable_Ih, cfg.channels.enable_ICa,
             cfg.channels.enable_IA, cfg.channels.enable_SK,
-            cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa,
+            cfg.calcium.dynamic_Ca, cfg.channels.enable_ITCa, cfg.channels.enable_IM,
             morph['gNa_v'], morph['gK_v'], morph['gL_v'],
-            morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'],
+            morph['gIh_v'], morph['gCa_v'], morph['gA_v'], morph['gSK_v'], morph['gTCa_v'], morph['gM_v'],
             cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL,
             cfg.channels.E_Ih, cfg.channels.E_A,
             morph['Cm_v'],
@@ -226,6 +226,7 @@ class NeuronSolver:
             cfg.env.phi_channel(cfg.env.Q10_Ca),
             cfg.env.phi_channel(cfg.env.Q10_IA),
             cfg.env.phi_channel(cfg.env.Q10_TCa),
+            cfg.env.phi_channel(cfg.env.Q10_M),
             t_kelvin,
             cfg.calcium.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca,
@@ -262,6 +263,7 @@ class NeuronSolver:
                 use_dfilter_primary=use_dfilter_primary,
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
+                en_im=cfg.channels.enable_IM,
             )
         elif jacobian_mode == "analytic_sparse":
             sparsity = build_jacobian_sparsity(
@@ -276,6 +278,7 @@ class NeuronSolver:
                 use_dfilter_primary=use_dfilter_primary,
                 use_dfilter_secondary=use_dfilter_secondary,
                 en_itca=cfg.channels.enable_ITCa,
+                en_im=cfg.channels.enable_IM,
             )
             jacobian_options["jac"] = make_analytic_jacobian(sparsity)
         elif jacobian_mode != "dense_fd":
@@ -345,6 +348,11 @@ class NeuronSolver:
             b = y[cursor + n:cursor + 2*n, :]
             res.currents['IA'] = morph['gA_v'][0] * a[0, :] * b[0, :] * (v[0, :] - cfg.channels.E_A)
             cursor += 2 * n
+
+        if cfg.channels.enable_IM:
+            w = y[cursor:cursor + n, :]
+            res.currents['IM'] = morph['gM_v'][0] * w[0, :] * (v[0, :] - cfg.channels.EK)
+            cursor += n
 
         if cfg.channels.enable_ITCa:
             p_t = y[cursor:cursor + n, :]

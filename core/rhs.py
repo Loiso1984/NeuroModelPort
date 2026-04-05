@@ -87,14 +87,14 @@ def get_stim_current(t, stype, iext, t0, td, atau):
 def rhs_multicompartment(
     t, y, n_comp,
     # Флаги включения каналов
-    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca,
+    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im,
     # Векторы проводимостей (уже с учетом AIS-множителей)
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v,
+    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gm_v,
     # Потенциалы реверсии
     ena, ek, el, eih, ea,
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
-    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca,
+    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im,
     t_kelvin, ca_ext, ca_rest, tau_ca, b_ca,
     # Стимуляция (primary)
     stype, iext, t0, td, atau, stim_comp, stim_mode,
@@ -132,6 +132,10 @@ def rhs_multicompartment(
         off_a = cursor
         cursor += n_comp
         off_b = cursor
+        cursor += n_comp
+    off_w = cursor   # M-current activation
+    if en_im:
+        off_w = cursor
         cursor += n_comp
     off_p = cursor   # T-type Ca activation
     off_q = cursor   # T-type Ca inactivation
@@ -223,6 +227,11 @@ def rhs_multicompartment(
             bi = y[off_b + i]
             i_ion += ga_v[i] * ai * bi * (vi - ea)
 
+        # M-current (KCNQ/Kv7, spike-frequency adaptation)
+        if en_im:
+            wi = y[off_w + i]
+            i_ion += gm_v[i] * wi * (vi - ek)
+
         # T-type Ca (low-threshold, Destexhe 1998)
         if en_itca:
             pi = y[off_p + i]
@@ -277,6 +286,10 @@ def rhs_multicompartment(
             bi = y[off_b + i]
             dydt[off_a + i] = phi_ia * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
             dydt[off_b + i] = phi_ia * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
+
+        if en_im:
+            wi = y[off_w + i]
+            dydt[off_w + i] = phi_im * (aw_M(vi) * (1.0 - wi) - bw_M(vi) * wi)
 
         if en_itca:
             pi = y[off_p + i]
