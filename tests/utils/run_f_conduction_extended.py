@@ -76,7 +76,18 @@ def _run_case(
     cfg.stim.dt_eval = float(dt_eval)
     cfg.stim.jacobian_mode = "sparse_fd"
 
-    res = NeuronSolver(cfg).run_single()
+    try:
+        res = NeuronSolver(cfg).run_single()
+    except Exception as exc:  # pragma: no cover - stress utility path
+        return {
+            "n_spikes": 0,
+            "soma_peak_mV": float("nan"),
+            "junction_peak_mV": float("nan"),
+            "prop_ratio": float("nan"),
+            "term_delay_ms": float("nan"),
+            "stable": False,
+            "error": type(exc).__name__,
+        }
     if cfg.morphology.N_trunk > 0:
         j = min(1 + cfg.morphology.N_ais + cfg.morphology.N_trunk - 1, res.n_comp - 1)
     elif cfg.morphology.N_ais > 0:

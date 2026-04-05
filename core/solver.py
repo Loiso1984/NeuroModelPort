@@ -346,19 +346,23 @@ class NeuronSolver:
         elif jacobian_mode != "dense_fd":
             raise ValueError(f"Unsupported jacobian_mode={jacobian_mode}")
 
-        sol = solve_ivp(
-            _rhs_fn,
-            (0.0, cfg.stim.t_sim),
-            y0,
-            # args= omitted: _rhs_fn captures args and _dydt_buf via closure
-            method='BDF',
-            t_eval=t_eval,
-            rtol=1e-5,
-            atol=1e-7,
-            max_step=max_step,
-            dense_output=False,  # Save memory
-            **jacobian_options,
-        )
+        def _solve(method: str, *, rtol: float, atol: float, use_jacobian: bool):
+            opts = jacobian_options if use_jacobian else {}
+            return solve_ivp(
+                _rhs_fn,
+                (0.0, cfg.stim.t_sim),
+                y0,
+                # args= omitted: _rhs_fn captures args and _dydt_buf via closure
+                method=method,
+                t_eval=t_eval,
+                rtol=rtol,
+                atol=atol,
+                max_step=max_step,
+                dense_output=False,  # Save memory
+                **opts,
+            )
+
+        sol = _solve("BDF", rtol=1e-5, atol=1e-7, use_jacobian=True)
         
         # Report actual simulation time
         t_elapsed = time.time() - t_start
@@ -366,7 +370,17 @@ class NeuronSolver:
             logger.info("   Completed in %.1fs", t_elapsed)
 
         if not sol.success:
-            raise RuntimeError(f"Integrator failed: {sol.message}")
+            first_message = str(sol.message)
+            logger.warning("Primary integrator failed (BDF): %s", first_message)
+            # Fallback for stiff/ill-conditioned episodes where BDF can fail with
+            # "Required step size is less than spacing between numbers."
+            # LSODA often recovers these trajectories by switching methods internally.
+            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            if not sol.success:
+                raise RuntimeError(
+                    "Integrator failed after fallback. "
+                    f"BDF='{first_message}'; LSODA='{sol.message}'"
+                )
 
         res = SimulationResult(sol.t, sol.y, n_comp, cfg)
         self._post_process_physics(res, morph)

@@ -29,7 +29,8 @@ def _classify_exit_code(code: int) -> str:
 
 
 def _run_step(name: str, cmd: list[str]) -> StepResult:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    repo_root = Path(__file__).resolve().parents[2]
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(repo_root))
     out_tail = "\n".join(proc.stdout.splitlines()[-30:])
     err_tail = "\n".join(proc.stderr.splitlines()[-30:])
     return StepResult(
@@ -48,7 +49,8 @@ def main() -> int:
     ap.add_argument("--target-ratio", type=float, default=0.3)
     args = ap.parse_args()
 
-    out_dir = Path(args.out_dir)
+    repo_root = Path(__file__).resolve().parents[2]
+    out_dir = (repo_root / args.out_dir).resolve() if not Path(args.out_dir).is_absolute() else Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     steps = [
@@ -59,17 +61,17 @@ def main() -> int:
                 "-m",
                 "pytest",
                 "-q",
-                "tests/core/test_rhs_contract.py",
-                "tests/core/test_jacobian_contract.py",
-                "tests/core/test_dual_stimulation_distribution.py",
-                "tests/core/test_delay_target_utils.py",
+                str(repo_root / "tests/core/test_rhs_contract.py"),
+                str(repo_root / "tests/core/test_jacobian_contract.py"),
+                str(repo_root / "tests/core/test_dual_stimulation_distribution.py"),
+                str(repo_root / "tests/core/test_delay_target_utils.py"),
             ],
         ),
         (
             "f_conduction_gate",
             [
                 sys.executable,
-                "tests/utils/run_f_conduction_extended.py",
+                str(repo_root / "tests/utils/run_f_conduction_extended.py"),
                 "--target-ratio",
                 str(args.target_ratio),
                 "--output",
@@ -80,11 +82,13 @@ def main() -> int:
             "preset_stress_gate",
             [
                 sys.executable,
-                "tests/utils/run_preset_stress_validation.py",
+                str(repo_root / "tests/utils/run_preset_stress_validation.py"),
                 "--out",
                 str(out_dir / "preset_stress_gate.json"),
                 "--report-md",
                 str(out_dir / "preset_stress_gate.md"),
+                "--dt-eval",
+                "0.2",
             ],
         ),
     ]

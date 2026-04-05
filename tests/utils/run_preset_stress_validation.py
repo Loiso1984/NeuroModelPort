@@ -117,6 +117,7 @@ def _run_case(
     preset: str,
     iext_scale: float,
     t_sim_ms: float,
+    dt_eval_ms: float,
     temp_c: float,
     noise_sigma: float,
     reference: dict,
@@ -125,6 +126,7 @@ def _run_case(
     apply_preset(cfg, preset)
     cfg.stim.Iext *= float(iext_scale)
     cfg.stim.t_sim = float(t_sim_ms)
+    cfg.stim.dt_eval = float(dt_eval_ms)
     cfg.env.T_celsius = float(temp_c)
     cfg.stim.noise_sigma = float(noise_sigma)
     param_issues = _preset_param_sanity(cfg)
@@ -199,6 +201,7 @@ def main() -> int:
     ap.add_argument("--report-md", default="tests/artifacts/preset_stress_validation.md")
     ap.add_argument("--reference", default="tests/utils/preset_reference_ranges.json")
     ap.add_argument("--limit-presets", type=int, default=0, help="Optional cap for quick local runs.")
+    ap.add_argument("--dt-eval", type=float, default=0.2, help="Sampling step (ms) used in stress sweeps.")
     ap.add_argument(
         "--fail-on-fail",
         action=argparse.BooleanOptionalAction,
@@ -265,7 +268,7 @@ def main() -> int:
             for t_sim in t_sims:
                 for tc in temps:
                     for ns in noises:
-                        rows.append(_run_case(p, s, t_sim, tc, ns, reference))
+                        rows.append(_run_case(p, s, t_sim, args.dt_eval, tc, ns, reference))
 
     summary = {
         "status": _overall_status(
@@ -277,6 +280,7 @@ def main() -> int:
         "warn": sum(r.status == "WARN" for r in rows),
         "fail": sum(r.status == "FAIL" for r in rows),
         "reference_path": args.reference,
+        "dt_eval_ms": float(args.dt_eval),
         "gate": {
             "fail_on_fail": bool(args.fail_on_fail),
             "fail_on_warn": bool(args.fail_on_warn),
