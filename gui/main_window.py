@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QPushButton, QLabel, QComboBox, QStatusBar,
     QScrollArea, QMessageBox, QApplication, QFileDialog,
-    QGroupBox, QToolBar, QProgressDialog, QLayout
+    QGroupBox, QToolBar, QProgressDialog, QLayout, QSizePolicy
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QRunnable, QThreadPool
 from PySide6.QtGui import QIcon, QAction

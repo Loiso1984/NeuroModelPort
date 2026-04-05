@@ -95,16 +95,16 @@ Simulation Trigger: Симуляция запускается по кнопке 
 NaN Protection: Все выводимые числовые значения должны принудительно приводиться к строке или форматироваться через .toFixed(), чтобы избежать ошибок рендеринга React при получении NaN из математического движка.
 ### STAGE 5: New Ion Channels & Preset Physics Fixes
 *Goal: Elevate the simulator to NEURON-level accuracy by adding missing critical channels and correcting existing presets.*
-- [ ] **5.1 T-type Calcium Current ($I_T$):** Implement the low-threshold transient calcium current (kinetics from *Destexhe 1998* or *Huguenard 1992*) in `core/kinetics.py` and integrate it into `core/rhs.py`.
-- [ ] **5.2 M-type Potassium Current ($I_M$):** Implement the slow, non-inactivating, muscarinic-sensitive potassium current responsible for spike-frequency adaptation.
-- [ ] **5.3 Persistent ($I_{NaP}$) & Resurgent ($I_{NaR}$) Sodium:** Add these channels based on established literature kinetics. Make them optional components in the RHS.
-- [ ] **5.4 Fix "Thalamic Relay" Preset (`core/presets.py`):** Replace the high-threshold L-type calcium channel with the newly implemented **T-type ($I_T$)**. Ensure the neuron generates Low-Threshold Spikes (LTS) and bursts *only* when recovering from hyperpolarization.
-- [ ] **5.5 Fix "CA1 Pyramidal" Preset (`core/presets.py`):** Remove intrinsic Theta rhythm generation (reduce $g_A$ from the unphysiological 10.0 to ~0.4). Rename the preset to `CA1 Pyramidal (Adapting)`. Note in comments that theta rhythm should be driven by external synaptic input, not intrinsic channels.
-- [ ] **5.6 Add 4 New Presets (`core/presets.py`):**
-    1. `Thalamic Reticular Nucleus (TRN)`: High density of $I_T$ in dendrites (sleep spindles).
-    2. `Striatal Spiny Projection Neuron (SPN)`: Demonstrates long latency to first spike (requires strong $I_A$ and inward rectifiers).
-    3. `Cholinergic Neuromodulation (Awake vs Sleep)`: Based on L5 Pyramidal, but blocking $I_M$ to show the shift from adaptation to tonic firing.
-    4. `Pathology: Dravet Syndrome`: FS Interneuron with reduced $g_{Na}$ demonstrating paradoxical network disinhibition (at the single-cell level).
+- [x] **5.1 T-type Calcium Current ($I_T$):** ✅ Implemented in `core/kinetics.py` + `core/rhs.py`. Preset K uses it for LTS bursts.
+- [x] **5.2 M-type Potassium Current ($I_M$):** ✅ Implemented. Exposed via `enable_IM` / `gIM_max` in GUI.
+- [x] **5.3 Persistent ($I_{NaP}$) & Resurgent ($I_{NaR}$) Sodium:** ✅ Both implemented with literature kinetics. Optional via `enable_NaP` / `enable_NaR`.
+- [x] **5.4 Fix "Thalamic Relay" Preset:** ✅ Now uses T-type Ca. Generates LTS + Na burst on recovery from hyperpolarization.
+- [x] **5.5 Fix "CA1 Pyramidal" Preset:** ✅ Renamed to `CA1 Pyramidal (Adapting)`. $g_A$ normalized.
+- [x] **5.6 Add 4 New Presets (`core/presets.py`):** ✅ All four added:
+    1. `P: Thalamic Reticular Nucleus (TRN Spindles)` — sleep spindles via $I_T$.
+    2. `Q: Striatal Spiny Projection (SPN)` — long first-spike latency via strong $I_A$.
+    3. `R: Cholinergic Neuromodulation (ACh)` — $I_M$ block → tonic firing.
+    4. `S: Pathology: Dravet Syndrome (SCN1A LOF)` — FS with reduced $g_{Na}$.
 - [ ] ** 5.6 Energy / ATP Consumption Metrics Refinement: Currently ATP is estimated solely from QNa Enhance this to include QCa 
 (Ca2+ pumps are highly ATP-expensive) and resting pump activity (Na+/K+ ATPase baseline cost). Это позволит моделировать "метаболическую усталость", которая является ключом к пониманию эпилептических припадков и ишемии.
 - [ ]**5.7 Conductance-Based Synaptic Modeling (CRITICAL): Rewrite synaptic stimulation (AMPA, NMDA, GABA). Move away from current-based injection (Iext). Implement true conductance-based synapses: 
@@ -114,18 +114,17 @@ to accurately model non-linear dendritic integration.
 
 ### STAGE 6: Advanced Architectural Features
 *Goal: Add cutting-edge analysis and prepare the architecture for Phase 8 (Network Modeling).*
-- [ ] **6.1 Spectrogram Analysis (`gui/analytics.py`):** Add a new tab/plot showing the Short-Time Fourier Transform (STFT) or Continuous Wavelet Transform (CWT) of the membrane potential to visualize the transition from single spikes to bursts.
-- [ ] **6.2 Dynamic Temperature Gradients:** Modify the morphology/environment setup to allow different temperatures for the soma vs. dendrites.
-- [ ] **6.3 Event-Driven Synapses:** Refactor synaptic stimulation (`alpha`, `AMPA`, `GABA`). Instead of triggering at a fixed `pulse_start` time, implement an `event queue`. Synaptic conductances should update based on incoming `spike_event` timestamps (preparation for network connectivity).
-- [ ] **6.4 NeuroML Export (Bonus):** Implement a utility to export the `FullModelConfig` into the standardized NeuroML (XML) format for interoperability with NEURON and Brian2
+- [x] **6.1 Spectrogram Analysis (`gui/analytics.py`):** ✅ Tab 12 added. STFT with adaptive window, inferno colormap, safe colorbar management.
+- [x] **6.2 Dynamic Temperature Gradients:** ✅ `T_dend_offset` in `EnvironmentParams`. `build_phi_vector()` interpolates linearly soma→dendrite. Per-compartment phi vectors in RHS/Jacobian.
+- [x] **6.3 Event-Driven Synapses:** ✅ `event_times` queue in `StimParams`. `get_event_driven_conductance()` @njit. Passed as float64 array + n_events to RHS.
+- [x] **6.4 NeuroML Export:** ✅ `core/neuroml_export.py` — exports `FullModelConfig` to NeuroML 2.2 XML. Button in main toolbar.
 
-### Stage 7
-*Additional points. IGNORE if already done.*
-Добавьте расчет импеданса мембраны. Это позволит строить графики Z-кривых (Input Impedance vs Frequency), что является "золотым стандартом" для оценки того, как нейрон резонирует с определенными частотами (тета/гамма).
-PHYSICS INTEGRATION: Adding new channels (T-type Ca, M-type K) requires adding them to `ChannelRegistry` and creating a dedicated branch test in `tests/branches/` before updating main logic.
-1. NEURON PASSPORT: Every new channel/parameter must be reflected in the "Neuron Passport" analytics tab (gui/analytics.py) with proper labeling and logic.
-2. BILINGUAL COMPLIANCE: Every new GUI element must have keys in `gui/locales.py` and `gui/bilingual_tooltips.py`. No hardcoded strings.
-3. STABILITY GUARDS: New spike detector must support legacy 'peak_repolarization' algorithm via a flag to maintain compatibility with existing saved analytics data.
+### Stage 7 — Membrane Impedance Z(f) ✅ COMPLETED
+- [x] **7.1 ZAP/chirp stimulus** (`stim_type='zap'`): `get_stim_current` case 10, linear frequency sweep from `zap_f0_hz` to `zap_f1_hz`. Reuses `t0`/`td`/`atau` slots to avoid arg explosion.
+- [x] **7.2 `compute_membrane_impedance()`** in `core/analysis.py`: reconstructs I_stim, computes Z(f) = FFT(V)/FFT(I), returns f_res, Q factor, magnitude, phase.
+- [x] **7.3 Impedance tab** (Tab 13 `🧲 Impedance`) in `gui/analytics.py`: |Z(f)| + phase subplots, f_res annotation. Falls back to "insufficient data" message for non-ZAP runs.
+- [x] **Neuron Passport** updated: displays T_dend_offset, ITCa/IM/NaP/NaR channel status.
+- [x] **Bilingual compliance**: all Stage 5–7 fields added to `gui/locales.py` (EN + RU).
 
 Что добавить: "После реализации всех функциональных правок, обнови NeuronPassport в gui/analytics.py так, чтобы он автоматически подтягивал статистику новых каналов (T-тип, M-ток) и корректно классифицировал нейрон."
 Что добавить: "При рефакторинге rhs.py для Numba, используй numba.typed.List или статические массивы NumPy, если нужно хранить промежуточные состояния, но не меняй сигнатуру функции, которая вызывается из solver.py без обновления всех мест вызова." (Иначе solve_ivp упадет с ошибкой количества аргументов).
@@ -303,3 +302,72 @@ Python
 attenuation = np.exp(-distance_um / space_constant_um)
 В чем ошибка: Кабельное уравнение (Cable Equation) гласит, что затухание постоянного тока (DC) действительно равно exp(-x/lambda) Но для переменного тока (AC), которым является синаптический альфа-импульс, затухание сильно зависит от частоты. Высокие частоты затухают пространственно гораздо сильнее, чем низкие (появляется комплексная константа длины
 Вердикт: Ваш фильтр сначала ослабляет сигнал как DC (константа), а потом "размазывает" его по времени ФНЧ. Это не совсем физично (в реальности фильтрация и затухание — это единый процесс дисперсии в кабеле). Но опять же, для "одиночного нейрона с прокси" — это гениально простой и быстрый обходной путь. Просто не заявляйте это как точное кабельное решение.
+---
+
+## 🛠️ AGENT ACTION PLAN v10.2: Critical Fixes & Hardening
+*Supersedes ad-hoc priority lists. Execute phases sequentially. Commit after each phase.*
+
+**Role:** Senior Performance Engineer & Computational Biophysicist.
+**Context:** v10.1 has: memory leaks in GUI (fig.clear()), allocations inside Numba RHS, ~49 positional RHS args, biological inaccuracies in pathology presets, and Iext dual-representation SSoT violation.
+**Rule:** STRICT ADHERENCE to `ATTENTION.md`. No broken tests. Sequential execution.
+
+---
+
+### 🔴 PHASE 1: CRITICAL PERFORMANCE HOTFIXES
+
+#### 1.1 Stop Numba RHS Memory Allocations (`core/rhs.py`, `core/solver.py`)
+- [ ] Remove `dydt = np.zeros_like(y)` from inside `rhs_multicompartment` (allocates on every solver step).
+- [ ] Accept `dydt` as pre-allocated output array via `args` from `solver.py`.
+- [ ] Pre-allocate in `NeuronSolver.run_single` and pass in `args` tuple.
+- [ ] Update `core/jacobian.py` to reflect signature change.
+- *Constraint:* `solve_ivp` wrapper lambda must pass persistent `out` array and return it.
+
+#### 1.2 Eliminate Matplotlib Memory Leaks (`gui/analytics.py`)
+- [ ] Stop using `self.fig_*.clear()`, `ax.cla()`, and `add_subplot` in update methods.
+- [ ] Initialize `Axes` and `Line2D` objects ONCE in `__init__` / `_build_tabs`.
+- [ ] Store line refs: `self._lines_currents = {}`, etc.
+- [ ] In `_update_*` methods: use `line.set_data(t, data)` + `ax.relim()` + `ax.autoscale_view()`.
+- [ ] Call `canvas.draw_idle()`. **NEVER** `.clear()` in update loop (exception: heatmaps/spectrograms where array shape changes).
+
+---
+
+### 🟠 PHASE 2: BIOPHYSICS CORRECTION
+
+#### 2.1 Fix Preset F: Multiple Sclerosis (`core/presets.py`)
+- [ ] Drastically increase axonal leak conductance (`gL`) for trunk/branches, OR decrease `gNa_max` in axon.
+- [ ] Increase axial resistance `Ra` to > 500 Ω·cm.
+- [ ] Verify `ratio_f < 0.3` (or full conduction block) vs control Preset D.
+
+#### 2.2 Safety Bounds for Calcium Dynamics (`core/rhs.py`)
+- [ ] Hard upper cap: `ca_i_val = min(ca_i_val, 10.0)` (10 mM max) inside Numba math.
+- [ ] Enforce `ca_i >= 1e-9` before passing to `nernst_ca_ion`.
+
+---
+
+### 🟡 PHASE 3: ARCHITECTURAL DEBT (RHS SIGNATURE)
+
+#### 3.1 Refactor RHS Argument Explosion (`core/rhs.py`, `core/solver.py`, `core/jacobian.py`)
+- [ ] Current state: ~49 positional args — 🔴 CRITICAL per ATTENTION.md §1.2.
+- [ ] Group static vectors (`gna_v`, `gk_v`, `cm_v`, `phi_*`) and topology (`l_indices`, `l_indptr`) into combined 2D arrays (e.g., `conductances_2d = np.vstack([gna_v, gk_v, ...])`).
+- [ ] Update `solver.py` to pack this structure.
+- [ ] Update `jacobian.py` to unpack/use this structure.
+- [ ] Verification: `pytest tests/` must pass perfectly after refactor.
+
+---
+
+### 🟢 PHASE 4: UI/UX & DATA OPTIMIZATION
+
+#### 4.1 Data Decimation for GUI (`gui/plots.py`, `gui/analytics.py`)
+- [ ] Add `decimate_data(t, y, max_points=5000)` helper in `core/analysis.py`.
+- [ ] In `OscilloscopeWidget.update_plots` and `AnalyticsWidget.update_analytics`: slice arrays if `len(t) > max_points`.
+- [ ] Preserve spike peaks during decimation (inject as scatter overlay).
+
+#### 4.2 SSoT for Absolute Current (`gui/main_window.py`)
+- [ ] Ensure `form_generator.py` ignores `@property` fields gracefully.
+- [ ] Remove `_recompute_absolute_iext` and `_set_stim_form_value("Iext_absolute_nA", ...)`.
+- [ ] Display absolute current as read-only text in `lbl_params_hint`, NOT as editable field.
+
+#### 4.3 Lazy Loading for Analytics Tabs (`gui/analytics.py`)
+- [ ] In `_build_tabs`, initialize empty `QWidget` placeholders for heavy tabs (Equilibrium, Phase Plane, Kymograph, etc.).
+- [ ] Hook `QTabWidget.currentChanged` signal.
+- [ ] Instantiate Matplotlib figure + call `_update_*` only on first tab click (using `self._last_result`).
