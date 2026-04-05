@@ -206,6 +206,14 @@ def validate_rhs_args_values(values: Mapping[str, Any]) -> None:
     if stype not in valid_stypes:
         raise ValueError(f"Invalid stype={stype}: unsupported stimulation type")
 
+    valid_stypes = (0, 1, 2, 4, 5, 6, 7, 8, 9, 10)
+    stype = int(values["stype"])
+    stype_2 = int(values["stype_2"])
+    if stype not in valid_stypes:
+        raise ValueError(f"Invalid stype={stype}: unsupported stimulation type")
+    if stype_2 not in valid_stypes:
+        raise ValueError(f"Invalid stype_2={stype_2}: unsupported stimulation type")
+
     stim_comp = int(values["stim_comp"])
     if not (0 <= stim_comp < n_comp):
         raise ValueError(f"Invalid stim_comp={stim_comp} for n_comp={n_comp}")
