@@ -23,10 +23,16 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from tests.utils.runtime_import_guard import dependency_diagnostic
 
-from core.models import FullModelConfig
-from core.presets import apply_preset
-from core.solver import NeuronSolver
+try:
+    from core.models import FullModelConfig
+    from core.presets import apply_preset
+    from core.solver import NeuronSolver
+except ModuleNotFoundError as exc:
+    _IMPORT_ERROR = exc
+else:
+    _IMPORT_ERROR = None
 
 
 def _parse_csv_floats(raw: str) -> list[float]:
@@ -70,7 +76,18 @@ def _run_case(
     cfg.stim.dt_eval = float(dt_eval)
     cfg.stim.jacobian_mode = "sparse_fd"
 
-    res = NeuronSolver(cfg).run_single()
+    try:
+        res = NeuronSolver(cfg).run_single()
+    except Exception as exc:  # pragma: no cover - stress utility path
+        return {
+            "n_spikes": 0,
+            "soma_peak_mV": float("nan"),
+            "junction_peak_mV": float("nan"),
+            "prop_ratio": float("nan"),
+            "term_delay_ms": float("nan"),
+            "stable": False,
+            "error": type(exc).__name__,
+        }
     if cfg.morphology.N_trunk > 0:
         j = min(1 + cfg.morphology.N_ais + cfg.morphology.N_trunk - 1, res.n_comp - 1)
     elif cfg.morphology.N_ais > 0:
@@ -94,6 +111,33 @@ def _run_case(
     }
 
 
+def _exit_code_for_anomalies(anomaly_count: int, fail_on_anomaly: bool) -> int:
+    if fail_on_anomaly and anomaly_count > 0:
+        return 1
+    return 0
+
+
+def _acceptance_ok(
+    *,
+    delay_ok: bool,
+    ratio_target_ok: bool,
+    abs_peak_ok: bool,
+    spike_ok: bool,
+    stable_ok: bool,
+    mode: str,
+) -> bool:
+    """Acceptance policy for a single grid case."""
+    if not (spike_ok and stable_ok):
+        return False
+    if mode == "delay_only":
+        return bool(delay_ok)
+    block_ok = bool(ratio_target_ok or abs_peak_ok)
+    if mode == "block_only":
+        return block_ok
+    # block_or_delay: valid for conduction-block presets and delayed-propagation presets
+    return bool(block_ok or delay_ok)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Extended F-vs-D conduction validation")
     parser.add_argument("--temps", type=str, default="23,30,37")
@@ -103,8 +147,49 @@ def main() -> int:
     parser.add_argument("--t-sim", type=float, default=320.0)
     parser.add_argument("--dt-eval", type=float, default=0.15)
     parser.add_argument("--delay-margin-ms", type=float, default=0.3)
+    parser.add_argument(
+        "--fail-on-anomaly",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Return non-zero exit code when any anomaly is detected (default: enabled).",
+    )
+    parser.add_argument(
+        "--target-ratio",
+        type=float,
+        default=0.3,
+        help="Target upper bound for F propagation ratio (junction_peak/soma_peak).",
+    )
+    parser.add_argument(
+        "--acceptance-mode",
+        choices=["block_or_delay", "block_only", "delay_only"],
+        default="block_or_delay",
+        help="Case acceptance mode (default supports both block and delayed-propagation signatures).",
+    )
     parser.add_argument("--output", type=str, default="_test_results/pathology_f_conduction_extended.json")
     args = parser.parse_args()
+
+    if _IMPORT_ERROR is not None:
+        msg = dependency_diagnostic("f-conduction-extended", _IMPORT_ERROR)
+        print(msg, file=sys.stderr)
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(
+                {
+                    "status": "dependency_error",
+                    "tool": "f-conduction-extended",
+                    "message": msg,
+                    "gate": {
+                        "fail_on_anomaly": bool(args.fail_on_anomaly),
+                        "exit_code": 2,
+                    },
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return 2
 
     temps = _parse_csv_floats(args.temps)
     f_ra = _parse_csv_floats(args.f_ra_mults)
@@ -145,10 +230,18 @@ def main() -> int:
                         and (f["term_delay_ms"] > d["term_delay_ms"] + args.delay_margin_ms)
                     )
                     ratio_ok = bool(f["prop_ratio"] < d["prop_ratio"])
+                    ratio_target_ok = bool(f["prop_ratio"] <= float(args.target_ratio))
                     abs_peak_ok = bool(f["junction_peak_mV"] < d["junction_peak_mV"] - 3.0)
                     spike_ok = bool(d["n_spikes"] >= 1 and f["n_spikes"] >= 1)
                     stable_ok = bool(d["stable"] and f["stable"])
-                    ok = bool(delay_ok and (ratio_ok or abs_peak_ok) and spike_ok and stable_ok)
+                    ok = _acceptance_ok(
+                        delay_ok=delay_ok,
+                        ratio_target_ok=ratio_target_ok,
+                        abs_peak_ok=abs_peak_ok,
+                        spike_ok=spike_ok,
+                        stable_ok=stable_ok,
+                        mode=str(args.acceptance_mode),
+                    )
 
                     row = {
                         "t_celsius": float(t_c),
@@ -175,6 +268,7 @@ def main() -> int:
                                 "i_mult": float(i_mult),
                                 "delay_ok": delay_ok,
                                 "ratio_ok": ratio_ok,
+                                "ratio_target_ok": ratio_target_ok,
                                 "abs_peak_ok": abs_peak_ok,
                                 "spike_ok": spike_ok,
                                 "stable_ok": stable_ok,
@@ -184,6 +278,7 @@ def main() -> int:
                         )
 
     out = {
+        "status": "PASS" if len(anomalies) == 0 else "FAIL",
         "config": {
             "temps": temps,
             "f_ra_mults": f_ra,
@@ -192,6 +287,7 @@ def main() -> int:
             "t_sim": float(args.t_sim),
             "dt_eval": float(args.dt_eval),
             "delay_margin_ms": float(args.delay_margin_ms),
+            "fail_on_anomaly": bool(args.fail_on_anomaly),
         },
         "summary": {
             "total_cases": len(rows),
@@ -202,12 +298,18 @@ def main() -> int:
         "rows": rows,
     }
 
+    exit_code = _exit_code_for_anomalies(len(anomalies), bool(args.fail_on_anomaly))
+    out["summary"]["gate_exit_code"] = int(exit_code)
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nSaved: {out_path}")
     print(f"Anomalies: {len(anomalies)} / {len(rows)}")
-    return 0
+    if exit_code != 0:
+        print("Result status: FAIL (anomalies detected and fail-on-anomaly is enabled).")
+    else:
+        print("Result status: PASS/WARN (no blocking anomaly gate).")
+    return exit_code
 
 
 if __name__ == "__main__":

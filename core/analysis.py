@@ -1298,7 +1298,7 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         "lyapunov_class": "disabled",
         "lyapunov_valid_pairs": 0,
     }
-    should_compute_lyapunov = getattr(ana, "enable_lyapunov", False) if compute_lyapunov is None else bool(compute_lyapunov)
+    should_compute_lyapunov = bool(compute_lyapunov) if compute_lyapunov is not None else False
     if should_compute_lyapunov:
         lyap_raw = estimate_ftle_lle(
             V,

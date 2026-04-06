@@ -323,14 +323,19 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 7. ПАТОЛОГИЯ: РАССЕЯННЫЙ СКЛЕРОЗ (Демиелинизация) ---
     elif "Multiple Sclerosis" in name:
         apply_preset(cfg, "alpha-Motoneuron (Powers 2001)")
-        # Stronger axial resistance increase to emphasize impaired conduction.
-        cfg.morphology.Ra = 450.0  # Demyelination: 70 → 450 (axial resistance ↑)
-        cfg.channels.gL = 1.2  # Increased leak: 0.3 → 1.2 (exposed membrane)
+        # Severe demyelination profile:
+        # - high axial resistance (internodal conduction impairment),
+        # - high leak shunt + higher effective membrane capacitance (myelin loss),
+        # - reduced Na drive to favor distal propagation failure/block.
+        cfg.morphology.Ra = 900.0
+        cfg.channels.gL = 3.2
+        cfg.channels.gNa_max = 45.0
+        cfg.channels.Cm = 6.0
         cfg.stim.jacobian_mode = 'sparse_fd'
-        # Pathology signature: reduced spike amplitude (~21 vs ~34 mV) due to leak shunt
+        # Keep the same input class as control; pathology should emerge from membrane/cable changes.
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.5
-        cfg.stim.Iext = 50.0  # Same as base motoneuron
+        cfg.stim.Iext = 50.0
 
     # --- 8. ПАТОЛОГИЯ: ЭПИЛЕПСИЯ (SCN1A GAIN-OF-FUNCTION) ---
     elif "Epilepsy" in name:
