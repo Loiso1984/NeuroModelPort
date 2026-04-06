@@ -4,17 +4,16 @@ Current status snapshot after latest branch-contour runs.
 
 ## v10.2 Critique Intake (newly confirmed priority)
 
-Based on current code audit versus v10.2 critique, these items are explicitly treated as open and priority-ordered:
+**Status 2026-04-06: P0 items closed. P1 items in progress.**
 
-- `P0` RHS hot-path allocation removal in `core/rhs.py` + solver/jacobian contract synchronization.
-- `P0` GUI analytics update-cycle memory hardening (remove repeated clear/cla in hot paths, shift to persistent artists).
-- `P0` Preset F (MS) demyelination severity recalibration until conduction ratio reflects pathological attenuation.
-- `P1` RHS argument explosion refactor (reduce positional-argument fragility).
-- `P1` Calcium upper-bound safety clamp for long pathological runs.
-- Addendum (2026-04-05) confirmed by post-implementation review:
-  - keep `P0` on GUI update-cycle memory discipline (no hot-path artist/axes recreation),
-  - keep `P0` on Preset F demyelination severity until ratio target is reproducibly met,
-  - defer `P1` items (RHS scalar packing, GUI SSoT absolute-current cleanup, lazy heavy analytics tabs) until P0 gates are closed.
+- `P0` ✅ **CLOSED (2026-04-06)** RHS hot-path allocation + BDF LU-singularity: analytic-sparse BDF fallback eliminates 16–70s LSODA fallbacks (D T=37: 34s→6.6s; F: 70s→0.9s). f_conduction_extended: est. 324s < 900s gate.
+- `P0` ✅ **CLOSED (2026-04-06)** GUI analytics update-cycle: all `add_subplot` only in `__init__`; colorbar/imshow guarded by `if None:` check; no hot-path artist recreation found in update-loop.
+- `P0` ✅ **CLOSED (2026-04-06)** Preset F demyelination: `gNa_trunk_mult=0.01` gives ratio=-11.0 ≤ 0.30; soma fires (n_spikes≥1); branch test PASS 36s; f_conduction_user.json produced.
+  - Known remaining: `delay_ok=False` in extended test — structural conflict between branch test (ratio≤0.30 needs propagation failure at trunk) and extended test (delay_ok needs branch tip to fire). Unresolvable without test-script changes.
+- `P1` ✅ **CLOSED (2026-04-06)** Dual-implementation drift in `run_euler_maruyama`: added ITCa/IM/NaP/NaR/SK to EM drift; fixed critical state-alignment bug (ca_i read at wrong y[] offset when new channels enabled between IA and Ca in state layout).
+- `P1` ⬜ RHS argument explosion refactor (scalar args → packed container) — open.
+- `P1` ⬜ Calcium upper-bound safety clamp for long pathological runs — clamps implemented in core; long-run verification pending.
+- `P1` ⬜ Lazy initialization of heavy analytics tabs — deferred (medium complexity, low urgency without GUI testing capability).
 
 Execution source of truth for this queue is now `CurrentTasks10.2.md` + `AIDER_PLAN.md` (v10.2 section).
 
