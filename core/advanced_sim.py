@@ -239,7 +239,11 @@ def run_euler_maruyama(config: FullModelConfig,
                                 ar_Ih, br_Ih,
                                 as_Ca, bs_Ca, au_Ca, bu_Ca,
                                 aa_IA, ba_IA, ab_IA, bb_IA,
-                                z_inf_SK)
+                                z_inf_SK,
+                                am_TCa, bm_TCa, ah_TCa, bh_TCa,
+                                aw_IM, bw_IM,
+                                ax_NaP, bx_NaP,
+                                ay_NaR, by_NaR, aj_NaR, bj_NaR)
     from scipy.sparse import csr_matrix
 
     cfg    = config
@@ -300,6 +304,16 @@ def run_euler_maruyama(config: FullModelConfig,
 
         r = np.zeros(n_comp); s = np.zeros(n_comp)
         u = np.zeros(n_comp); a = np.zeros(n_comp); b = np.zeros(n_comp)
+        # T-type Ca (ITCa): gates p (activation), q (inactivation)
+        p = np.zeros(n_comp); q = np.ones(n_comp)
+        # M-type K (IM): gate w
+        w = np.zeros(n_comp)
+        # Persistent Na (NaP): gate x
+        x_nap = np.zeros(n_comp)
+        # Resurgent Na (NaR): gates y_nr (activation), j_nr (inactivation)
+        y_nr = np.zeros(n_comp); j_nr = np.ones(n_comp)
+        # SK Ca-activated K: gate z_sk
+        z_sk = np.zeros(n_comp)
 
         if ch.enable_Ih:
             r = y[cur:cur + n_comp];  cur += n_comp
@@ -309,6 +323,18 @@ def run_euler_maruyama(config: FullModelConfig,
         if ch.enable_IA:
             a = y[cur:cur + n_comp];  cur += n_comp
             b = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_ITCa:
+            p = y[cur:cur + n_comp];  cur += n_comp
+            q = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_IM:
+            w = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_NaP:
+            x_nap = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_NaR:
+            y_nr = y[cur:cur + n_comp];  cur += n_comp
+            j_nr = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_SK:
+            z_sk = y[cur:cur + n_comp];  cur += n_comp
 
         ca_i = np.full(n_comp, cfg.calcium.Ca_rest)
         if dyn_ca:
@@ -326,12 +352,22 @@ def run_euler_maruyama(config: FullModelConfig,
             eca = nernst_ca_ion(ca_i[0], cfg.calcium.Ca_ext, t_kelvin) if dyn_ca else 120.0
             I_ca_c = morph['gCa_v'] * (s ** 2) * u * (V - eca)
             I_ion += I_ca_c
-            I_ca_total = I_ca_c
+            I_ca_total += I_ca_c
         if ch.enable_IA:
             I_ion += morph['gA_v'] * a * b * (V - ch.E_A)
+        if ch.enable_ITCa:
+            eca_t = nernst_ca_ion(ca_i[0], cfg.calcium.Ca_ext, t_kelvin) if dyn_ca else 120.0
+            I_ca_t = morph['gTCa_v'] * (p ** 2) * q * (V - eca_t)
+            I_ion += I_ca_t
+            I_ca_total += I_ca_t
+        if ch.enable_IM:
+            I_ion += morph['gIM_v'] * w * (V - ch.EK)
+        if ch.enable_NaP:
+            I_ion += morph['gNaP_v'] * x_nap * (V - ch.ENa)
+        if ch.enable_NaR:
+            I_ion += morph['gNaR_v'] * (y_nr ** 3) * j_nr * (V - ch.ENa)
         if ch.enable_SK:
-            for i in range(n_comp):
-                I_ion[i] += morph['gSK_v'][i] * z_inf_SK(ca_i[i]) * (V[i] - ch.EK)
+            I_ion += morph['gSK_v'] * z_sk * (V - ch.EK)
 
         I_ax    = L.dot(V)
         I_stim  = np.zeros(n_comp)
@@ -372,6 +408,28 @@ def run_euler_maruyama(config: FullModelConfig,
             ab_v = ab_IA(V);  bb_v = bb_IA(V)
             dy[cur:cur + n_comp] = phi_ia_v * (aa_v * (1 - a) - ba_v * a);  cur += n_comp
             dy[cur:cur + n_comp] = phi_ia_v * (ab_v * (1 - b) - bb_v * b);  cur += n_comp
+        if ch.enable_ITCa:
+            ap_v = am_TCa(V);  bp_v = bm_TCa(V)
+            aq_v = ah_TCa(V);  bq_v = bh_TCa(V)
+            dy[cur:cur + n_comp] = phi_ca_v * (ap_v * (1 - p) - bp_v * p);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_ca_v * (aq_v * (1 - q) - bq_v * q);  cur += n_comp
+        if ch.enable_IM:
+            aw_v = aw_IM(V);  bw_v = bw_IM(V)
+            # IM is a slow channel (muscarinic) — use Na phi as proxy (no Q10 for IM yet)
+            dy[cur:cur + n_comp] = phi_na_v * (aw_v * (1 - w) - bw_v * w);  cur += n_comp
+        if ch.enable_NaP:
+            axp_v = ax_NaP(V);  bxp_v = bx_NaP(V)
+            dy[cur:cur + n_comp] = phi_na_v * (axp_v * (1 - x_nap) - bxp_v * x_nap);  cur += n_comp
+        if ch.enable_NaR:
+            aynr_v = ay_NaR(V);  bynr_v = by_NaR(V)
+            ajnr_v = aj_NaR(V);  bjnr_v = bj_NaR(V)
+            dy[cur:cur + n_comp] = phi_na_v * (aynr_v * (1 - y_nr) - bynr_v * y_nr);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_na_v * (ajnr_v * (1 - j_nr) - bjnr_v * j_nr);  cur += n_comp
+        if ch.enable_SK:
+            # SK gate z: fast kinetic approximation z → z_inf(Ca) with tau_sk
+            tau_sk = getattr(ch, 'tau_sk', 10.0)
+            z_inf_v = np.vectorize(z_inf_SK)(ca_i)
+            dy[cur:cur + n_comp] = (z_inf_v - z_sk) / tau_sk;  cur += n_comp
         if dyn_ca:
             dca = (-b_ca_v * I_ca_total
                    - (ca_i - cfg.calcium.Ca_rest) / cfg.calcium.tau_Ca)

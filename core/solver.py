@@ -333,6 +333,11 @@ class NeuronSolver:
             en_im=cfg.channels.enable_IM,
             en_nap=cfg.channels.enable_NaP,
             en_nar=cfg.channels.enable_NaR,
+            # Pass per-compartment gNa so the sparsity builder can omit
+            # m/h→V connections for near-zero Na compartments (demyelinated
+            # trunk).  Prevents SuperLU "Factor is exactly singular" when
+            # gNa_trunk_mult << 1 creates 35 nearly-identical passive rows.
+            gNa_v=morph.get("gNa_v"),
         )
         if jacobian_mode == "sparse_fd":
             jacobian_options["jac_sparsity"] = build_jacobian_sparsity(**_sparsity_kwargs)
@@ -362,16 +367,54 @@ class NeuronSolver:
                 **opts,
             )
 
+        # Build analytic-sparse Jacobian closure once (used as fast fallback
+        # when sparse/dense FD produces a singular LU factor).
+        _analytic_jac_opts: dict = {}
+        if jacobian_mode in ("sparse_fd", "dense_fd"):
+            try:
+                _as_sparsity = build_jacobian_sparsity(**_sparsity_kwargs)
+                _as_raw = make_analytic_jacobian(_as_sparsity)
+                def _as_jac_fn(t, y):
+                    return _as_raw(t, y, *args)
+                _analytic_jac_opts = {"jac": _as_jac_fn}
+            except Exception:
+                _analytic_jac_opts = {}  # analytic fallback unavailable
+
+        def _solve_analytic_bdf(rtol: float, atol: float):
+            """BDF with exact analytic Jacobian — fast fallback for FD singularity."""
+            return solve_ivp(
+                _rhs_fn,
+                (0.0, cfg.stim.t_sim),
+                y0,
+                method="BDF",
+                t_eval=t_eval,
+                rtol=rtol,
+                atol=atol,
+                max_step=max_step,
+                dense_output=False,
+                **_analytic_jac_opts,
+            )
+
         try:
             sol = _solve("BDF", rtol=1e-5, atol=1e-7, use_jacobian=True)
             bdf_exception_message = None
         except Exception as exc:
             # Some sparse factorization failures (e.g., exactly singular Jacobian)
             # can propagate from SciPy internals before `sol.success` is populated.
-            # Treat this path as a BDF failure and fall back to LSODA.
             bdf_exception_message = f"{type(exc).__name__}: {exc}"
             logger.warning("Primary integrator crashed during BDF step: %s", bdf_exception_message)
-            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            # First try analytic Jacobian (fast, exact) before expensive LSODA fallback.
+            if _analytic_jac_opts and jacobian_mode != "analytic_sparse":
+                try:
+                    sol = _solve_analytic_bdf(rtol=1e-5, atol=1e-7)
+                    if sol.success:
+                        logger.info("BDF(analytic) recovered from FD singularity.")
+                    else:
+                        sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+                except Exception:
+                    sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            else:
+                sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
             if not sol.success:
                 raise RuntimeError(
                     "Integrator failed after fallback. "
@@ -386,15 +429,25 @@ class NeuronSolver:
         if not sol.success:
             first_message = str(sol.message)
             logger.warning("Primary integrator failed (BDF): %s", first_message)
-            # Fallback for stiff/ill-conditioned episodes where BDF can fail with
-            # "Required step size is less than spacing between numbers."
-            # LSODA often recovers these trajectories by switching methods internally.
-            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
-            if not sol.success:
-                raise RuntimeError(
-                    "Integrator failed after fallback. "
-                    f"BDF='{first_message}'; LSODA='{sol.message}'"
-                )
+            # Fallback hierarchy when BDF reports step-size failure:
+            # 1. Try analytic sparse Jacobian with BDF (fast, exact, avoids FD issues).
+            # 2. If analytic BDF also fails, fall back to LSODA (robust but slow).
+            analytic_sol = None
+            if _analytic_jac_opts and jacobian_mode != "analytic_sparse":
+                try:
+                    analytic_sol = _solve_analytic_bdf(rtol=1e-5, atol=1e-7)
+                except Exception:
+                    analytic_sol = None
+            if analytic_sol is not None and analytic_sol.success:
+                sol = analytic_sol
+                logger.info("BDF(analytic) recovered from step-size failure.")
+            else:
+                sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+                if not sol.success:
+                    raise RuntimeError(
+                        "Integrator failed after fallback. "
+                        f"BDF='{first_message}'; LSODA='{sol.message}'"
+                    )
 
         res = SimulationResult(sol.t, sol.y, n_comp, cfg)
         self._post_process_physics(res, morph)
