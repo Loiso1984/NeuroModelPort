@@ -323,38 +323,19 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 7. ПАТОЛОГИЯ: РАССЕЯННЫЙ СКЛЕРОЗ (Демиелинизация) ---
     elif "Multiple Sclerosis" in name:
         apply_preset(cfg, "alpha-Motoneuron (Powers 2001)")
-        # Demyelination profile — literature-validated parameter set:
-        #
-        # Ra = 300 Ω·cm (4.3× base 70): increased axial resistance due to loss of
-        #   compact myelin sheath; Bostock & Sears 1978, J Physiol 280:273.
-        #
-        # gL = 2.0 mS/cm² (6.7× base 0.3): exposed paranodal and juxtaparanodal
-        #   membrane channels (Kv1 leak); Rasband & Trimmer 2001, J Neurosci 21:1311.
-        #
-        # gNa_max = 80 mS/cm²: soma + AIS retain Na channels (nodal regions preserved
-        #   in early MS); Craner et al. 2004, Brain 127:294.
-        #
-        # gNa_trunk_mult = 0.01: internodal membrane has ~1% of nodal Na density
-        #   (normal internodal ~25/µm² vs node ~20 000/µm²; Waxman 1977).
-        #   This is the primary mechanism of conduction block: without Na regeneration
-        #   in the trunk, the AP decays passively (λ ≈ 91 µm, trunk = 700 µm = 7.7 λ).
-        #
-        # Cm = 2.0 µF/cm² (1.33× base): loss of compact myelin raises effective
-        #   membrane capacitance toward unmyelinated values.
-        cfg.morphology.Ra = 300.0
-        cfg.channels.gL = 2.0
-        cfg.channels.gNa_max = 80.0
-        cfg.channels.Cm = 2.0
-        cfg.morphology.gNa_trunk_mult = 0.01
-        # AIS Na enrichment reduced: demyelination disrupts nodal Na-channel clustering.
-        # Default 40× causes autonomous AIS pacemaking (dV/dt > 0 at rest) with high gL.
-        # 5× still allows AIS AP initiation when soma fires, but prevents spontaneous AIS firing.
-        cfg.morphology.gNa_ais_mult = 5.0
+        # Severe demyelination profile:
+        # - high axial resistance (internodal conduction impairment),
+        # - high leak shunt + higher effective membrane capacitance (myelin loss),
+        # - reduced Na drive to favor distal propagation failure/block.
+        cfg.morphology.Ra = 900.0
+        cfg.channels.gL = 3.2
+        cfg.channels.gNa_max = 45.0
+        cfg.channels.Cm = 6.0
         cfg.stim.jacobian_mode = 'sparse_fd'
-        # Direct somatic stimulation; const drive ensures soma fires despite elevated leak.
-        cfg.stim_location.location = 'soma'
-        cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 80.0
+        # Keep the same input class as control; pathology should emerge from membrane/cable changes.
+        cfg.stim.stim_type = 'alpha'
+        cfg.stim.alpha_tau = 1.5
+        cfg.stim.Iext = 50.0
 
     # --- 8. ПАТОЛОГИЯ: ЭПИЛЕПСИЯ (SCN1A GAIN-OF-FUNCTION) ---
     elif "Epilepsy" in name:

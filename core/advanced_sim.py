@@ -408,28 +408,6 @@ def run_euler_maruyama(config: FullModelConfig,
             ab_v = ab_IA(V);  bb_v = bb_IA(V)
             dy[cur:cur + n_comp] = phi_ia_v * (aa_v * (1 - a) - ba_v * a);  cur += n_comp
             dy[cur:cur + n_comp] = phi_ia_v * (ab_v * (1 - b) - bb_v * b);  cur += n_comp
-        if ch.enable_ITCa:
-            ap_v = am_TCa(V);  bp_v = bm_TCa(V)
-            aq_v = ah_TCa(V);  bq_v = bh_TCa(V)
-            dy[cur:cur + n_comp] = phi_ca_v * (ap_v * (1 - p) - bp_v * p);  cur += n_comp
-            dy[cur:cur + n_comp] = phi_ca_v * (aq_v * (1 - q) - bq_v * q);  cur += n_comp
-        if ch.enable_IM:
-            aw_v = aw_IM(V);  bw_v = bw_IM(V)
-            # IM is a slow channel (muscarinic) — use Na phi as proxy (no Q10 for IM yet)
-            dy[cur:cur + n_comp] = phi_na_v * (aw_v * (1 - w) - bw_v * w);  cur += n_comp
-        if ch.enable_NaP:
-            axp_v = ax_NaP(V);  bxp_v = bx_NaP(V)
-            dy[cur:cur + n_comp] = phi_na_v * (axp_v * (1 - x_nap) - bxp_v * x_nap);  cur += n_comp
-        if ch.enable_NaR:
-            aynr_v = ay_NaR(V);  bynr_v = by_NaR(V)
-            ajnr_v = aj_NaR(V);  bjnr_v = bj_NaR(V)
-            dy[cur:cur + n_comp] = phi_na_v * (aynr_v * (1 - y_nr) - bynr_v * y_nr);  cur += n_comp
-            dy[cur:cur + n_comp] = phi_na_v * (ajnr_v * (1 - j_nr) - bjnr_v * j_nr);  cur += n_comp
-        if ch.enable_SK:
-            # SK gate z: fast kinetic approximation z → z_inf(Ca) with tau_sk
-            tau_sk = getattr(ch, 'tau_sk', 10.0)
-            z_inf_v = np.vectorize(z_inf_SK)(ca_i)
-            dy[cur:cur + n_comp] = (z_inf_v - z_sk) / tau_sk;  cur += n_comp
         if dyn_ca:
             dca = (-b_ca_v * I_ca_total
                    - (ca_i - cfg.calcium.Ca_rest) / cfg.calcium.tau_Ca)

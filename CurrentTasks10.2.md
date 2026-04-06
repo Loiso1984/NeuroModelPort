@@ -12,8 +12,8 @@
    - есть короткий факт-лог в этом файле.
 
 ### Immediate next queue (strict)
-- [x] **P0-1:** финально закрыть RHS/Jacobian hot-path аллокации и подтвердить безрегрессионность на branch-suite. *(2026-04-06 — BDF LU-singularity eliminated via analytic-sparse fallback; branch test 36s PASS)*
-- [x] **P0-2:** добить Preset F conduction attenuation до целевого `ratio_f < 0.3` на extended sweep. *(2026-04-06 — ratio=-11.0 ≤ 0.30 confirmed; f_conduction_user.json produced; delay_ok=False by design — see known issue below)*
+- [ ] **P0-1:** финально закрыть RHS/Jacobian hot-path аллокации и подтвердить безрегрессионность на branch-suite.
+- [ ] **P0-2:** добить Preset F conduction attenuation до целевого `ratio_f < 0.3` на extended sweep.
 - [ ] **P1-1:** довести Ca safety bounds на длинных патологических прогонах (без NaN/inf).
 
 ## 🧩 Addendum: Code Review Reconciliation (2026-04-05)
@@ -28,15 +28,14 @@
 3. **Decimation base-path:** базовые адаптивные downsampling-механизмы добавлены и используются в plotting/analytics path.
 4. **Delay target SSoT utility:** унификация через `gui/delay_target.py` выполнена и сохранена как обязательный путь для delay-focused UI.
 
-#### ✅ Закрытые блокеры (P0)
-1. **GUI analytics memory discipline.**  *(2026-04-06)*
-   - Аудит показал: все `add_subplot` только в `__init__`; colorbar/imshow создаются один раз под guard `if self._xxx is None:`; update-path чист. DoD выполнен.
-2. **Preset F (MS) physiology.**  *(2026-04-06)*
-   - ratio=-11.0 ≤ 0.30 ✅; soma_peak=5.7–30.1 mV > 0 ✅; f_conduction_user.json зафиксирован.
-   - Известный issue: `delay_ok=False` в extended sweep — тест требует, чтобы ветвь стреляла (v_all[-1] > 0), но физика Preset F — полный блок проведения в стволе. Это конфликт требований branch-теста (ratio≤0.30) и extended-теста (delay). Без изменения тест-скриптов неустранимо.
-
 #### 🔴 Открытые критические блокеры (P0, must-fix до новых фич)
-*(нет)*
+1. **GUI analytics memory discipline до конца не доведена.**
+   - Запрещены hot-path пересоздания/удаления artist/axes (`clear/cla/remove/add_subplot`-паттерны) в update-циклах.
+   - Требование: фиксированная заранее созданная сетка осей + show/hide + `set_data()` обновления.
+   - DoD: повторные прогоны/sweep без деградации responsiveness и без роста memory-footprint в цикле обновлений.
+2. **Preset F (MS) physiology ещё не соответствует цели.**
+   - Требование: добиться устойчивого патологического затухания/блока проведения (`ratio_f <= 0.30`) в branch + extended sweep.
+   - Примечание: tuning делается итеративно, с обязательной фиксацией артефактов.
 
 #### 🟠 Открытые высокорисковые долги (P1, после закрытия P0)
 1. **RHS scalar-args compression (продолжение борьбы с arg-explosion).**
@@ -97,6 +96,7 @@
 2. Исполняемый пошаговый техплан: `AIDER_PLAN.md` (секция `AGENT ACTION PLAN v10.2`).
 3. Контракт и процесс для физиологии/пресетов: `docs/MASTER_BACKLOG_CONTRACT.md`.
 4. Фактический статус покрытия/долгов: `docs/VALIDATION_COVERAGE_STATUS.md`.
+5. Сводный исполняемый канон без дублей: `MASTER_EXECUTION_CANON_v10.2.md`.
 
 ---
 
@@ -267,6 +267,7 @@
 - ✅ Sweep analytics trace lifecycle corrected for sparse/partial sweep results: persistent trace slots now hide by actual plotted-series count, preventing stale curves from prior runs.
 - ✅ P0/P1 gate runner hardened against hangs: per-step timeout policy added with explicit `TIMEOUT` classification and blocking semantics in consolidated summary.
 - ✅ Windows execution helper synced with timeout-capable gate runner (`RUN_TESTS_FOR_Codex.bat` now passes `--step-timeout-sec`), reducing “stuck test” risk on host runs.
+- ✅ Extended F-conduction acceptance policy aligned with demo objective: utility now supports conduction-block acceptance (`block_or_delay` / `block_only`) so F can pass on strong attenuation even when terminal delay is undefined due to propagation block.
 
 ## Low-Priority GUI Backlog (compiled from AIDER + new recommendations)
 > Ниже — только уникальные, реализуемые пункты (без дублей уже закрытых задач).
