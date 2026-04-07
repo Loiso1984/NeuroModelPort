@@ -33,6 +33,8 @@ RHS_ARG_ORDER: tuple[str, ...] = (
     "dual_stim_enabled",
     "stype_2", "iext_2", "t0_2", "td_2", "atau_2", "zap_f0_hz_2", "zap_f1_hz_2", "stim_comp_2", "stim_mode_2",
     "use_dfilter_secondary", "dfilter_attenuation_2", "dfilter_tau_ms_2",
+    # Stochastic parameters
+    "stoch_gating", "noise_sigma", "rng_state",
 )
 
 RHS_ARG_INDEX: dict[str, int] = {name: i for i, name in enumerate(RHS_ARG_ORDER)}

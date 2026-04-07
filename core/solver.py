@@ -10,6 +10,7 @@ from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import rhs_multicompartment, F_CONST, R_GAS
 from core.rhs_contract import pack_rhs_args, validate_rhs_args_values
+from core.physics_params import create_physics_params
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
 
@@ -300,14 +301,16 @@ class NeuronSolver:
             "dfilter_tau_ms_2": dfilter_tau_ms_2,
         }
         validate_rhs_args_values(rhs_values)
-        args = pack_rhs_args(rhs_values)
+        
+        # Create structured PhysicsParams container
+        physics_params = create_physics_params(**rhs_values)
 
         # Pre-allocate the RHS output buffer once. rhs_multicompartment zeroes
         # it in-place via a Numba loop (no np.zeros_like heap alloc per step).
         _dydt_buf = np.empty(len(y0), dtype=np.float64)
 
         def _rhs_fn(t, y):
-            return rhs_multicompartment(t, y, *args, _dydt_buf)
+            return rhs_multicompartment(t, y, physics_params, _dydt_buf)
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
 
@@ -344,9 +347,9 @@ class NeuronSolver:
         elif jacobian_mode == "analytic_sparse":
             sparsity = build_jacobian_sparsity(**_sparsity_kwargs)
             _jac_raw = make_analytic_jacobian(sparsity)
-            # Wrap as closure: jacobian uses physics args only (no dydt buffer).
+            # Wrap as closure: jacobian uses physics params only (no dydt buffer).
             def _jac_fn(t, y):
-                return _jac_raw(t, y, *args)
+                return _jac_raw(t, y, physics_params)
             jacobian_options["jac"] = _jac_fn
         elif jacobian_mode != "dense_fd":
             raise ValueError(f"Unsupported jacobian_mode={jacobian_mode}")
@@ -375,7 +378,7 @@ class NeuronSolver:
                 _as_sparsity = build_jacobian_sparsity(**_sparsity_kwargs)
                 _as_raw = make_analytic_jacobian(_as_sparsity)
                 def _as_jac_fn(t, y):
-                    return _as_raw(t, y, *args)
+                    return _as_raw(t, y, physics_params)
                 _analytic_jac_opts = {"jac": _as_jac_fn}
             except Exception:
                 _analytic_jac_opts = {}  # analytic fallback unavailable
@@ -565,19 +568,56 @@ class NeuronSolver:
         }
 
     # ─────────────────────────────────────────────────────────────────
-    def run_monte_carlo(self) -> list:
-        """Parallel Monte-Carlo: biological variability ±5% on gNa, gK."""
-        n_trials = self.config.analysis.mc_trials
+    def run_mc(self, n_trials: int = 10, param_var: float = 0.05,
+                progress_cb=None) -> list[SimulationResult]:
+        """
+        Monte-Carlo parameter sweep with stochastic reproducibility.
+        
+        Parameters
+        ----------
+        n_trials : int
+            Number of Monte-Carlo trials
+        param_var : float
+            Parameter variation (±%) for gNa/gK randomization
+        progress_cb : callable, optional
+            Progress callback function
+            
+        Returns
+        -------
+        list[SimulationResult]
+            Results from all Monte-Carlo trials
+        """
+        from core.stochastic_rng import get_rng
+        
         configs  = []
+        rng = get_rng()  # Use centralized RNG
+        
         for _ in range(n_trials):
             m_cfg = copy.deepcopy(self.config)
-            m_cfg.channels.gNa_max *= np.random.normal(1.0, 0.05)
-            m_cfg.channels.gK_max  *= np.random.normal(1.0, 0.05)
+            # Use centralized RNG for parameter variations
+            m_cfg.channels.gNa_max *= rng.normal(1.0, param_var)
+            m_cfg.channels.gK_max  *= rng.normal(1.0, param_var)
             configs.append(m_cfg)
 
         with ProcessPoolExecutor() as executor:
-            results = list(executor.map(worker_task, configs))
-        return results
+            futures = []
+            for i, cfg in enumerate(configs):
+                if progress_cb:
+                    progress_cb(i, n_trials, None)
+                futures.append(executor.submit(NeuronSolver(cfg).run_single))
+            
+            results = []
+            for i, future in enumerate(futures):
+                try:
+                    result = future.result()
+                    results.append(result)
+                    if progress_cb:
+                        progress_cb(i, n_trials, result)
+                except Exception as e:
+                    print(f"Monte-Carlo trial {i} failed: {e}")
+                    results.append(None)
+            
+            return results
 
     # ─────────────────────────────────────────────────────────────────
     def run_bifurcation(self) -> list:

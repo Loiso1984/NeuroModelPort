@@ -1013,7 +1013,8 @@ def estimate_spike_modulation(
     if surrogate_count > 0:
         s_count = int(surrogate_count)
         if s_count > 0:
-            rng = np.random.default_rng(20260404)
+            from core.stochastic_rng import get_rng
+            rng = get_rng()
             plv_surr = np.empty(s_count, dtype=float)
             for i in range(s_count):
                 st_surr = np.sort(rng.choice(t, size=len(st), replace=True))
