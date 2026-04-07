@@ -76,14 +76,14 @@ def apply_dual_preset(config: DualStimulationConfig, preset_name: str):
         # Demonstrates spatial integration and coincidence detection
         config.primary_location = "dendritic_filtered"
         config.primary_stim_type = "AMPA"
-        config.primary_Iext = 25.0
+        config.primary_Iext = 1.5
         config.primary_start = 10.0
         config.primary_duration = 5.0
         config.primary_alpha_tau = 2.0
         
         config.secondary_location = "dendritic_filtered"
         config.secondary_stim_type = "AMPA"
-        config.secondary_Iext = 20.0
+        config.secondary_Iext = 1.2
         config.secondary_start = 15.0  # Slightly delayed
         config.secondary_duration = 5.0
         config.secondary_alpha_tau = 2.0
@@ -101,14 +101,14 @@ def apply_dual_preset(config: DualStimulationConfig, preset_name: str):
         # Models hippocampal theta rhythm with ongoing activity
         config.primary_location = "soma"
         config.primary_stim_type = "pulse"
-        config.primary_Iext = 15.0
+        config.primary_Iext = 1.5
         config.primary_start = 10.0
         config.primary_duration = 0.5  # Short pulses
         config.primary_alpha_tau = 2.0
         
         config.secondary_location = "dendritic_filtered"
         config.secondary_stim_type = "const"
-        config.secondary_Iext = 5.0  # Background activity
+        config.secondary_Iext = 0.5  # Background activity
         config.secondary_start = 0.0
         config.secondary_duration = 200.0
         config.secondary_alpha_tau = 10.0
@@ -144,14 +144,14 @@ def apply_dual_preset(config: DualStimulationConfig, preset_name: str):
         # Maintains physiological firing rates
         config.primary_location = "soma"
         config.primary_stim_type = "alpha"
-        config.primary_Iext = 15.0
+        config.primary_Iext = 1.0
         config.primary_start = 10.0
         config.primary_duration = 3.0
         config.primary_alpha_tau = 2.5
         
         config.secondary_location = "dendritic_filtered"
         config.secondary_stim_type = "GABAA"
-        config.secondary_Iext = 10.0  # Balanced inhibition
+        config.secondary_Iext = 1.5  # Balanced inhibition
         config.secondary_start = 8.0  # Slightly before excitation
         config.secondary_duration = 60.0
         config.secondary_alpha_tau = 5.0

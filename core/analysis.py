@@ -112,9 +112,23 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
         return np.array([], dtype=int), np.array([]), np.array([])
 
     if len(V) != len(t):
+        import logging
+        length_diff = abs(len(V) - len(t))
+        if length_diff > 10:  # Significant mismatch
+            logging.error(f"Significant array length mismatch: V={len(V)}, t={len(t)} (diff={length_diff}). "
+                         "This indicates serious data integrity issues.")
+            raise ValueError(f"Array length mismatch too large ({length_diff} points). "
+                           f"Voltage: {len(V)}, Time: {len(t)}")
+        else:
+            logging.warning(f"Minor array length mismatch: V={len(V)}, t={len(t)} (diff={length_diff}). "
+                           "Truncating to minimum length.")
+        # Truncate to minimum length but warn user
         n = min(len(V), len(t))
         V = V[:n]
         t = t[:n]
+        if n < 10:
+            logging.error("Array length too short after truncation (< 10 points). Results may be unreliable.")
+            raise ValueError("Arrays too short after truncation for reliable analysis")
 
     dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.05
     dt_ms = max(dt_ms, 1e-6)
@@ -815,7 +829,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
     1) If dendritic filtering state exists in solution, use that directly.
     2) Otherwise reconstruct from configured stimulus equations.
     """
-    from core.rhs import get_stim_current
+    from core.rhs import get_stim_current, get_event_driven_conductance
 
     t = np.asarray(result.t, dtype=float)
     n = len(t)
@@ -840,18 +854,36 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             attenuation = float(
                 np.exp(-cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um)
             )
-        for i, ti in enumerate(t):
-            base = get_stim_current(
-                float(ti),
-                stype,
-                cfg.stim.Iext,
-                cfg.stim.pulse_start,
-                cfg.stim.pulse_dur,
-                cfg.stim.alpha_tau,
-                float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
-                float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
-            )
-            stim[i] += attenuation * float(base)
+        
+        # Check for event-driven synaptic stimulation
+        if (stype >= 4 and 
+            hasattr(cfg.stim, 'n_events') and cfg.stim.n_events > 0 and 
+            hasattr(cfg.stim, 'event_times_arr') and len(cfg.stim.event_times_arr) > 0):
+            # Use event-driven conductance for synaptic types
+            for i, ti in enumerate(t):
+                conductance = get_event_driven_conductance(
+                    float(ti),
+                    stype,
+                    cfg.stim.Iext,
+                    cfg.stim.event_times_arr,
+                    cfg.stim.n_events,
+                    cfg.stim.alpha_tau
+                )
+                stim[i] += attenuation * float(conductance)
+        else:
+            # Use regular stimulus current
+            for i, ti in enumerate(t):
+                base = get_stim_current(
+                    float(ti),
+                    stype,
+                    cfg.stim.Iext,
+                    cfg.stim.pulse_start,
+                    cfg.stim.pulse_dur,
+                    cfg.stim.alpha_tau,
+                    float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+                    float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+                )
+                stim[i] += attenuation * float(base)
 
     dual_cfg = getattr(cfg, "dual_stimulation", None)
     if dual_cfg is not None and getattr(dual_cfg, "enabled", False):

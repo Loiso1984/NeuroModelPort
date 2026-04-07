@@ -187,10 +187,7 @@ class AnalyticsWidget(QTabWidget):
         self.passport_view.setStyleSheet(
             "background:#0D1117; color:#C9D1D9; border:none;"
         )
-        self.addTab(self.passport_view, "🧬 Passport")
-
-        # 1 — Traces (pyqtgraph for interactivity)
-        self._build_traces_tab()
+        self.addTab(self.passport_view, "Passport")
 
         # 2 — Gate Dynamics (fixed pre-created grid; show/hide only in updates)
         self._gates_max_rows = 10  # Vm + up to 9 gate traces
@@ -226,8 +223,8 @@ class AnalyticsWidget(QTabWidget):
         self._currents_signature: tuple[str, ...] = ()
 
         # 2.6 — Spike Mechanism (why spikes attenuate)
-        self.fig_spike_mech, cvs = _mpl_fig(4, 1)
-        self.ax_spike_mech = [self.fig_spike_mech.add_subplot(4, 1, k) for k in range(1, 5)]
+        self.fig_spike_mech, cvs = _mpl_fig(2, 1)
+        self.ax_spike_mech = [self.fig_spike_mech.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_spike_mech.set_tight_layout({'pad': 2.5})
         self.addTab(_tab_with_toolbar(cvs), "🧪 Spike Mechanism")
         self.cvs_spike_mech = cvs
@@ -338,25 +335,6 @@ class AnalyticsWidget(QTabWidget):
         self._impedance_lines: dict[str, object] = {}
         self._impedance_texts: dict[str, object] = {}
 
-    def _build_traces_tab(self):
-        """pyqtgraph multi-compartment detail traces tab."""
-        win = pg.GraphicsLayoutWidget()
-        win.setBackground('w')
-        self.p_detail_v = win.addPlot(title="Membrane Potential — All Key Compartments")
-        self.p_detail_v.setLabel('left', 'V', units='mV')
-        self.p_detail_v.showGrid(x=True, y=True, alpha=0.3)
-        self.p_detail_v.addLegend(offset=(10, 10))
-        win.nextRow()
-        self.p_detail_ca = win.addPlot(title="Intracellular [Ca²⁺]ᵢ (soma)")
-        self.p_detail_ca.setLabel('left', '[Ca²⁺]', units='nM')
-        self.p_detail_ca.setLabel('bottom', 'Time', units='ms')
-        self.p_detail_ca.showGrid(x=True, y=True, alpha=0.3)
-        self.p_detail_ca.setXLink(self.p_detail_v)
-        self._detail_v_lines: dict[tuple[int, str], object] = {}
-        self._detail_trace_signature: tuple[tuple[int, str], ...] = ()
-        self._detail_ca_line = None
-        self.addTab(win, "📊 Traces")
-
     # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
     # ─────────────────────────────────────────────────────────────────
@@ -371,7 +349,6 @@ class AnalyticsWidget(QTabWidget):
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
         self._update_passport(result, stats)
-        self._update_traces(result)
         self._update_gates(result)
         self._update_currents(result)
         self._update_spike_mechanism(result, stats)
@@ -450,6 +427,12 @@ class AnalyticsWidget(QTabWidget):
         modulation_high_hz = stats.get('modulation_band_high_hz', np.nan)
         dt_val = float(np.mean(np.diff(result.t))) if len(result.t) > 1 else 0.0
         current_stats = {}
+        
+        # Safety check for currents dictionary
+        if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
+            logging.error("SimulationResult missing or invalid currents attribute")
+            return
+            
         for name, curr in result.currents.items():
             if curr is None or len(curr) == 0:
                 continue
@@ -458,10 +441,12 @@ class AnalyticsWidget(QTabWidget):
             q_abs = float(np.sum(np.abs(curr)) * dt_val) if dt_val > 0 else np.nan
             current_stats[name] = (i_min, i_max, q_abs)
         dominant_current = "—"
+        # Fix np capture in lambda
+        isfinite = np.isfinite
         if current_stats:
             dominant_current = max(
                 current_stats.items(),
-                key=lambda kv: kv[1][2] if np.isfinite(kv[1][2]) else -1.0,
+                key=lambda kv: kv[1][2] if isfinite(kv[1][2]) else -1.0,
             )[0]
 
         def _first_crossing_ms(v_trace: np.ndarray, threshold: float = -20.0) -> float:
@@ -585,9 +570,11 @@ class AnalyticsWidget(QTabWidget):
             "║  CHANNEL ENGAGEMENT                                              ║",
             f"║    Dominant |Q| channel: {dominant_current:<10}                        ║",
         ]
+        # Fix np capture in lambda
+        isfinite = np.isfinite
         top_channels = sorted(
             current_stats.items(),
-            key=lambda kv: kv[1][2] if np.isfinite(kv[1][2]) else -1.0,
+            key=lambda kv: kv[1][2] if isfinite(kv[1][2]) else -1.0,
             reverse=True,
         )[:4]
         for name, (i_min, i_max, q_abs) in top_channels:
@@ -694,74 +681,6 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_impedance.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
-    #  1 — TRACES (pyqtgraph)
-    # ─────────────────────────────────────────────────────────────────
-    def _update_traces(self, result):
-        t = result.t
-        mc = result.config.morphology
-        n  = result.n_comp
-
-        comp_colors = ['b', 'r', 'm', 'g', 'c']
-        labels = ['Soma']
-        key_indices = [0]
-
-        if n > 1 and mc.N_ais > 0:
-            key_indices.append(1)
-            labels.append('AIS')
-        if mc.N_trunk > 0:
-            junc = 1 + mc.N_ais + mc.N_trunk - 1
-        elif mc.N_ais > 0:
-            junc = mc.N_ais
-        else:
-            junc = 0
-        if 1 <= junc < n:
-            key_indices.append(min(junc, n-1))
-            labels.append('Junction')
-        if n > 2:
-            key_indices.append(n - 1)
-            labels.append('Terminal')
-
-        desired_keys = tuple((int(idx), str(lbl)) for idx, lbl in zip(key_indices, labels))
-        if desired_keys != self._detail_trace_signature:
-            stale = [k for k in self._detail_v_lines.keys() if k not in desired_keys]
-            for k in stale:
-                self.p_detail_v.removeItem(self._detail_v_lines[k])
-                del self._detail_v_lines[k]
-            self._detail_trace_signature = desired_keys
-
-        for i, (idx, lbl) in enumerate(desired_keys):
-            color = comp_colors[i % len(comp_colors)]
-            key = (idx, lbl)
-            if key not in self._detail_v_lines:
-                self._detail_v_lines[key] = self.p_detail_v.plot(
-                    [],
-                    [],
-                    pen=pg.mkPen(color, width=2),
-                    name=lbl,
-                )
-            t_ds, v_ds = _downsample_xy(t, result.v_all[idx, :], max_points=2500)
-            self._detail_v_lines[key].setData(t_ds, v_ds)
-
-        if result.ca_i is not None:
-            if self._detail_ca_line is None:
-                self._detail_ca_line = self.p_detail_ca.plot(
-                    [],
-                    [],
-                    pen=pg.mkPen('b', width=2),
-                    name="[Ca²⁺]ᵢ soma",
-                )
-            t_ds, ca_ds = _downsample_xy(t, result.ca_i[0, :] * 1e6, max_points=2500)
-            self._detail_ca_line.setData(t_ds, ca_ds)
-            self.p_detail_ca.show()
-        else:
-            if self._detail_ca_line is not None:
-                self.p_detail_ca.removeItem(self._detail_ca_line)
-                self._detail_ca_line = None
-            self.p_detail_ca.hide()
-
-        self.p_detail_v.autoRange()
-
-    # ─────────────────────────────────────────────────────────────────
     #  2 — GATE DYNAMICS
     # ─────────────────────────────────────────────────────────────────
     def _update_gates(self, result):
@@ -825,6 +744,12 @@ class AnalyticsWidget(QTabWidget):
     def _update_currents(self, result):
         """Plot channel currents with membrane potential overlay."""
         t = result.t
+        
+        # Safety check for currents dictionary
+        if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
+            logging.error("SimulationResult missing or invalid currents attribute")
+            return
+            
         # Count non-zero current traces
         currents = {name: curr for name, curr in result.currents.items()
                     if np.max(np.abs(curr)) > 1e-9}
@@ -890,18 +815,20 @@ class AnalyticsWidget(QTabWidget):
     def _init_spike_mechanism_artists(self) -> None:
         if self._spike_mech_init_done:
             return
-        ax1, ax2, ax3, ax4 = self.ax_spike_mech
+        ax1, ax2 = self.ax_spike_mech
+        
+        # Row 1: Voltage trace with peaks and calcium overlay
         self._spike_mech_lines["ax1_vm"] = ax1.plot([], [], color="#2060CC", lw=2.0, label="V_soma")[0]
         self._spike_mech_lines["ax1_peaks"] = ax1.plot([], [], linestyle="None", marker="o", markersize=4.0, color="#AA3377", label="spike peaks")[0]
-        self._spike_mech_lines["ax2_peak_v"] = ax2.plot([], [], "o-", color="#1F77B4", lw=1.8, label="V_peak")[0]
-        self._spike_mech_ax2b = ax2.twinx()
-        self._spike_mech_lines["ax2_ca"] = self._spike_mech_ax2b.plot([], [], "s--", color="#D62728", lw=1.4, label="Ca_i@spike")[0]
-        self._spike_mech_texts["ax2_warn"] = ax2.text(0.02, 0.55, "", transform=ax2.transAxes, fontsize=10, color="#444444")
-        self._spike_mech_texts["ax3_reasons"] = ax3.text(
-            0.01, 0.02, "", transform=ax3.transAxes, fontsize=8.5, color="#333333",
+        self._spike_mech_ax2b = ax1.twinx()
+        self._spike_mech_lines["ax1_ca"] = self._spike_mech_ax2b.plot([], [], "s--", color="#D62728", lw=1.4, label="Ca_i@spike")[0]
+        
+        # Row 2: Channel activity with explanation
+        self._spike_mech_texts["ax2_reasons"] = ax2.text(
+            0.01, 0.02, "", transform=ax2.transAxes, fontsize=8.5, color="#333333",
             bbox=dict(boxstyle="round,pad=0.25", facecolor="#F8F8F8", edgecolor="#CCCCCC", alpha=0.9),
         )
-        self._spike_mech_texts["ax4_empty"] = ax4.text(0.02, 0.55, "", transform=ax4.transAxes, fontsize=9.5, color="#444444")
+        
         self._spike_mech_init_done = True
 
     def _update_spike_mechanism(self, result, stats: dict):
@@ -913,17 +840,17 @@ class AnalyticsWidget(QTabWidget):
         self._init_spike_mechanism_artists()
         t = np.asarray(result.t, dtype=float)
         v = np.asarray(result.v_soma, dtype=float)
-        ax1, ax2, ax3, ax4 = self.ax_spike_mech
+        ax1, ax2 = self.ax_spike_mech
+        
         for ax in self.ax_spike_mech:
             ax.set_axis_on()
             ax.set_visible(True)
-        self._spike_mech_texts["ax2_warn"].set_visible(False)
-        self._spike_mech_texts["ax4_empty"].set_visible(False)
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
         n_sp = len(spike_times)
 
+        # Row 1: Voltage trace with peaks and calcium overlay
         self._spike_mech_lines["ax1_vm"].set_data(t, v)
         if n_sp > 0:
             self._spike_mech_lines["ax1_peaks"].set_data(t[peak_idx], v[peak_idx])
@@ -931,6 +858,23 @@ class AnalyticsWidget(QTabWidget):
         else:
             self._spike_mech_lines["ax1_peaks"].set_data([], [])
             self._spike_mech_lines["ax1_peaks"].set_visible(False)
+        
+        # Add continuous calcium trace on secondary axis
+        if (result.ca_i is not None and 
+            len(result.ca_i) > 0 and 
+            result.ca_i.shape[0] > 0):
+            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
+            self._spike_mech_lines["ax1_ca"].set_data(t, ca_nM)
+            self._spike_mech_lines["ax1_ca"].set_visible(True)
+            self._spike_mech_ax2b.set_ylabel("[Ca²+]_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
+            self._spike_mech_ax2b.tick_params(axis="y", labelcolor="#D62728")
+            self._spike_mech_ax2b.relim()
+            self._spike_mech_ax2b.autoscale_view()
+        else:
+            self._spike_mech_lines["ax1_ca"].set_data([], [])
+            self._spike_mech_lines["ax1_ca"].set_visible(False)
+            self._spike_mech_ax2b.set_visible(False)
+
         _configure_ax_interactive(
             ax1,
             title=f"Spike Peaks Timeline (N={n_sp})",
@@ -939,158 +883,69 @@ class AnalyticsWidget(QTabWidget):
             show_legend=True,
         )
 
+        # Row 2: Channel activity with explanation
         if n_sp < 2:
-            self._spike_mech_texts["ax2_warn"].set_text("Need at least 2 spikes for attenuation diagnostics.")
-            self._spike_mech_texts["ax2_warn"].set_visible(True)
-            ax2.set_axis_off()
-            ax3.set_axis_off()
-            ax4.set_axis_off()
+            self._spike_mech_texts["ax2_reasons"].set_text("Need at least 2 spikes for attenuation diagnostics.")
+            ax2.clear()
+            ax2.text(0.5, 0.5, "Need at least 2 spikes for attenuation diagnostics.", 
+                    ha='center', va='center', transform=ax2.transAxes, fontsize=12)
             self.cvs_spike_mech.draw_idle()
             return
 
-        sp_no = np.arange(1, n_sp + 1)
-        peak_v = v[peak_idx]
-        self._spike_mech_lines["ax2_peak_v"].set_data(sp_no, peak_v)
-        self._spike_mech_lines["ax2_peak_v"].set_visible(True)
-        ax2.set_ylabel("Peak V (mV)", fontsize=10, fontweight="bold")
-        ax2.grid(True, alpha=0.25)
-        self._spike_mech_ax2b.set_ylabel("Ca_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
-        self._spike_mech_ax2b.tick_params(axis="y", labelcolor="#D62728")
-
-        if result.ca_i is not None and len(result.ca_i) > 0:
-            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
-            ca_sp = ca_nM[peak_idx]
-            self._spike_mech_lines["ax2_ca"].set_data(sp_no, ca_sp)
-            self._spike_mech_lines["ax2_ca"].set_visible(True)
-            self._spike_mech_ax2b.set_visible(True)
-            self._spike_mech_ax2b.relim()
-            self._spike_mech_ax2b.autoscale_view()
-        else:
-            self._spike_mech_lines["ax2_ca"].set_data([], [])
-            self._spike_mech_lines["ax2_ca"].set_visible(False)
-            self._spike_mech_ax2b.set_visible(False)
-
-        _configure_ax_interactive(
-            ax2,
-            title="Per-Spike Amplitude and Calcium Load",
-            xlabel="Spike #",
-            ylabel="Peak V (mV)",
-            show_legend=True,
-        )
-
-        curr_candidates = ["Na", "K", "ICa", "IA", "SK", "Ih", "Leak"]
-        traces = {k: np.asarray(result.currents[k], dtype=float) for k in curr_candidates if k in result.currents}
-        for line in self._spike_mech_curr_lines.values():
-            line.set_data([], [])
-            line.set_visible(False)
-        for name, tr in traces.items():
-            if name not in self._spike_mech_curr_lines:
-                self._spike_mech_curr_lines[name] = ax3.plot([], [], marker=".", lw=1.2, label=name, color=CHAN_COLORS.get(name, "#555555"))[0]
-            self._spike_mech_curr_lines[name].set_data(sp_no, tr[peak_idx])
-            self._spike_mech_curr_lines[name].set_visible(True)
-        _configure_ax_interactive(
-            ax3,
-            title="Currents Sampled at Spike Peaks",
-            xlabel="Spike #",
-            ylabel="I_channel (uA/cm2)",
-            show_legend=True,
-        )
-
-        # Time-resolved channel/Ca activity to explain attenuation causes.
+        # Time-resolved channel activity to explain attenuation causes
         dt = float(np.mean(np.diff(t))) if len(t) > 1 else 0.1
         smooth_pts = max(3, int(round(2.0 / max(dt, 1e-6))))
         if smooth_pts % 2 == 0:
             smooth_pts += 1
 
-        def _smooth(x: np.ndarray, n: int) -> np.ndarray:
-            if n <= 1:
-                return x
-            kernel = np.ones(n, dtype=float) / float(n)
-            return np.convolve(x, kernel, mode="same")
+        # Cache kernel for efficiency
+        _smooth_kernel = np.ones(smooth_pts) / smooth_pts
 
-        plotted = 0
+        def _smooth(x: np.ndarray) -> np.ndarray:
+            """Optimized smoothing using pre-computed kernel."""
+            if len(x) < smooth_pts or smooth_pts <= 1:
+                return x
+            return np.convolve(x, _smooth_kernel, mode='same')
+
+        # Plot normalized channel activity
+        curr_candidates = ["Na", "K", "ICa", "IA", "SK", "Ih", "Leak"]
+        
+        # Safety check for currents dictionary
+        if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
+            logging.error("SimulationResult missing or invalid currents attribute")
+            return
+            
+        traces = {k: np.asarray(result.currents[k], dtype=float) for k in curr_candidates if k in result.currents}
+        
         for line in self._spike_mech_norm_lines.values():
             line.set_data([], [])
             line.set_visible(False)
-        for name in ("Na", "K", "ICa", "IA", "SK", "Ih", "Leak"):
-            if name not in traces:
-                continue
-            y_abs = np.abs(_smooth(traces[name], smooth_pts))
-            ymax = float(np.max(y_abs))
-            if ymax <= 1e-12:
-                continue
-            key = f"norm_{name}"
-            if key not in self._spike_mech_norm_lines:
-                self._spike_mech_norm_lines[key] = ax4.plot([], [], lw=1.3, alpha=0.9, label=f"|I_{name}| norm", color=CHAN_COLORS.get(name, "#666666"))[0]
-            self._spike_mech_norm_lines[key].set_data(t, y_abs / ymax)
-            self._spike_mech_norm_lines[key].set_visible(True)
-            plotted += 1
+        
+        for name, tr in traces.items():
+            if name not in self._spike_mech_norm_lines:
+                self._spike_mech_norm_lines[name] = ax2.plot([], [], lw=1.5, label=f"|I_{name}| norm", 
+                                                            color=CHAN_COLORS.get(name, "#555555"))[0]
+            # Normalize and smooth
+            tr_norm = np.abs(tr) / (np.max(np.abs(tr)) + 1e-12)
+            tr_smooth = _smooth(tr_norm)
+            self._spike_mech_norm_lines[name].set_data(t, tr_smooth)
+            self._spike_mech_norm_lines[name].set_visible(True)
 
-        if result.ca_i is not None and len(result.ca_i) > 0:
-            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
-            ca_s = _smooth(ca_nM, smooth_pts)
-            ca_rng = float(np.max(ca_s) - np.min(ca_s))
-            if ca_rng > 1e-12:
-                ca_norm = (ca_s - np.min(ca_s)) / ca_rng
-                if "norm_ca" not in self._spike_mech_norm_lines:
-                    self._spike_mech_norm_lines["norm_ca"] = ax4.plot([], [], "--", lw=1.4, color="#D62728", label="Ca_i norm")[0]
-                self._spike_mech_norm_lines["norm_ca"].set_data(t, ca_norm)
-                self._spike_mech_norm_lines["norm_ca"].set_visible(True)
-                plotted += 1
+        _configure_ax_interactive(
+            ax2,
+            title="Time-Resolved Channel Activity (Normalized)",
+            xlabel="Time (ms)",
+            ylabel="|I|/max(|I|)",
+            show_legend=True,
+        )
 
-        if plotted == 0:
-            self._spike_mech_texts["ax4_empty"].set_text("No channel activity traces available for time-resolved causality view.")
-            self._spike_mech_texts["ax4_empty"].set_visible(True)
-            ax4.set_axis_off()
-        else:
-            _configure_ax_interactive(
-                ax4,
-                title="Time-Resolved Channel/Ca Activity (normalized, smoothed)",
-                xlabel="Time (ms)",
-                ylabel="Norm activity",
-                show_legend=True,
-            )
-
-        # Heuristic explanation block
-        peak_drop = float(peak_v[-1] - peak_v[0])
-        reasons = []
-        if peak_drop < -5.0:
-            reasons.append(f"Peak attenuation detected: ΔV_peak={peak_drop:.1f} mV")
-
-        if "Na" in traces:
-            na_mag = np.abs(traces["Na"][peak_idx])
-            if na_mag[0] > 1e-9:
-                na_rel = float((na_mag[-1] - na_mag[0]) / na_mag[0])
-                if na_rel < -0.20:
-                    reasons.append(f"Na drive decreased at peaks ({na_rel*100:.1f}%) -> possible Na inactivation")
-
-        k_like = None
-        if "SK" in traces:
-            k_like = np.abs(traces["SK"][peak_idx])
-            k_name = "SK"
-        elif "K" in traces:
-            k_like = np.abs(traces["K"][peak_idx])
-            k_name = "K"
-        else:
-            k_name = None
-        if k_like is not None and k_like[0] > 1e-9:
-            k_rel = float((k_like[-1] - k_like[0]) / k_like[0])
-            if k_rel > 0.20:
-                reasons.append(f"{k_name} outward component increased ({k_rel*100:.1f}%)")
-
-        if result.ca_i is not None and len(result.ca_i) > 0:
-            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
-            ca_sp = ca_nM[peak_idx]
-            if ca_sp[0] > 1e-9:
-                ca_rel = float((ca_sp[-1] - ca_sp[0]) / ca_sp[0])
-                if ca_rel > 0.25:
-                    reasons.append(f"Ca_i accumulation at peaks ({ca_rel*100:.1f}%) may promote adaptation/block")
-
-        if not reasons:
-            reasons = ["No dominant attenuation driver from peak-sampled metrics; inspect full-current traces."]
-
-        self._spike_mech_texts["ax3_reasons"].set_text(" | ".join(reasons[:3]))
-        self._spike_mech_texts["ax3_reasons"].set_visible(True)
+        # Add explanation text
+        explanation = ("Spike attenuation mechanisms:\n"
+                      "1. Na+ inactivation reduces available current\n"
+                      "2. K+ activation increases outward current\n"
+                      "3. Ca²+ accumulation activates SK channels (hyperpolarization)\n"
+                      "4. A-type K+ channels provide frequency-dependent adaptation")
+        self._spike_mech_texts["ax2_reasons"].set_text(explanation)
 
         self.cvs_spike_mech.draw_idle()
 
@@ -1201,37 +1056,51 @@ class AnalyticsWidget(QTabWidget):
         cfg   = result.config
         I_stm = cfg.stim.Iext if cfg.stim.stim_type == 'const' else 0.0
 
+        # Limit to last 300ms for better readability
+        max_time_ms = 300.0
+        if len(t) > 0 and t[-1] > max_time_ms:
+            start_idx = np.searchsorted(t, t[-1] - max_time_ms)
+            V_plot = V[start_idx:]
+            n_plot = n_t[start_idx:]
+            t_plot = t[start_idx:]
+        else:
+            V_plot = V
+            n_plot = n_t
+            t_plot = t
+
         V_rng               = np.linspace(-100, 60, 500)
         n_V_null, n_n_null  = compute_nullclines(V_rng, cfg, I_stm)
 
         ax = self.ax_phase
         if not self._phase_lines:
-            self._phase_lines["traj"] = ax.plot([], [], color='#F0B020', lw=1.5, zorder=3, label='AP trajectory')[0]
+            self._phase_lines["traj"] = ax.plot([], [], color='#F0B020', lw=1.5, zorder=3, label='AP trajectory (last 300ms)')[0]
             self._phase_lines["rest"] = ax.plot([], [], 'go', ms=8, zorder=5, label='Resting state')[0]
             self._phase_lines["spikes"] = ax.plot([], [], 'r*', ms=12, zorder=6, label='Spike peaks')[0]
-            self._phase_lines["n_null"] = ax.plot([], [], color='#40CC40', lw=2, ls='--', label='dn/dt = 0  (n∞)')[0]
+            self._phase_lines["n_null"] = ax.plot([], [], color='#40CC40', lw=2, ls='--', label='dn/dt = 0  (n\u221e)')[0]
             self._phase_lines["v_null"] = ax.plot([], [], color='#CC4040', lw=2, ls='--', label='dV/dt = 0')[0]
 
-        # Trajectory
-        self._phase_lines["traj"].set_data(V, n_t)
-        self._phase_lines["rest"].set_data([V[0]], [n_t[0]])
+        # Trajectory (limited to last 300ms)
+        self._phase_lines["traj"].set_data(V_plot, n_plot)
+        self._phase_lines["rest"].set_data([V_plot[0]], [n_plot[0]])
 
-        # Spike detection markers
+        # Spike detection markers (limited to last 300ms)
         if stats['n_spikes'] > 0:
             from core.analysis import detect_spikes
             pk_idx, _, _ = detect_spikes(V, t, **_spike_detect_kwargs_from_stats(stats))
-            self._phase_lines["spikes"].set_data(V[pk_idx], n_t[pk_idx])
+            # Filter spikes to only those in the last 300ms
+            recent_spikes = pk_idx[pk_idx >= start_idx] if len(t) > 0 and t[-1] > max_time_ms else pk_idx
+            self._phase_lines["spikes"].set_data(V[recent_spikes], n_t[recent_spikes])
         else:
             self._phase_lines["spikes"].set_data([], [])
 
-        # Nullclines
+        # Nullclines (unchanged)
         self._phase_lines["n_null"].set_data(V_rng, n_n_null)
         valid = ~np.isnan(n_V_null)
         self._phase_lines["v_null"].set_data(V_rng[valid], n_V_null[valid])
 
         ax.set_xlabel('V (mV)',  fontsize=11)
-        ax.set_ylabel('n  [K⁺ activation]', fontsize=11)
-        ax.set_title('Phase Plane  (V – n)  with Nullclines', fontsize=12)
+        ax.set_ylabel('n  [K\u207a activation]', fontsize=11)
+        ax.set_title(f'Phase Plane (V\u2013n) - Last {max_time_ms:.0f}ms', fontsize=12)
         ax.legend(fontsize=9)
         ax.grid(alpha=0.3)
         ax.set_xlim(-100, 60);  ax.set_ylim(-0.05, 1.05)
@@ -1245,7 +1114,7 @@ class AnalyticsWidget(QTabWidget):
         if cfg.channels.enable_Ih or cfg.channels.enable_ICa or cfg.channels.enable_IA:
             self._phase_warning_text = ax.text(
                 0.01, 0.01,
-                "⚠ Nullclines include Na+K+Leak only",
+                "\u26a0 Nullclines include Na+K+Leak only",
                 transform=ax.transAxes, fontsize=8, color='gray'
             )
 
@@ -1384,6 +1253,12 @@ class AnalyticsWidget(QTabWidget):
         P_total = np.zeros_like(t)
         active_q = set()
         active_p = set()
+        
+        # Safety check for currents dictionary
+        if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
+            logging.error("SimulationResult missing or invalid currents attribute")
+            return
+            
         for name, curr in result.currents.items():
             color = CHAN_COLORS.get(name, '#888888')
             E_rev = _get_E_rev(name, result.config.channels)

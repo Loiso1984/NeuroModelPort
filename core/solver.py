@@ -121,6 +121,28 @@ class NeuronSolver:
         for msg in validate_simulation_config(cfg):
             logger.warning("Simulation config warning: %s", msg)
         
+        # Auto-generate synaptic event train if requested
+        if cfg.stim.synaptic_train_type != 'none':
+            from core.stochastic_rng import get_rng
+            rng = get_rng()
+            t_start = cfg.stim.pulse_start
+            duration = cfg.stim.synaptic_train_duration_ms
+            freq_hz = cfg.stim.synaptic_train_freq_hz
+            
+            if cfg.stim.synaptic_train_type == 'regular':
+                isi_ms = 1000.0 / freq_hz
+                # Generate strictly periodic spikes
+                train = np.arange(t_start, t_start + duration, isi_ms).tolist()
+                cfg.stim.event_times = train
+            elif cfg.stim.synaptic_train_type == 'poisson':
+                # Generate Poisson spike train
+                rate_ms = freq_hz / 1000.0
+                expected_spikes = int(duration * rate_ms * 1.5) # Buffer
+                intervals = rng.exponential(1.0 / rate_ms, expected_spikes)
+                times = t_start + np.cumsum(intervals)
+                train = times[times < (t_start + duration)].tolist()
+                cfg.stim.event_times = train
+        
         # ── Simulation complexity estimation ──
         rt = estimate_simulation_runtime(cfg)
         if rt["estimated_seconds"] > 30.0:
@@ -427,6 +449,13 @@ class NeuronSolver:
         h  = y[2*n :3*n, :]
         nk = y[3*n :4*n, :]
 
+        # Safety check for required morph keys
+        required_keys = ['gNa_v', 'gK_v', 'gL_v']
+        for key in required_keys:
+            if key not in morph:
+                logger.error(f"Missing morph key: {key}")
+                return
+        
         res.currents['Na']   = morph['gNa_v'][0] * (m[0, :] ** 3) * h[0, :] * (v[0, :] - cfg.channels.ENa)
         res.currents['K']    = morph['gK_v'][0]  * (nk[0, :] ** 4) * (v[0, :] - cfg.channels.EK)
         res.currents['Leak'] = morph['gL_v'][0]  * (v[0, :] - cfg.channels.EL)
@@ -434,62 +463,86 @@ class NeuronSolver:
         cursor = 4 * n
 
         if cfg.channels.enable_Ih:
-            r = y[cursor:cursor + n, :]
-            res.currents['Ih'] = morph['gIh_v'][0] * r[0, :] * (v[0, :] - cfg.channels.E_Ih)
-            cursor += n
+            if 'gIh_v' in morph:
+                r = y[cursor:cursor + n, :]
+                res.currents['Ih'] = morph['gIh_v'][0] * r[0, :] * (v[0, :] - cfg.channels.E_Ih)
+                cursor += n
+            else:
+                logger.warning("Ih channel enabled but gIh_v missing from morph")
 
         if cfg.channels.enable_ICa:
-            s = y[cursor:cursor + n, :]
-            u = y[cursor + n:cursor + 2*n, :]
-            if cfg.calcium.dynamic_Ca and res.ca_i is not None:
-                t_kelvin = cfg.env.T_celsius + 273.15
-                ca_soma = np.maximum(res.ca_i[0, :], 1e-9)
-                e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_soma) * 1000.0
-            else:
-                e_ca = 120.0
-            res.currents['ICa'] = morph['gCa_v'][0] * (s[0, :] ** 2) * u[0, :] * (v[0, :] - e_ca)
-            cursor += 2 * n
-
-        if cfg.channels.enable_IA:
-            a = y[cursor:cursor + n, :]
-            b = y[cursor + n:cursor + 2*n, :]
-            res.currents['IA'] = morph['gA_v'][0] * a[0, :] * b[0, :] * (v[0, :] - cfg.channels.E_A)
-            cursor += 2 * n
-
-        if cfg.channels.enable_ITCa:
-            p_t = y[cursor:cursor + n, :]
-            q_t = y[cursor + n:cursor + 2*n, :]
-            if not cfg.channels.enable_ICa:
-                # e_ca not yet computed — compute here
+            if 'gCa_v' in morph:
+                s = y[cursor:cursor + n, :]
+                u = y[cursor + n:cursor + 2*n, :]
                 if cfg.calcium.dynamic_Ca and res.ca_i is not None:
                     t_kelvin = cfg.env.T_celsius + 273.15
                     ca_soma = np.maximum(res.ca_i[0, :], 1e-9)
                     e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_soma) * 1000.0
                 else:
                     e_ca = 120.0
-            res.currents['ITCa'] = morph['gTCa_v'][0] * (p_t[0, :] ** 2) * q_t[0, :] * (v[0, :] - e_ca)
-            cursor += 2 * n
+                res.currents['ICa'] = morph['gCa_v'][0] * (s[0, :] ** 2) * u[0, :] * (v[0, :] - e_ca)
+                cursor += 2 * n
+            else:
+                logger.warning("ICa channel enabled but gCa_v missing from morph")
+
+        if cfg.channels.enable_IA:
+            if 'gA_v' in morph:
+                a = y[cursor:cursor + n, :]
+                b = y[cursor + n:cursor + 2*n, :]
+                res.currents['IA'] = morph['gA_v'][0] * a[0, :] * b[0, :] * (v[0, :] - cfg.channels.E_A)
+                cursor += 2 * n
+            else:
+                logger.warning("IA channel enabled but gA_v missing from morph")
+
+        if cfg.channels.enable_ITCa:
+            if 'gTCa_v' in morph:
+                p_t = y[cursor:cursor + n, :]
+                q_t = y[cursor + n:cursor + 2*n, :]
+                if not cfg.channels.enable_ICa:
+                    # e_ca not yet computed - compute here
+                    if cfg.calcium.dynamic_Ca and res.ca_i is not None:
+                        t_kelvin = cfg.env.T_celsius + 273.15
+                        ca_soma = np.maximum(res.ca_i[0, :], 1e-9)
+                        e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_soma) * 1000.0
+                    else:
+                        e_ca = 120.0
+                res.currents['ITCa'] = morph['gTCa_v'][0] * (p_t[0, :] ** 2) * q_t[0, :] * (v[0, :] - e_ca)
+                cursor += 2 * n
+            else:
+                logger.warning("ITCa channel enabled but gTCa_v missing from morph")
 
         if cfg.channels.enable_IM:
-            w_m = y[cursor:cursor + n, :]
-            res.currents['IM'] = morph['gIM_v'][0] * w_m[0, :] * (v[0, :] - cfg.channels.EK)
-            cursor += n
+            if 'gIM_v' in morph:
+                w_m = y[cursor:cursor + n, :]
+                res.currents['IM'] = morph['gIM_v'][0] * w_m[0, :] * (v[0, :] - cfg.channels.EK)
+                cursor += n
+            else:
+                logger.warning("IM channel enabled but gIM_v missing from morph")
 
         if cfg.channels.enable_NaP:
-            x_p = y[cursor:cursor + n, :]
-            res.currents['NaP'] = morph['gNaP_v'][0] * x_p[0, :] * (v[0, :] - cfg.channels.ENa)
-            cursor += n
+            if 'gNaP_v' in morph:
+                x_p = y[cursor:cursor + n, :]
+                res.currents['NaP'] = morph['gNaP_v'][0] * x_p[0, :] * (v[0, :] - cfg.channels.ENa)
+                cursor += n
+            else:
+                logger.warning("NaP channel enabled but gNaP_v missing from morph")
 
         if cfg.channels.enable_NaR:
-            y_r = y[cursor:cursor + n, :]
-            j_r = y[cursor + n:cursor + 2*n, :]
-            res.currents['NaR'] = morph['gNaR_v'][0] * y_r[0, :] * j_r[0, :] * (v[0, :] - cfg.channels.ENa)
-            cursor += 2 * n
+            if 'gNaR_v' in morph:
+                y_r = y[cursor:cursor + n, :]
+                j_r = y[cursor + n:cursor + 2*n, :]
+                res.currents['NaR'] = morph['gNaR_v'][0] * y_r[0, :] * j_r[0, :] * (v[0, :] - cfg.channels.ENa)
+                cursor += 2 * n
+            else:
+                logger.warning("NaR channel enabled but gNaR_v missing from morph")
 
         if cfg.channels.enable_SK:
-            z_sk = y[cursor:cursor + n, :]
-            res.currents['SK'] = morph['gSK_v'][0] * z_sk[0, :] * (v[0, :] - cfg.channels.EK)
-            cursor += n
+            if 'gSK_v' in morph:
+                z_sk = y[cursor:cursor + n, :]
+                res.currents['SK'] = morph['gSK_v'][0] * z_sk[0, :] * (v[0, :] - cfg.channels.EK)
+                cursor += n
+            else:
+                logger.warning("SK channel enabled but gSK_v missing from morph")
 
         # ── ATP consumption estimate ──────────────────────────────────
         # Na+/K+-ATPase: 3 Na+ pumped per ATP hydrolysis (Skou 1957).
