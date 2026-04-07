@@ -115,8 +115,14 @@ class NeuronSolver:
 
     # ─────────────────────────────────────────────────────────────────
     def run_single(self, custom_config: FullModelConfig = None) -> SimulationResult:
-        """Run a single deterministic simulation (BDF integrator)."""
+        """Run a single deterministic simulation.
+
+        Dispatches to run_native() when jacobian_mode='native_hines',
+        otherwise uses the SciPy BDF integrator.
+        """
         cfg = custom_config or self.config
+        if cfg.stim.jacobian_mode == "native_hines":
+            return self.run_native(cfg)
         for msg in validate_simulation_config(cfg):
             logger.warning("Simulation config warning: %s", msg)
         
@@ -604,6 +610,201 @@ class NeuronSolver:
             'baseline': atp_baseline,
             'total': atp_total,
         }
+
+    # ─────────────────────────────────────────────────────────────────
+    def run_native(self, custom_config: "FullModelConfig | None" = None) -> SimulationResult:
+        """Run simulation with the native Hines solver (v11.0).
+
+        Uses a fixed-step Backward-Euler integrator with the O(N) Hines
+        tree solver instead of SciPy BDF.  Requires jacobian_mode='native_hines'.
+        Returns a standard SimulationResult compatible with the GUI and analytics.
+        """
+        from core.native_loop import run_native_loop
+
+        cfg = custom_config or self.config
+
+        morph  = MorphologyBuilder.build(cfg)
+        n_comp = morph["N_comp"]
+
+        y0 = self.registry.compute_initial_states(-65.0, cfg)
+
+        # ── Stimulus maps (mirrors run_single) ──
+        s_map = {
+            "const": 0, "pulse": 1, "alpha": 2, "ou_noise": 3,
+            "AMPA": 4, "NMDA": 5, "GABAA": 6, "GABAB": 7,
+            "Kainate": 8, "Nicotinic": 9, "zap": 10,
+        }
+        stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
+        t_kelvin = cfg.env.T_celsius + 273.15
+
+        stype = s_map.get(cfg.stim.stim_type, 0)
+        stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
+        use_dfilter_primary = int(
+            stim_mode == 2
+            and cfg.dendritic_filter.enabled
+            and cfg.dendritic_filter.tau_dendritic_ms > 0.0
+        )
+        if use_dfilter_primary == 1:
+            y0 = np.concatenate([y0, np.array([0.0])])
+        dfilter_attenuation = 1.0
+        if stim_mode == 2 and cfg.dendritic_filter.space_constant_um > 0:
+            dfilter_attenuation = np.exp(
+                -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
+            )
+        dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
+
+        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
+        zap_f0_2, zap_f1_2 = cfg.stim.zap_f0_hz, cfg.stim.zap_f1_hz
+        stim_comp_2, stim_mode_2 = 0, 0
+        use_dfilter_secondary = 0
+        dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
+        dual_stim_enabled = 0
+        dual_cfg = getattr(cfg, "dual_stimulation", None)
+        if dual_cfg is not None and getattr(dual_cfg, "enabled", False):
+            dual_stim_enabled = 1
+            stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
+            iext_2 = dual_cfg.secondary_Iext
+            t0_2 = dual_cfg.secondary_start
+            td_2 = dual_cfg.secondary_duration
+            atau_2 = dual_cfg.secondary_alpha_tau
+            stim_mode_2 = stim_mode_map.get(dual_cfg.secondary_location, 0)
+            zap_f0_2 = getattr(dual_cfg, "secondary_zap_f0_hz", zap_f0_2)
+            zap_f1_2 = getattr(dual_cfg, "secondary_zap_f1_hz", zap_f1_2)
+            dfilter_tau_ms_2 = dual_cfg.secondary_tau_dendritic_ms
+            use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
+            if use_dfilter_secondary == 1:
+                y0 = np.concatenate([y0, np.array([0.0])])
+            if stim_mode_2 == 2 and dual_cfg.secondary_space_constant_um > 0:
+                dfilter_attenuation_2 = np.exp(
+                    -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
+                )
+
+        # ── Reconstruct state offsets (must match rhs.py exactly) ──
+        cc = cfg.channels
+        cursor = 4 * n_comp  # V, m, h, n_K are always first 4*n_comp
+        off_m, off_h, off_n = n_comp, 2 * n_comp, 3 * n_comp
+
+        off_r = cursor
+        if cc.enable_Ih:
+            cursor += n_comp
+        off_s = off_u = cursor
+        if cc.enable_ICa:
+            off_s = cursor;  cursor += n_comp
+            off_u = cursor;  cursor += n_comp
+        off_a = off_b = cursor
+        if cc.enable_IA:
+            off_a = cursor;  cursor += n_comp
+            off_b = cursor;  cursor += n_comp
+        off_p = off_q = cursor
+        if cc.enable_ITCa:
+            off_p = cursor;  cursor += n_comp
+            off_q = cursor;  cursor += n_comp
+        off_w = cursor
+        if cc.enable_IM:
+            cursor += n_comp
+        off_x = cursor
+        if cc.enable_NaP:
+            cursor += n_comp
+        off_y = off_j = cursor
+        if cc.enable_NaR:
+            off_y = cursor;  cursor += n_comp
+            off_j = cursor;  cursor += n_comp
+        off_zsk = cursor
+        if cc.enable_SK:
+            cursor += n_comp
+        off_ca = cursor
+        if cfg.calcium.dynamic_Ca:
+            cursor += n_comp
+        off_vfilt_primary = cursor
+        if use_dfilter_primary == 1:
+            cursor += 1
+        off_vfilt_secondary = cursor
+
+        # ── Temperature scaling ──
+        phi_na  = cfg.env.build_phi_vector(cfg.env.Q10_Na,  n_comp)
+        phi_k   = cfg.env.build_phi_vector(cfg.env.Q10_K,   n_comp)
+        phi_ih  = cfg.env.build_phi_vector(cfg.env.Q10_Ih,  n_comp)
+        phi_ca  = cfg.env.build_phi_vector(cfg.env.Q10_Ca,  n_comp)
+        phi_nap = cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp)
+        phi_nar = cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp)
+
+        # ── Laplacian diagonal ──
+        import scipy.sparse
+        l_sparse = scipy.sparse.csr_matrix(
+            (morph["L_data"], morph["L_indices"], morph["L_indptr"]),
+            shape=(n_comp, n_comp),
+        )
+        l_diag = np.array(l_sparse.diagonal(), dtype=np.float64)  # all < 0
+
+        b_ca_v = self._build_b_ca_vector(cfg, morph)
+
+        # ── Fixed dt for native loop ──
+        dt = cfg.stim.dt_eval   # use output step as integration step
+
+        t_out, y_out = run_native_loop(
+            y0.astype(np.float64),
+            float(cfg.stim.t_sim),
+            float(dt),
+            float(cfg.stim.dt_eval),
+            # Morphology
+            int(n_comp),
+            morph["Cm_v"].astype(np.float64),
+            l_diag,
+            morph["parent_idx"].astype(np.int32),
+            morph["hines_order"].astype(np.int32),
+            morph["g_axial_to_parent"].astype(np.float64),
+            morph["g_axial_parent_to_child"].astype(np.float64),
+            # Conductance vectors
+            morph["gNa_v"], morph["gK_v"], morph["gL_v"],
+            morph["gIh_v"], morph["gCa_v"], morph["gA_v"],
+            morph["gSK_v"], morph["gTCa_v"], morph["gIM_v"],
+            morph["gNaP_v"], morph["gNaR_v"],
+            # Reversal potentials
+            float(cc.ENa), float(cc.EK), float(cc.EL),
+            float(cc.E_Ih), float(cc.E_A),
+            # Temperature scaling
+            phi_na, phi_k, phi_ih, phi_ca, phi_nap, phi_nar,
+            # Channel flags
+            bool(cc.enable_Ih), bool(cc.enable_ICa), bool(cc.enable_IA),
+            bool(cc.enable_SK), bool(cc.enable_ITCa), bool(cc.enable_IM),
+            bool(cc.enable_NaP), bool(cc.enable_NaR),
+            bool(cfg.calcium.dynamic_Ca),
+            # State offsets
+            int(off_m), int(off_h), int(off_n),
+            int(off_r), int(off_s), int(off_u),
+            int(off_a), int(off_b), int(off_p), int(off_q),
+            int(off_w), int(off_x), int(off_y), int(off_j),
+            int(off_zsk), int(off_ca),
+            int(off_vfilt_primary), int(off_vfilt_secondary),
+            int(use_dfilter_primary), int(use_dfilter_secondary),
+            float(dfilter_attenuation), float(dfilter_tau_ms),
+            float(dfilter_attenuation_2), float(dfilter_tau_ms_2),
+            # Calcium
+            float(cfg.calcium.Ca_rest), float(cfg.calcium.Ca_ext),
+            float(cfg.calcium.tau_Ca), b_ca_v, float(t_kelvin),
+            # SK
+            float(cc.tau_SK),
+            # Primary stimulus
+            int(stype),
+            float(cfg.stim.Iext), float(cfg.stim.pulse_start),
+            float(cfg.stim.pulse_dur), float(cfg.stim.alpha_tau),
+            float(cfg.stim.zap_f0_hz), float(cfg.stim.zap_f1_hz),
+            np.array(cfg.stim.event_times or [], dtype=np.float64),
+            int(len(cfg.stim.event_times or [])),
+            int(cfg.stim.stim_comp), int(stim_mode),
+            # Secondary stimulus
+            int(dual_stim_enabled),
+            int(stype_2), float(iext_2), float(t0_2), float(td_2), float(atau_2),
+            float(zap_f0_2), float(zap_f1_2),
+            np.array(getattr(cfg.stim, "event_times_2", None) or [], dtype=np.float64),
+            int(len(getattr(cfg.stim, "event_times_2", None) or [])),
+            int(stim_comp_2), int(stim_mode_2),
+        )
+
+        res = SimulationResult(t_out, y_out, n_comp, cfg)
+        self._post_process_physics(res, morph)
+        res.morph = morph
+        return res
 
     # ─────────────────────────────────────────────────────────────────
     def run_mc(self, n_trials: int = 10, param_var: float = 0.05,
