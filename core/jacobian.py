@@ -34,7 +34,6 @@ from .kinetics import (
     by_NaR,
 )
 from .rhs import CA_I_MAX_M_M, CA_I_MIN_M_M, F_CONST, R_GAS
-from .rhs_contract import RHS_ARG_COUNT, unpack_rhs_args
 from .physics_params import PhysicsParams, unpack_conductances, unpack_temperature_scaling
 
 _LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
@@ -712,23 +711,26 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             if en_ia and idx["a"] is not None:
                 a_row = idx["a"].start + i
                 b_row = idx["b"].start + i
-                _set(a_row, v_col, phi_ia[i] * (daa_v[i] * (1.0 - a[i]) - dba_v[i] * a[i]))
-                _set(a_row, a_row, -phi_ia[i] * (aa_v[i] + ba_v[i]))
-                _set(b_row, v_col, phi_ia[i] * (dab_v[i] * (1.0 - b[i]) - dbb_v[i] * b[i]))
-                _set(b_row, b_row, -phi_ia[i] * (ab_v[i] + bb_v[i]))
+                # A-current (IA) is a K channel — use phi_k (matches rhs.py)
+                _set(a_row, v_col, phi_k[i] * (daa_v[i] * (1.0 - a[i]) - dba_v[i] * a[i]))
+                _set(a_row, a_row, -phi_k[i] * (aa_v[i] + ba_v[i]))
+                _set(b_row, v_col, phi_k[i] * (dab_v[i] * (1.0 - b[i]) - dbb_v[i] * b[i]))
+                _set(b_row, b_row, -phi_k[i] * (ab_v[i] + bb_v[i]))
 
             if en_itca and idx["p"] is not None:
                 p_row = idx["p"].start + i
                 q_row = idx["q"].start + i
-                _set(p_row, v_col, phi_tca[i] * (damt_v[i] * (1.0 - p_g[i]) - dbmt_v[i] * p_g[i]))
-                _set(p_row, p_row, -phi_tca[i] * (amt_v[i] + bmt_v[i]))
-                _set(q_row, v_col, phi_tca[i] * (daht_v[i] * (1.0 - q_g[i]) - dbht_v[i] * q_g[i]))
-                _set(q_row, q_row, -phi_tca[i] * (aht_v[i] + bht_v[i]))
+                # T-type Ca is a Ca channel — use phi_ca (matches rhs.py)
+                _set(p_row, v_col, phi_ca[i] * (damt_v[i] * (1.0 - p_g[i]) - dbmt_v[i] * p_g[i]))
+                _set(p_row, p_row, -phi_ca[i] * (amt_v[i] + bmt_v[i]))
+                _set(q_row, v_col, phi_ca[i] * (daht_v[i] * (1.0 - q_g[i]) - dbht_v[i] * q_g[i]))
+                _set(q_row, q_row, -phi_ca[i] * (aht_v[i] + bht_v[i]))
 
             if en_im and idx["w"] is not None:
                 w_row = idx["w"].start + i
-                _set(w_row, v_col, phi_im[i] * (dawm_v[i] * (1.0 - w_g[i]) - dbwm_v[i] * w_g[i]))
-                _set(w_row, w_row, -phi_im[i] * (awm_v[i] + bwm_v[i]))
+                # M-type K (IM) is a K channel — use phi_k (matches rhs.py)
+                _set(w_row, v_col, phi_k[i] * (dawm_v[i] * (1.0 - w_g[i]) - dbwm_v[i] * w_g[i]))
+                _set(w_row, w_row, -phi_k[i] * (awm_v[i] + bwm_v[i]))
 
             if en_nap and idx["x"] is not None:
                 x_row = idx["x"].start + i
@@ -781,17 +783,22 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
     return jac_fn
 
 
-# Legacy interface for backward compatibility
+# Legacy interface — REMOVED.  rhs_contract.py was deleted in v11.0.
+# Use make_analytic_jacobian(sparsity) which returns a closure over PhysicsParams.
 def analytic_sparse_jacobian(*args, **kwargs):
-    """Fallback: creates lil_matrix each call. Use make_analytic_jacobian instead."""
-    if len(args) < 2:
-        raise ValueError("analytic_sparse_jacobian expects (t, y, *rhs_args)")
-    rhs_args = args[2:]
-    if len(rhs_args) != RHS_ARG_COUNT:
-        raise ValueError(
-            f"analytic_sparse_jacobian expected {RHS_ARG_COUNT} rhs args, got {len(rhs_args)}"
-        )
-    rhs = unpack_rhs_args(tuple(rhs_args))
+    """Removed in v11.0: positional-arg contract (rhs_contract.py) has been deleted.
+
+    Use make_analytic_jacobian(sparsity) instead, which accepts a PhysicsParams struct.
+    """
+    raise NotImplementedError(
+        "analytic_sparse_jacobian was removed in v11.0.  "
+        "Use make_analytic_jacobian(sparsity) which returns a closure over PhysicsParams."
+    )
+
+
+def _analytic_sparse_jacobian_impl(*args, **kwargs):
+    """Internal implementation — kept for reference; not called by any active path."""
+    rhs = args[2] if len(args) > 2 else {}
     n_comp = rhs["n_comp"]
     en_ih = rhs["en_ih"]
     en_ica = rhs["en_ica"]

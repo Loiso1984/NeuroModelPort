@@ -127,7 +127,12 @@ class OscilloscopeWidget(QWidget):
         self._curves_i:    dict = {}
         self._curves_ca:   dict = {}
         self._transient_items: list = []
-        self._ref_curve_v = None  # Will be created in update_plots
+        # Persistent reference curve — created once, never removed from the plot.
+        # ignoreBounds=True prevents it from affecting autoRange.
+        _ref_pen = pg.mkPen(color=(150, 150, 150, 100), width=1.5, style=Qt.PenStyle.DashLine)
+        self._ref_curve_v = pg.PlotDataItem([], [], pen=_ref_pen, name="Reference")
+        self._p_v.addItem(self._ref_curve_v, ignoreBounds=True)
+        self._ref_curve_v.setVisible(False)
 
     # ─────────────────────────────────────────────────────────────────
     def _title_html(self, text: str, color: str) -> str:
@@ -543,15 +548,22 @@ class OscilloscopeWidget(QWidget):
                     # Catch-all for unexpected errors but don't crash
                     logging.warning(f"Unexpected error during plot cleanup: {e}")
         self._transient_items = []
-        self._curves_v.clear()
-        self._curves_gate.clear()
-        self._curves_i.clear()
-        self._curves_ca.clear()
-        
-        # Clear reference curve if it exists
-        if self._ref_curve_v:
-            self._ref_curve_v.setData([], [])
-            self._ref_curve_v.setVisible(False)
+        # Hide and clear all persistent curve data (do NOT remove from plot)
+        for c in self._curves_v.values():
+            c.setData([], [])
+            c.setVisible(False)
+        for c in self._curves_gate.values():
+            c.setData([], [])
+            c.setVisible(False)
+        for c in self._curves_i.values():
+            c.setData([], [])
+            c.setVisible(False)
+        for c in self._curves_ca.values():
+            c.setData([], [])
+            c.setVisible(False)
+        # Reference curve is always initialised; just hide it
+        self._ref_curve_v.setData([], [])
+        self._ref_curve_v.setVisible(False)
         
         self._apply_grid_alpha()
         self._set_default_titles()
@@ -564,22 +576,17 @@ class OscilloscopeWidget(QWidget):
         self._last_mc_results = None
         
         # --- Handle Reference Trace (Comparison Mode) ---
-        # Capture reference BEFORE clearing current plots
+        # Capture reference data BEFORE clearing current plots.
+        # Uses setData/setVisible on the persistent curve — never removeItem/plot.
         if self._cb_keep_reference.isChecked():
-            # If we have a current soma trace, "ghost" it into a reference line
             if "Soma" in self._curves_v:
                 old_t, old_v = self._curves_v["Soma"].getData()
                 if old_t is not None and old_v is not None and len(old_t) > 0:
-                    # Remove old reference curve to prevent memory leak
-                    if self._ref_curve_v:
-                        self._p_v.removeItem(self._ref_curve_v)
-                    ref_pen = pg.mkPen(color=(150, 150, 150, 100), width=1.5, style=Qt.PenStyle.DashLine)
-                    self._ref_curve_v = self._p_v.plot(old_t, old_v, pen=ref_pen, name="Reference")
+                    self._ref_curve_v.setData(old_t, old_v)
+                    self._ref_curve_v.setVisible(True)
         else:
-            # Hide reference if mode is off
-            if self._ref_curve_v:
-                self._p_v.removeItem(self._ref_curve_v)
-                self._ref_curve_v = None
+            self._ref_curve_v.setData([], [])
+            self._ref_curve_v.setVisible(False)
         
         self.clear()
         self._sync_delay_controls(result)
@@ -798,19 +805,23 @@ class OscilloscopeWidget(QWidget):
         # Sync checkbox visibility
         self._sync_checkboxes(result)
 
-        # -- Calcium trace --
+        # -- Calcium trace (persistent artist) --
         if result.ca_i is not None:
             ca_pen = pg.mkPen(color="#F38BA8", width=2.0 * lw)
             t_ca, ca_nM = _downsample_xy(t, result.ca_i[0, :] * 1e6, max_points=budget_i)
-            c_ca = self._p_ca.plot(t_ca, ca_nM, pen=ca_pen, name="[Ca²+]_i")
-            self._curves_ca['calcium'] = c_ca
-            self._transient_items.append(c_ca)
+            c_ca = self._curves_ca.get('calcium')
+            if c_ca is None:
+                c_ca = self._p_ca.plot([], [], pen=ca_pen, name="[Ca²+]_i")
+                self._curves_ca['calcium'] = c_ca
+            else:
+                c_ca.setPen(ca_pen)
+            c_ca.setData(t_ca, ca_nM)
             c_ca.setVisible(self._cb_ca['calcium'].isChecked())
             self._p_ca.autoRange()
         else:
-            # Hide calcium plot if no calcium data
-            self._p_ca.clear()
-            self._curves_ca.clear()
+            if 'calcium' in self._curves_ca:
+                self._curves_ca['calcium'].setData([], [])
+                self._curves_ca['calcium'].setVisible(False)
 
         # ── Currents title with ATP estimate ──────────────────────────
         self._p_i.setTitle(

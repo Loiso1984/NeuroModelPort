@@ -69,6 +69,8 @@ class PhysicsParams(NamedTuple):
     zap_f1_hz: float64
     event_times_arr: np.ndarray
     n_events: int32
+    event_times_arr_2: np.ndarray
+    n_events_2: int32
     stim_comp: int32
     stim_mode: int32
     use_dfilter_primary: int32
@@ -109,10 +111,16 @@ def create_physics_params(**kwargs) -> PhysicsParams:
     Returns:
             PhysicsParams: Structured parameter container
     """
-    # Set default stochastic parameters only if not provided
-    defaults = {'stoch_gating': False, 'noise_sigma': 0.0, 'rng_state': None}
+    # Set defaults for optional fields if not provided
+    defaults = {
+        'stoch_gating': False,
+        'noise_sigma': 0.0,
+        'rng_state': None,
+        'event_times_arr_2': np.zeros(0, dtype=np.float64),
+        'n_events_2': np.int32(0),
+    }
     for k, v in defaults.items():
-        if k not in kwargs: 
+        if k not in kwargs:
             kwargs[k] = v
     
     return PhysicsParams(**kwargs)
