@@ -38,3 +38,29 @@ def test_exit_code_for_anomalies_policy():
     assert mod._exit_code_for_anomalies(anomaly_count=0, fail_on_anomaly=True) == 0
     assert mod._exit_code_for_anomalies(anomaly_count=3, fail_on_anomaly=False) == 0
     assert mod._exit_code_for_anomalies(anomaly_count=1, fail_on_anomaly=True) == 1
+
+
+def test_acceptance_policy_modes():
+    mod = importlib.import_module("tests.utils.run_f_conduction_extended")
+
+    base = dict(
+        delay_ok=False,
+        ratio_target_ok=True,
+        abs_peak_ok=False,
+        spike_ok=True,
+        stable_ok=True,
+    )
+    assert mod._acceptance_ok(mode="block_or_delay", **base) is True
+    assert mod._acceptance_ok(mode="block_only", **base) is True
+    assert mod._acceptance_ok(mode="delay_only", **base) is False
+
+    delay_case = dict(
+        delay_ok=True,
+        ratio_target_ok=False,
+        abs_peak_ok=False,
+        spike_ok=True,
+        stable_ok=True,
+    )
+    assert mod._acceptance_ok(mode="block_or_delay", **delay_case) is True
+    assert mod._acceptance_ok(mode="block_only", **delay_case) is False
+    assert mod._acceptance_ok(mode="delay_only", **delay_case) is True

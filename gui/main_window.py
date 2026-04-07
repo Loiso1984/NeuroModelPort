@@ -364,6 +364,7 @@ class MainWindow(QMainWindow):
             self.config.stim,
             "Stimulation",
             on_change=self._on_stim_field_changed,
+            hidden_fields={"Iext_absolute_nA"},
         )
         self.form_stim_loc = PydanticFormWidget(
             self.config.stim_location,

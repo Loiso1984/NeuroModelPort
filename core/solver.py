@@ -287,40 +287,21 @@ class NeuronSolver:
                 cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
                 cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
             ]),
-            "t_kelvin": t_kelvin,
-            "ca_ext": cfg.calcium.Ca_ext,
-            "ca_rest": cfg.calcium.Ca_rest,
-            "tau_ca": cfg.calcium.tau_Ca,
+            "env_vec": np.array([
+                t_kelvin, cfg.calcium.Ca_ext, cfg.calcium.Ca_rest, cfg.calcium.tau_Ca, cfg.env.Mg_ext, cfg.channels.tau_SK,
+            ], dtype=np.float64),
             "b_ca": self._build_b_ca_vector(cfg, morph),
-            "mg_ext": cfg.env.Mg_ext,
-            "tau_sk": cfg.channels.tau_SK,
-            "stype": stype,
-            "iext": primary_iext,
-            "t0": primary_t0,
-            "td": primary_td,
-            "atau": primary_atau,
-            "zap_f0_hz": primary_zap_f0,
-            "zap_f1_hz": primary_zap_f1,
+            "stim1_vec": np.array([
+                stype, primary_iext, primary_t0, primary_td, primary_atau, primary_zap_f0, primary_zap_f1,
+                primary_stim_comp, stim_mode, use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
+            ], dtype=np.float64),
             "event_times_arr": np.array(cfg.stim.event_times or [], dtype=np.float64),
             "n_events": int(len(cfg.stim.event_times or [])),
-            "stim_comp": primary_stim_comp,
-            "stim_mode": stim_mode,
-            "use_dfilter_primary": use_dfilter_primary,
-            "dfilter_attenuation": dfilter_attenuation,
-            "dfilter_tau_ms": dfilter_tau_ms,
-            "dual_stim_enabled": dual_stim_enabled,
-            "stype_2": stype_2,
-            "iext_2": iext_2,
-            "t0_2": t0_2,
-            "td_2": td_2,
-            "atau_2": atau_2,
-            "zap_f0_hz_2": zap_f0_2,
-            "zap_f1_hz_2": zap_f1_2,
-            "stim_comp_2": stim_comp_2,
-            "stim_mode_2": stim_mode_2,
-            "use_dfilter_secondary": use_dfilter_secondary,
-            "dfilter_attenuation_2": dfilter_attenuation_2,
-            "dfilter_tau_ms_2": dfilter_tau_ms_2,
+            "stim2_vec": np.array([
+                dual_stim_enabled,
+                stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_2, zap_f1_2,
+                stim_comp_2, stim_mode_2, use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
+            ], dtype=np.float64),
         }
         validate_rhs_args_values(rhs_values)
         
@@ -426,20 +407,10 @@ class NeuronSolver:
         except Exception as exc:
             # Some sparse factorization failures (e.g., exactly singular Jacobian)
             # can propagate from SciPy internals before `sol.success` is populated.
+            # Treat this path as a BDF failure and fall back to LSODA.
             bdf_exception_message = f"{type(exc).__name__}: {exc}"
             logger.warning("Primary integrator crashed during BDF step: %s", bdf_exception_message)
-            # First try analytic Jacobian (fast, exact) before expensive LSODA fallback.
-            if _analytic_jac_opts and jacobian_mode != "analytic_sparse":
-                try:
-                    sol = _solve_analytic_bdf(rtol=1e-5, atol=1e-7)
-                    if sol.success:
-                        logger.info("BDF(analytic) recovered from FD singularity.")
-                    else:
-                        sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
-                except Exception:
-                    sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
-            else:
-                sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
             if not sol.success:
                 raise RuntimeError(
                     "Integrator failed after fallback. "
@@ -454,25 +425,15 @@ class NeuronSolver:
         if not sol.success:
             first_message = str(sol.message)
             logger.warning("Primary integrator failed (BDF): %s", first_message)
-            # Fallback hierarchy when BDF reports step-size failure:
-            # 1. Try analytic sparse Jacobian with BDF (fast, exact, avoids FD issues).
-            # 2. If analytic BDF also fails, fall back to LSODA (robust but slow).
-            analytic_sol = None
-            if _analytic_jac_opts and jacobian_mode != "analytic_sparse":
-                try:
-                    analytic_sol = _solve_analytic_bdf(rtol=1e-5, atol=1e-7)
-                except Exception:
-                    analytic_sol = None
-            if analytic_sol is not None and analytic_sol.success:
-                sol = analytic_sol
-                logger.info("BDF(analytic) recovered from step-size failure.")
-            else:
-                sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
-                if not sol.success:
-                    raise RuntimeError(
-                        "Integrator failed after fallback. "
-                        f"BDF='{first_message}'; LSODA='{sol.message}'"
-                    )
+            # Fallback for stiff/ill-conditioned episodes where BDF can fail with
+            # "Required step size is less than spacing between numbers."
+            # LSODA often recovers these trajectories by switching methods internally.
+            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            if not sol.success:
+                raise RuntimeError(
+                    "Integrator failed after fallback. "
+                    f"BDF='{first_message}'; LSODA='{sol.message}'"
+                )
 
         res = SimulationResult(sol.t, sol.y, n_comp, cfg)
         self._post_process_physics(res, morph)
