@@ -23,8 +23,18 @@ def _make_rhs_args_for_legacy_call(*, l_indices=None, l_indptr=None):
         "en_im": False,
         "en_nap": False,
         "en_nar": False,
+        "gbar_mat": np.zeros((11, n), dtype=np.float64),
+        "cm_v": np.ones(n, dtype=np.float64),
+        "l_data": np.array([0.0, 0.0], dtype=np.float64),
         "l_indices": np.array([0, 1] if l_indices is None else l_indices, dtype=np.int64),
         "l_indptr": np.array([0, 1, 2] if l_indptr is None else l_indptr, dtype=np.int64),
+        "phi_mat": np.ones((9, n), dtype=np.float64),
+        "env_vec": np.array([310.0, 2.0, 5e-5, 200.0, 1.0, 5.0], dtype=np.float64),
+        "b_ca": np.zeros(n, dtype=np.float64),
+        "stim1_vec": np.array([0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0, 0, 0, 1.0, 0.0], dtype=np.float64),
+        "event_times_arr": np.array([], dtype=np.float64),
+        "n_events": 0,
+        "stim2_vec": np.array([0, 0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0, 0, 0, 1.0, 0.0], dtype=np.float64),
     })
     return tuple(vals[name] for name in RHS_ARG_ORDER)
 

@@ -117,6 +117,27 @@ def _exit_code_for_anomalies(anomaly_count: int, fail_on_anomaly: bool) -> int:
     return 0
 
 
+def _acceptance_ok(
+    *,
+    delay_ok: bool,
+    ratio_target_ok: bool,
+    abs_peak_ok: bool,
+    spike_ok: bool,
+    stable_ok: bool,
+    mode: str,
+) -> bool:
+    """Acceptance policy for a single grid case."""
+    if not (spike_ok and stable_ok):
+        return False
+    if mode == "delay_only":
+        return bool(delay_ok)
+    block_ok = bool(ratio_target_ok or abs_peak_ok)
+    if mode == "block_only":
+        return block_ok
+    # block_or_delay: valid for conduction-block presets and delayed-propagation presets
+    return bool(block_ok or delay_ok)
+
+
 def main() -> int:
     if _IMPORT_ERROR is not None:
         print(dependency_diagnostic("f-conduction-extended", _IMPORT_ERROR), file=sys.stderr)
@@ -141,6 +162,12 @@ def main() -> int:
         type=float,
         default=0.3,
         help="Target upper bound for F propagation ratio (junction_peak/soma_peak).",
+    )
+    parser.add_argument(
+        "--acceptance-mode",
+        choices=["block_or_delay", "block_only", "delay_only"],
+        default="block_or_delay",
+        help="Case acceptance mode (default supports both block and delayed-propagation signatures).",
     )
     parser.add_argument("--output", type=str, default="_test_results/pathology_f_conduction_extended.json")
     args = parser.parse_args()
@@ -211,7 +238,14 @@ def main() -> int:
                     abs_peak_ok = bool(f["junction_peak_mV"] < d["junction_peak_mV"] - 3.0)
                     spike_ok = bool(d["n_spikes"] >= 1 and f["n_spikes"] >= 1)
                     stable_ok = bool(d["stable"] and f["stable"])
-                    ok = bool(delay_ok and (ratio_target_ok or abs_peak_ok) and spike_ok and stable_ok)
+                    ok = _acceptance_ok(
+                        delay_ok=delay_ok,
+                        ratio_target_ok=ratio_target_ok,
+                        abs_peak_ok=abs_peak_ok,
+                        spike_ok=spike_ok,
+                        stable_ok=stable_ok,
+                        mode=str(args.acceptance_mode),
+                    )
 
                     row = {
                         "t_celsius": float(t_c),

@@ -802,8 +802,10 @@ def analytic_sparse_jacobian(*args, **kwargs):
     en_im = rhs["en_im"]
     en_nap = rhs["en_nap"]
     en_nar = rhs["en_nar"]
-    use_dfp = rhs["use_dfilter_primary"]
-    use_dfs = rhs["use_dfilter_secondary"]
+    stim1_vec = rhs["stim1_vec"]
+    stim2_vec = rhs["stim2_vec"]
+    use_dfp = int(stim1_vec[9])
+    use_dfs = int(stim2_vec[10])
     cache_key = (
         n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
         use_dfp, use_dfs, _sparse_structure_signature(rhs["l_indices"], rhs["l_indptr"]),

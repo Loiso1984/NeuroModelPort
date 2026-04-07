@@ -500,9 +500,13 @@ class OscilloscopeWidget(QWidget):
                 except Exception:
                     pass
         self._transient_items = []
-        self._curves_v.clear()
-        self._curves_gate.clear()
-        self._curves_i.clear()
+        for store in (self._curves_v, self._curves_gate, self._curves_i):
+            for curve in store.values():
+                try:
+                    curve.setData([], [])
+                    curve.setVisible(False)
+                except Exception:
+                    pass
         self._apply_grid_alpha()
         self._set_default_titles()
 
@@ -526,26 +530,46 @@ class OscilloscopeWidget(QWidget):
         # ── Voltage traces ────────────────────────────────────────────
         soma_pen = pg.mkPen(color=theme["soma"], width=2.0 * lw)
         t_soma, v_soma = _downsample_xy(t, result.v_soma, max_points=budget_v)
-        c_soma   = self._p_v.plot(t_soma, v_soma, pen=soma_pen, name="Soma")
-        self._curves_v['Soma'] = c_soma
-        self._transient_items.append(c_soma)
+        c_soma = self._curves_v.get("Soma")
+        if c_soma is None:
+            c_soma = self._p_v.plot([], [], pen=soma_pen, name="Soma")
+            self._curves_v["Soma"] = c_soma
+        else:
+            c_soma.setPen(soma_pen)
+        c_soma.setData(t_soma, v_soma)
+        c_soma.setVisible(True)
 
         if n > 1 and mc.N_ais > 0:
             ais_pen = pg.mkPen(color=theme["ais"], width=1.5 * lw,
                                style=Qt.PenStyle.DashLine)
             t_ais, v_ais = _downsample_xy(t, result.v_all[1, :], max_points=budget_v)
-            c_ais   = self._p_v.plot(t_ais, v_ais, pen=ais_pen, name="AIS")
-            self._curves_v['AIS'] = c_ais
-            self._transient_items.append(c_ais)
+            c_ais = self._curves_v.get("AIS")
+            if c_ais is None:
+                c_ais = self._p_v.plot([], [], pen=ais_pen, name="AIS")
+                self._curves_v["AIS"] = c_ais
+            else:
+                c_ais.setPen(ais_pen)
+            c_ais.setData(t_ais, v_ais)
+            c_ais.setVisible(True)
+        elif "AIS" in self._curves_v:
+            self._curves_v["AIS"].setData([], [])
+            self._curves_v["AIS"].setVisible(False)
 
         if n > 2:
             term_pen = pg.mkPen(color=theme["terminal"], width=1.2 * lw,
                                 style=Qt.PenStyle.DotLine)
             t_term, v_term = _downsample_xy(t, result.v_all[-1, :], max_points=budget_v)
-            c_term   = self._p_v.plot(t_term, v_term,
-                                       pen=term_pen, name="Terminal")
-            self._curves_v['Terminal'] = c_term
-            self._transient_items.append(c_term)
+            c_term = self._curves_v.get("Terminal")
+            if c_term is None:
+                c_term = self._p_v.plot([], [], pen=term_pen, name="Terminal")
+                self._curves_v["Terminal"] = c_term
+            else:
+                c_term.setPen(term_pen)
+            c_term.setData(t_term, v_term)
+            c_term.setVisible(True)
+        elif "Terminal" in self._curves_v:
+            self._curves_v["Terminal"].setData([], [])
+            self._curves_v["Terminal"].setVisible(False)
 
         # ── Threshold line at _THRESHOLD_MV ──────────────────────────
         thresh_line = pg.InfiniteLine(
@@ -614,28 +638,42 @@ class OscilloscopeWidget(QWidget):
         # ── Gate dynamics ─────────────────────────────────────────────
         from core.analysis import extract_gate_traces
         gates = extract_gate_traces(result)
+        visible_gates: set[str] = set()
         for name in ('m', 'h', 'n'):
             if name in gates:
                 col  = GATE_COLORS.get(name, (180, 180, 180, 200))
                 pen  = pg.mkPen(color=col[:3], width=1.5 * lw)
                 tg, yg = _downsample_xy(t, gates[name], max_points=budget_g)
-                c    = self._p_g.plot(tg, yg, pen=pen, name=name)
-                self._curves_gate[name] = c
-                self._transient_items.append(c)
+                c = self._curves_gate.get(name)
+                if c is None:
+                    c = self._p_g.plot([], [], pen=pen, name=name)
+                    self._curves_gate[name] = c
+                else:
+                    c.setPen(pen)
+                c.setData(tg, yg)
                 c.setVisible(self._cb_g[name].isChecked())
+                visible_gates.add(name)
+        for name, c in self._curves_gate.items():
+            if name not in visible_gates:
+                c.setData([], [])
+                c.setVisible(False)
 
         # ── Ion currents ──────────────────────────────────────────────
+        visible_currents: set[str] = set()
         for name, curr in result.currents.items():
             col   = CHAN_COLORS.get(name, (120, 120, 120, 150))
             pen   = pg.mkPen(color=col[:3], width=1.5 * lw)
             brush = pg.mkBrush(col)
             tc, yc = _downsample_xy(t, curr, max_points=budget_i)
-            c     = self._p_i.plot(tc, yc, pen=pen,
-                                    fillLevel=0.0, fillBrush=brush,
-                                    name=f"I_{name}")
-            self._curves_i[name] = c
-            self._transient_items.append(c)
+            c = self._curves_i.get(name)
+            if c is None:
+                c = self._p_i.plot([], [], pen=pen, fillLevel=0.0, fillBrush=brush, name=f"I_{name}")
+                self._curves_i[name] = c
+            else:
+                c.setPen(pen)
+            c.setData(tc, yc)
             c.setVisible(self._cb_i.get(name, QCheckBox()).isChecked())
+            visible_currents.add(name)
 
         # ── Reconstructed stimulus input trace ─────────────────────────
         from core.analysis import reconstruct_stimulus_trace
@@ -646,10 +684,15 @@ class OscilloscopeWidget(QWidget):
             style=Qt.PenStyle.SolidLine,
         )
         t_si, y_si = _downsample_xy(t, stim_input, max_points=budget_i)
-        c_si = self._p_i.plot(t_si, y_si, pen=stim_input_pen, name="I_stim(input)")
-        self._curves_i['Stim_input'] = c_si
-        self._transient_items.append(c_si)
+        c_si = self._curves_i.get("Stim_input")
+        if c_si is None:
+            c_si = self._p_i.plot([], [], pen=stim_input_pen, name="I_stim(input)")
+            self._curves_i["Stim_input"] = c_si
+        else:
+            c_si.setPen(stim_input_pen)
+        c_si.setData(t_si, y_si)
         c_si.setVisible(self._cb_i['Stim_input'].isChecked())
+        visible_currents.add("Stim_input")
 
         # ── Filtered stimulus current ─────────────────────────────────
         # Show the post-filter state so user can compare with reconstructed input.
@@ -657,11 +700,23 @@ class OscilloscopeWidget(QWidget):
             filt_curr_pen = pg.mkPen(color=theme["stim_filtered"], width=1.5 * lw,
                                       style=Qt.PenStyle.DashLine)
             t_sf, y_sf = _downsample_xy(t, result.v_dendritic_filtered, max_points=budget_i)
-            c_sf = self._p_i.plot(t_sf, y_sf,
-                                   pen=filt_curr_pen, name="I_stim(filt)")
-            self._curves_i['Stim_filtered'] = c_sf
-            self._transient_items.append(c_sf)
+            c_sf = self._curves_i.get("Stim_filtered")
+            if c_sf is None:
+                c_sf = self._p_i.plot([], [], pen=filt_curr_pen, name="I_stim(filt)")
+                self._curves_i["Stim_filtered"] = c_sf
+            else:
+                c_sf.setPen(filt_curr_pen)
+            c_sf.setData(t_sf, y_sf)
             c_sf.setVisible(self._cb_i['Stim_filtered'].isChecked())
+            visible_currents.add("Stim_filtered")
+        elif "Stim_filtered" in self._curves_i:
+            self._curves_i["Stim_filtered"].setData([], [])
+            self._curves_i["Stim_filtered"].setVisible(False)
+
+        for name, c in self._curves_i.items():
+            if name not in visible_currents:
+                c.setData([], [])
+                c.setVisible(False)
 
         # Sync checkbox visibility
         self._sync_checkboxes(result)
