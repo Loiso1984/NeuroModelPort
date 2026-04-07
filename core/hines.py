@@ -1,11 +1,11 @@
-"""Native Hines solver kernels — v11.0.
+"""Native Hines solver kernels — v11.1.
 
-O(N) direct tree solver replacing SciPy BDF for voltage equation.
+TRUE O(N) tree solver for branched morphologies replacing SciPy BDF.
 The semi-implicit split-operator scheme:
 1. Compute i_ca_influx at V_n (for Ca dynamics).
-2. Update gating variables analytically (exact exp, operator-split).
+2. Update gating variables using Exponential Euler (stable, dt-independent).
 3. Build Hines system: d[i]*V_{n+1} - coupling = rhs[i].
-4. Solve with hines_solve (O(N) direct tree solver).
+4. Solve with hines_solve (TRUE tree solver, handles branches).
 5. Update dendritic filter states (Backward Euler).
 
 This file contains ONLY the mathematical kernels - no imports from
@@ -24,44 +24,52 @@ CA_DAMPING_FACTOR = 0.5
 
 
 @njit
-def _gate_step(y: float64[:], dt: float64, v: float64,
-              alpha: float64, beta: float64) -> float64:
-    """Exact analytical solution for gating ODE: dy/dt = alpha*(1-y) - beta*y."""
-    return y + (alpha * (1.0 - y) - beta * y) * dt
+def _gate_step(y_old: float64, dt: float64, alpha: float64, beta: float64) -> float64:
+    """Exponential Euler: dy/dt = alpha*(1-y) - beta*y.
+    
+    Analytical solution for stability (dt-independent).
+    """
+    sum_ab = alpha + beta
+    if sum_ab < 1e-12:
+        return y_old
+    y_inf = alpha / sum_ab
+    tau = 1.0 / sum_ab
+    return y_inf + (y_old - y_inf) * np.exp(-dt / tau)
 
-
-@njit
-def update_gates_analytic(y: float64[:], dt: float64,
-                           m_inf: float64[:], h_inf: float64[:], n_inf: float64[:],
-                           alpha_m: float64[:], beta_m: float64[:],
-                           alpha_h: float64[:], beta_h: float64[:], alpha_n: float64[:], beta_n: float64[:],
-                           off_m: int, off_h: int, off_n: int,
-                           m_idx: int, h_idx: int, n_idx: int) -> None:
-    """Update all gate variables using exact analytical integration."""
-    # Sodium activation (m)
-    y[m_idx] = _gate_step(y[m_idx], dt, m_inf[m_idx], alpha_m[m_idx], beta_m[m_idx])
-    # Sodium inactivation (h)  
-    y[h_idx] = _gate_step(y[h_idx], dt, h_inf[h_idx], alpha_h[h_idx], beta_h[m_idx])
-    # Potassium activation (n)
-    y[n_idx] = _gate_step(y[n_idx], dt, n_inf[n_idx], alpha_n[m_idx], beta_n[n_idx])
 
 
 @njit
 def hines_solve(d: float64[:], a: float64[:], b: float64[:],
               parent_idx: int64[:], order: int64[:], rhs: float64[:],
               v_new: float64[:]) -> None:
-    """Solve tridiagonal system using Thomas algorithm (O(N))."""
+    """TRUE Linear-time (O(N)) tree solver for branched morphologies.
+    
+    Correctly handles tree structures (not just tridiagonal chains).
+    Forward elimination from leaves to root, backward substitution root to leaves.
+    """
     n = len(d)
-    
-    # Forward sweep
-    for i in range(1, n):
+    # Temporary working buffers to avoid mutating original d/rhs
+    d_work = d.copy()
+    rhs_work = rhs.copy()
+
+    # 1. Forward elimination (Leaves to Root)
+    # 'order' contains indices from distal to proximal
+    for i in range(n - 1):  # Root is last, don't eliminate it
         idx = order[i]
-        w = a[idx] / d[idx-1]
-        d[idx] = d[idx-1] - w * b[idx-1]
-        rhs[idx] = rhs[idx] - w * rhs[idx-1]
+        p = parent_idx[idx]
+        if p < 0:
+            continue
+        
+        factor = a[idx] / d_work[idx]
+        d_work[p] -= factor * b[idx]
+        rhs_work[p] -= factor * rhs_work[idx]
+
+    # 2. Backward substitution (Root to Leaves)
+    # Root is at the end of 'order'
+    root_idx = order[n-1]
+    v_new[root_idx] = rhs_work[root_idx] / d_work[root_idx]
     
-    # Backward sweep
-    v_new[n-1] = rhs[n-1] / d[n-1]
-    for i in range(n-2, -1, -1):
+    for i in range(n - 2, -1, -1):
         idx = order[i]
-        v_new[idx] = (rhs[idx] - a[idx] * v_new[idx+1] - b[idx] * v_new[idx-1]) / d[idx]
+        p = parent_idx[idx]
+        v_new[idx] = (rhs_work[idx] - b[idx] * v_new[p]) / d_work[idx]

@@ -223,6 +223,11 @@ class SimulationParams(BaseModel):
     pulse_start: float  = Field(default=10.0,        description="Pulse onset (ms)")
     pulse_dur:   float  = Field(default=1.0,         description="Pulse duration (ms)")
     alpha_tau:   float  = Field(default=2.0,         description="Alpha-synapse time constant (ms)")
+    
+    # ZAP (impedance) stimulus parameters
+    zap_f0_hz:   float  = Field(default=0.0,         description="ZAP start frequency (Hz)")
+    zap_f1_hz:   float  = Field(default=20.0,        description="ZAP end frequency (Hz)")
+    
     stim_comp:   int    = Field(default=0,           description="Compartment index to inject current")
 
     # Stochastic
