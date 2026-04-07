@@ -287,33 +287,55 @@ class NeuronSolver:
                 cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
                 cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
             ]),
-            "env_vec": np.array([
-                t_kelvin, cfg.calcium.Ca_ext, cfg.calcium.Ca_rest, cfg.calcium.tau_Ca, cfg.env.Mg_ext, cfg.channels.tau_SK,
-            ], dtype=np.float64),
+            "t_kelvin": t_kelvin,
+            "ca_ext": cfg.calcium.Ca_ext,
+            "ca_rest": cfg.calcium.Ca_rest,
+            "tau_ca": cfg.calcium.tau_Ca,
+            "mg_ext": cfg.env.Mg_ext,
+            "tau_sk": cfg.channels.tau_SK,
             "b_ca": self._build_b_ca_vector(cfg, morph),
-            "stim1_vec": np.array([
-                stype, primary_iext, primary_t0, primary_td, primary_atau, primary_zap_f0, primary_zap_f1,
-                primary_stim_comp, stim_mode, use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
-            ], dtype=np.float64),
+            "stype": stype,
+            "iext": primary_iext,
+            "t0": primary_t0,
+            "td": primary_td,
+            "atau": primary_atau,
+            "zap_f0_hz": primary_zap_f0,
+            "zap_f1_hz": primary_zap_f1,
+            "stim_comp": primary_stim_comp,
+            "stim_mode": stim_mode,
+            "use_dfilter_primary": use_dfilter_primary,
+            "dfilter_attenuation": dfilter_attenuation,
+            "dfilter_tau_ms": dfilter_tau_ms,
             "event_times_arr": np.array(cfg.stim.event_times or [], dtype=np.float64),
             "n_events": int(len(cfg.stim.event_times or [])),
-            "stim2_vec": np.array([
-                dual_stim_enabled,
-                stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_2, zap_f1_2,
-                stim_comp_2, stim_mode_2, use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
-            ], dtype=np.float64),
+            "dual_stim_enabled": dual_stim_enabled,
+            "stype_2": stype_2,
+            "iext_2": iext_2,
+            "t0_2": t0_2,
+            "td_2": td_2,
+            "atau_2": atau_2,
+            "zap_f0_hz_2": zap_f0_2,
+            "zap_f1_hz_2": zap_f1_2,
+            "stim_comp_2": stim_comp_2,
+            "stim_mode_2": stim_mode_2,
+            "use_dfilter_secondary": use_dfilter_secondary,
+            "dfilter_attenuation_2": dfilter_attenuation_2,
+            "dfilter_tau_ms_2": dfilter_tau_ms_2,
         }
         validate_rhs_args_values(rhs_values)
         
         # Create structured PhysicsParams container
         physics_params = create_physics_params(**rhs_values)
 
-        # Pre-allocate the RHS output buffer once. rhs_multicompartment zeroes
-        # it in-place via a Numba loop (no np.zeros_like heap alloc per step).
+        # Pre-allocate RHS output buffer once (reused across integration steps)
         _dydt_buf = np.empty(len(y0), dtype=np.float64)
 
         def _rhs_fn(t, y):
-            return rhs_multicompartment(t, y, physics_params, _dydt_buf)
+            # Reuse pre-allocated buffer for SciPy's history.
+            # Numba's rhs_multicompartment fills it in-place (no heap alloc).
+            _dydt_buf.fill(0.0)
+            rhs_multicompartment(t, y, physics_params, _dydt_buf)
+            return _dydt_buf.copy()
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
 

@@ -110,16 +110,10 @@ def create_physics_params(**kwargs) -> PhysicsParams:
             PhysicsParams: Structured parameter container
     """
     # Set default stochastic parameters only if not provided
-    stochastic_defaults = {
-        'stoch_gating': False,
-        'noise_sigma': 0.0,
-        'rng_state': None
-    }
-    
-    # Only set defaults for missing parameters
-    for key, default_val in stochastic_defaults.items():
-        if key not in kwargs:
-            kwargs[key] = default_val
+    defaults = {'stoch_gating': False, 'noise_sigma': 0.0, 'rng_state': None}
+    for k, v in defaults.items():
+        if k not in kwargs: 
+            kwargs[k] = v
     
     return PhysicsParams(**kwargs)
 

@@ -127,6 +127,7 @@ class OscilloscopeWidget(QWidget):
         self._curves_i:    dict = {}
         self._curves_ca:   dict = {}
         self._transient_items: list = []
+        self._ref_curve_v = None  # Will be created in update_plots
 
     # ─────────────────────────────────────────────────────────────────
     def _title_html(self, text: str, color: str) -> str:
@@ -312,6 +313,12 @@ class OscilloscopeWidget(QWidget):
         self._spin_grid_alpha.valueChanged.connect(self._on_view_settings_changed)
         vl2.addWidget(lbl_grid)
         vl2.addWidget(self._spin_grid_alpha)
+
+        self._cb_keep_reference = QCheckBox("Keep as Reference")
+        self._cb_keep_reference.setChecked(False)
+        self._cb_keep_reference.setToolTip("Freeze current soma trace as a grey reference line for comparison")
+        self._cb_keep_reference.setStyleSheet("color:#A6ADC8; font-size:11px;")
+        vl2.insertWidget(4, self._cb_keep_reference)
 
         self._cb_presentation = QCheckBox("Presentation Mode")
         self._cb_presentation.setChecked(False)
@@ -540,6 +547,12 @@ class OscilloscopeWidget(QWidget):
         self._curves_gate.clear()
         self._curves_i.clear()
         self._curves_ca.clear()
+        
+        # Clear reference curve if it exists
+        if self._ref_curve_v:
+            self._ref_curve_v.setData([], [])
+            self._ref_curve_v.setVisible(False)
+        
         self._apply_grid_alpha()
         self._set_default_titles()
 
@@ -549,9 +562,40 @@ class OscilloscopeWidget(QWidget):
     def update_plots(self, result):
         self._last_result = result
         self._last_mc_results = None
+        
+        # --- Handle Reference Trace (Comparison Mode) ---
+        # Capture reference BEFORE clearing current plots
+        if self._cb_keep_reference.isChecked():
+            # If we have a current soma trace, "ghost" it into a reference line
+            if "Soma" in self._curves_v:
+                old_t, old_v = self._curves_v["Soma"].getData()
+                if old_t is not None and old_v is not None and len(old_t) > 0:
+                    # Remove old reference curve to prevent memory leak
+                    if self._ref_curve_v:
+                        self._p_v.removeItem(self._ref_curve_v)
+                    ref_pen = pg.mkPen(color=(150, 150, 150, 100), width=1.5, style=Qt.PenStyle.DashLine)
+                    self._ref_curve_v = self._p_v.plot(old_t, old_v, pen=ref_pen, name="Reference")
+        else:
+            # Hide reference if mode is off
+            if self._ref_curve_v:
+                self._p_v.removeItem(self._ref_curve_v)
+                self._ref_curve_v = None
+        
         self.clear()
         self._sync_delay_controls(result)
         theme = PLOT_THEMES.get(self._theme_name, PLOT_THEMES["Default"])
+        
+        # --- Reset All Active Curves (The Overlap Bug Fix) ---
+        # Before drawing new data, hide and clear ALL existing dynamic curves
+        all_curves = (list(self._curves_v.values()) + 
+                      list(self._curves_gate.values()) + 
+                      list(self._curves_i.values()) + 
+                      list(self._curves_ca.values()))
+        
+        for curve in all_curves:
+            curve.setVisible(False)
+            curve.setData([], [])
+        
         lw = self._line_width_scale
         t   = result.t
         n   = result.n_comp
@@ -570,7 +614,7 @@ class OscilloscopeWidget(QWidget):
         else:
             c_soma.setPen(soma_pen)
         c_soma.setData(t_soma, v_soma)
-        c_soma.setVisible(True)
+        c_soma.setVisible(self._cb_v["Soma"].isChecked())  # Respect user checkbox
 
         if n > 1 and mc.N_ais > 0:
             ais_pen = pg.mkPen(color=theme["ais"], width=1.5 * lw,
@@ -583,7 +627,7 @@ class OscilloscopeWidget(QWidget):
             else:
                 c_ais.setPen(ais_pen)
             c_ais.setData(t_ais, v_ais)
-            c_ais.setVisible(True)
+            c_ais.setVisible(self._cb_v["AIS"].isChecked())  # Respect user checkbox
         elif "AIS" in self._curves_v:
             self._curves_v["AIS"].setData([], [])
             self._curves_v["AIS"].setVisible(False)
@@ -599,7 +643,7 @@ class OscilloscopeWidget(QWidget):
             else:
                 c_term.setPen(term_pen)
             c_term.setData(t_term, v_term)
-            c_term.setVisible(True)
+            c_term.setVisible(self._cb_v["Terminal"].isChecked())  # Respect user checkbox
         elif "Terminal" in self._curves_v:
             self._curves_v["Terminal"].setData([], [])
             self._curves_v["Terminal"].setVisible(False)
