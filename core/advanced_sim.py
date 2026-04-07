@@ -239,7 +239,11 @@ def run_euler_maruyama(config: FullModelConfig,
                                 ar_Ih, br_Ih,
                                 as_Ca, bs_Ca, au_Ca, bu_Ca,
                                 aa_IA, ba_IA, ab_IA, bb_IA,
-                                z_inf_SK)
+                                z_inf_SK,
+                                am_TCa, bm_TCa, ah_TCa, bh_TCa,
+                                aw_IM, bw_IM,
+                                ax_NaP, bx_NaP,
+                                ay_NaR, by_NaR, aj_NaR, bj_NaR)
     from scipy.sparse import csr_matrix
 
     cfg    = config
@@ -300,6 +304,16 @@ def run_euler_maruyama(config: FullModelConfig,
 
         r = np.zeros(n_comp); s = np.zeros(n_comp)
         u = np.zeros(n_comp); a = np.zeros(n_comp); b = np.zeros(n_comp)
+        # T-type Ca (ITCa): gates p (activation), q (inactivation)
+        p = np.zeros(n_comp); q = np.ones(n_comp)
+        # M-type K (IM): gate w
+        w = np.zeros(n_comp)
+        # Persistent Na (NaP): gate x
+        x_nap = np.zeros(n_comp)
+        # Resurgent Na (NaR): gates y_nr (activation), j_nr (inactivation)
+        y_nr = np.zeros(n_comp); j_nr = np.ones(n_comp)
+        # SK Ca-activated K: gate z_sk
+        z_sk = np.zeros(n_comp)
 
         if ch.enable_Ih:
             r = y[cur:cur + n_comp];  cur += n_comp
@@ -309,6 +323,18 @@ def run_euler_maruyama(config: FullModelConfig,
         if ch.enable_IA:
             a = y[cur:cur + n_comp];  cur += n_comp
             b = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_ITCa:
+            p = y[cur:cur + n_comp];  cur += n_comp
+            q = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_IM:
+            w = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_NaP:
+            x_nap = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_NaR:
+            y_nr = y[cur:cur + n_comp];  cur += n_comp
+            j_nr = y[cur:cur + n_comp];  cur += n_comp
+        if ch.enable_SK:
+            z_sk = y[cur:cur + n_comp];  cur += n_comp
 
         ca_i = np.full(n_comp, cfg.calcium.Ca_rest)
         if dyn_ca:

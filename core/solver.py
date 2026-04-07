@@ -314,6 +314,11 @@ class NeuronSolver:
             en_im=cfg.channels.enable_IM,
             en_nap=cfg.channels.enable_NaP,
             en_nar=cfg.channels.enable_NaR,
+            # Pass per-compartment gNa so the sparsity builder can omit
+            # m/h→V connections for near-zero Na compartments (demyelinated
+            # trunk).  Prevents SuperLU "Factor is exactly singular" when
+            # gNa_trunk_mult << 1 creates 35 nearly-identical passive rows.
+            gNa_v=morph.get("gNa_v"),
         )
         if jacobian_mode == "sparse_fd":
             jacobian_options["jac_sparsity"] = build_jacobian_sparsity(**_sparsity_kwargs)

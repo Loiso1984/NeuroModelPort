@@ -161,7 +161,27 @@ def build_jacobian_sparsity(
     en_im: bool = False,
     en_nap: bool = False,
     en_nar: bool = False,
+    gNa_v: "np.ndarray | None" = None,
+    _gna_sparsity_threshold: float = 2.0,
 ) -> csr_matrix:
+    """Build the sparsity structure for the sparse-FD Jacobian.
+
+    Parameters
+    ----------
+    gNa_v : array, optional
+        Per-compartment Na conductance (mS/cm²).  When provided, m- and
+        h-gate → voltage dependencies are **omitted** for compartments
+        where gNa_v[i] < _gna_sparsity_threshold.  This prevents the
+        near-zero columns produced by demyelinated trunk segments
+        (gNa ≈ 0) from making the LU factor exactly singular in
+        scipy BDF's SuperLU back-end.  The RHS is **not** affected;
+        only the sparsity pattern used by the finite-difference
+        Jacobian approximation is tightened.
+    _gna_sparsity_threshold : float
+        Conductance cut-off in mS/cm² (default 2.0).  Compartments
+        with gNa < this value have their m/h columns excluded from the
+        voltage-equation sparsity row.
+    """
     idx, n_state = _state_slices(
         n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter_primary, use_dfilter_secondary,
         en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar, en_sk=en_sk,
@@ -196,8 +216,17 @@ def build_jacobian_sparsity(
             sp[v_row, v_slice.start + v_col] = 1.0
 
         # Local channel-state dependencies in voltage equation.
-        sp[v_row, m_slice.start + i] = 1.0
-        sp[v_row, h_slice.start + i] = 1.0
+        # Skip m/h→V entries for compartments with negligible Na conductance
+        # (e.g. demyelinated trunk, gNa_trunk_mult≪1).  Near-zero columns in
+        # the Na-gating block cause SuperLU to produce an exactly-singular LU
+        # factor (numerical cancellation across identical passive rows).
+        # K-channel n-gate is retained because gK is always full-density.
+        _has_active_na = (
+            gNa_v is None or float(gNa_v[i]) >= _gna_sparsity_threshold
+        )
+        if _has_active_na:
+            sp[v_row, m_slice.start + i] = 1.0
+            sp[v_row, h_slice.start + i] = 1.0
         sp[v_row, n_slice.start + i] = 1.0
         if r_slice is not None:
             sp[v_row, r_slice.start + i] = 1.0
