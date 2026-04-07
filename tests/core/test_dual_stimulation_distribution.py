@@ -17,6 +17,7 @@ def test_distributed_stimulus_current_for_comp_soma_mode():
             stim_mode=0,
             use_dfilter=0,
             dfilter_attenuation=1.0,
+            dfilter_tau_ms=10.0,
             v_filtered=0.0,
         )
         for i in range(4)
@@ -34,6 +35,7 @@ def test_distributed_stimulus_current_for_comp_ais_mode():
             stim_mode=1,
             use_dfilter=0,
             dfilter_attenuation=1.0,
+            dfilter_tau_ms=10.0,
             v_filtered=0.0,
         )
         for i in range(4)
@@ -51,6 +53,7 @@ def test_distributed_stimulus_current_for_comp_dfilter_mode():
             stim_mode=2,
             use_dfilter=0,
             dfilter_attenuation=0.25,
+            dfilter_tau_ms=10.0,
             v_filtered=0.0,
         )
         for i in range(3)
@@ -66,8 +69,27 @@ def test_distributed_stimulus_current_for_comp_dfilter_mode():
             stim_mode=2,
             use_dfilter=1,
             dfilter_attenuation=0.25,
+            dfilter_tau_ms=10.0,
             v_filtered=0.33,
         )
         for i in range(3)
     ]
     assert vals_filter == [0.33, 0.0, 0.0]
+
+
+def test_distributed_stimulus_current_for_comp_tau_nonpositive_disables_filter():
+    vals_tau_zero = [
+        distributed_stimulus_current_for_comp(
+            comp_idx=i,
+            n_comp=3,
+            base_current=4.0,
+            stim_comp=0,
+            stim_mode=2,
+            use_dfilter=1,
+            dfilter_attenuation=0.25,
+            dfilter_tau_ms=0.0,
+            v_filtered=0.33,
+        )
+        for i in range(3)
+    ]
+    assert vals_tau_zero == [1.0, 0.0, 0.0]

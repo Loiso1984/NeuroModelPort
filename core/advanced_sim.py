@@ -10,7 +10,7 @@ import copy
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
-from core.rhs import get_stim_current, nernst_ca_ion
+from core.rhs import compute_ionic_currents_scalar, get_stim_current
 from core.solver import NeuronSolver, SimulationResult
 from core.analysis import detect_spikes
 
@@ -252,7 +252,11 @@ def run_euler_maruyama(config: FullModelConfig,
     L      = csr_matrix((morph['L_data'], morph['L_indices'], morph['L_indptr']),
                         shape=(n_comp, n_comp))
 
-    phi      = cfg.env.phi  # legacy global phi for stochastic sim (TODO: per-channel Q10)
+    phi_na_v = cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp)
+    phi_k_v = cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp)
+    phi_ih_v = cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp)
+    phi_ca_v = cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp)
+    phi_ia_v = cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp)
     t_kelvin = cfg.env.T_celsius + 273.15
 
     # Per-compartment B_Ca (Stage 3.4 — volume-dependent calcium dynamics)
@@ -310,24 +314,29 @@ def run_euler_maruyama(config: FullModelConfig,
         if dyn_ca:
             ca_i = y[cur:cur + n_comp];  cur += n_comp
 
-        # ── ionic currents ──────────────────────────────────────────
-        I_ion = morph['gL_v'] * (V - ch.EL)
-        I_ion += morph['gNa_v'] * (m ** 3) * h * (V - ch.ENa)
-        I_ion += morph['gK_v']  * (nk ** 4) * (V - ch.EK)
+        # ── ionic currents (shared math with deterministic RHS) ────
+        I_ion = np.zeros(n_comp)
         I_ca_total = np.zeros(n_comp)
-
-        if ch.enable_Ih:
-            I_ion += morph['gIh_v'] * r * (V - ch.E_Ih)
-        if ch.enable_ICa:
-            eca = nernst_ca_ion(ca_i[0], cfg.calcium.Ca_ext, t_kelvin) if dyn_ca else 120.0
-            I_ca_c = morph['gCa_v'] * (s ** 2) * u * (V - eca)
-            I_ion += I_ca_c
-            I_ca_total = I_ca_c
-        if ch.enable_IA:
-            I_ion += morph['gA_v'] * a * b * (V - ch.E_A)
-        if ch.enable_SK:
-            for i in range(n_comp):
-                I_ion[i] += morph['gSK_v'][i] * z_inf_SK(ca_i[i]) * (V[i] - ch.EK)
+        for i in range(n_comp):
+            sk_gate_i = z_inf_SK(ca_i[i]) if ch.enable_SK else 0.0
+            i_ion_i, i_ca_influx_i = compute_ionic_currents_scalar(
+                V[i], m[i], h[i], nk[i],
+                r[i] if ch.enable_Ih else 0.0,
+                s[i] if ch.enable_ICa else 0.0,
+                u[i] if ch.enable_ICa else 0.0,
+                a[i] if ch.enable_IA else 0.0,
+                b[i] if ch.enable_IA else 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                sk_gate_i,
+                ch.enable_Ih, ch.enable_ICa, ch.enable_IA, ch.enable_SK,
+                False, False, False, False, dyn_ca,
+                morph['gNa_v'][i], morph['gK_v'][i], morph['gL_v'][i], morph['gIh_v'][i],
+                morph['gCa_v'][i], morph['gA_v'][i], morph['gSK_v'][i], 0.0, 0.0, 0.0, 0.0,
+                ch.ENa, ch.EK, ch.EL, ch.E_Ih, ch.E_A,
+                ca_i[i], cfg.calcium.Ca_ext, cfg.calcium.Ca_rest, t_kelvin,
+            )
+            I_ion[i] = i_ion_i
+            I_ca_total[i] = i_ca_influx_i
 
         I_ax    = L.dot(V)
         I_stim  = np.zeros(n_comp)
@@ -351,23 +360,23 @@ def run_euler_maruyama(config: FullModelConfig,
         dy = np.empty_like(y)
         cur = 0
         dy[cur:cur + n_comp] = (I_stim - I_ion + I_ax) / morph['Cm_v'];  cur += n_comp
-        dy[cur:cur + n_comp] = phi * (am_v * (1 - m)  - bm_v * m);        cur += n_comp
-        dy[cur:cur + n_comp] = phi * (ah_v * (1 - h)  - bh_v * h);        cur += n_comp
-        dy[cur:cur + n_comp] = phi * (an_v * (1 - nk) - bn_v * nk);       cur += n_comp
+        dy[cur:cur + n_comp] = phi_na_v * (am_v * (1 - m)  - bm_v * m);        cur += n_comp
+        dy[cur:cur + n_comp] = phi_na_v * (ah_v * (1 - h)  - bh_v * h);        cur += n_comp
+        dy[cur:cur + n_comp] = phi_k_v * (an_v * (1 - nk) - bn_v * nk);        cur += n_comp
 
         if ch.enable_Ih:
             ar_v = ar_Ih(V);  br_v = br_Ih(V)
-            dy[cur:cur + n_comp] = phi * (ar_v * (1 - r) - br_v * r);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_ih_v * (ar_v * (1 - r) - br_v * r);  cur += n_comp
         if ch.enable_ICa:
             as_v = as_Ca(V);  bs_v = bs_Ca(V)
             au_v = au_Ca(V);  bu_v = bu_Ca(V)
-            dy[cur:cur + n_comp] = phi * (as_v * (1 - s) - bs_v * s);  cur += n_comp
-            dy[cur:cur + n_comp] = phi * (au_v * (1 - u) - bu_v * u);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_ca_v * (as_v * (1 - s) - bs_v * s);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_ca_v * (au_v * (1 - u) - bu_v * u);  cur += n_comp
         if ch.enable_IA:
             aa_v = aa_IA(V);  ba_v = ba_IA(V)
             ab_v = ab_IA(V);  bb_v = bb_IA(V)
-            dy[cur:cur + n_comp] = phi * (aa_v * (1 - a) - ba_v * a);  cur += n_comp
-            dy[cur:cur + n_comp] = phi * (ab_v * (1 - b) - bb_v * b);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_ia_v * (aa_v * (1 - a) - ba_v * a);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_ia_v * (ab_v * (1 - b) - bb_v * b);  cur += n_comp
         if dyn_ca:
             dca = (-b_ca_v * I_ca_total
                    - (ca_i - cfg.calcium.Ca_rest) / cfg.calcium.tau_Ca)
@@ -380,15 +389,15 @@ def run_euler_maruyama(config: FullModelConfig,
         # ── Langevin diffusion (gate noise) ──────────────────────────
         if stoch:
             g_start = n_comp
-            def _add_noise(offset, alpha_v, beta_v, gate_v, N_ch):
+            def _add_noise(offset, alpha_v, beta_v, gate_v, N_ch, phi_gate_v):
                 sigma = np.sqrt(
                     np.maximum(0.0, alpha_v * (1.0 - gate_v) + beta_v * gate_v) / N_ch
-                ) * phi
+                ) * phi_gate_v
                 y_new[offset:offset + n_comp] += sigma * np.random.randn(n_comp) * sqrt_dt
 
-            _add_noise(g_start,           am_v, bm_v, m,  N_Na)
-            _add_noise(g_start + n_comp,   ah_v, bh_v, h,  N_Na)
-            _add_noise(g_start + 2*n_comp, an_v, bn_v, nk, N_K)
+            _add_noise(g_start,           am_v, bm_v, m,  N_Na, phi_na_v)
+            _add_noise(g_start + n_comp,   ah_v, bh_v, h,  N_Na, phi_na_v)
+            _add_noise(g_start + 2*n_comp, an_v, bn_v, nk, N_K, phi_k_v)
 
         # ── Membrane current noise ───────────────────────────────────
         if noise:

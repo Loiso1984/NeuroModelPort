@@ -193,7 +193,9 @@ class NeuronSolver:
         dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
 
         # Secondary stimulus defaults.
-        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 0.0
+        # Keep secondary defaults physically valid even when dual stimulation is disabled.
+        # This protects against stricter external validators and stale serialized configs.
+        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
         zap_f0_2, zap_f1_2 = primary_zap_f0, primary_zap_f1
         stim_comp_2, stim_mode_2 = 0, 0
         use_dfilter_secondary = 0
@@ -229,17 +231,19 @@ class NeuronSolver:
             "en_im": cfg.channels.enable_IM,
             "en_nap": cfg.channels.enable_NaP,
             "en_nar": cfg.channels.enable_NaR,
-            "gna_v": morph['gNa_v'],
-            "gk_v": morph['gK_v'],
-            "gl_v": morph['gL_v'],
-            "gih_v": morph['gIh_v'],
-            "gca_v": morph['gCa_v'],
-            "ga_v": morph['gA_v'],
-            "gsk_v": morph['gSK_v'],
-            "gtca_v": morph['gTCa_v'],
-            "gim_v": morph['gIM_v'],
-            "gnap_v": morph['gNaP_v'],
-            "gnar_v": morph['gNaR_v'],
+            "gbar_mat": np.vstack([
+                morph['gNa_v'],
+                morph['gK_v'],
+                morph['gL_v'],
+                morph['gIh_v'],
+                morph['gCa_v'],
+                morph['gA_v'],
+                morph['gSK_v'],
+                morph['gTCa_v'],
+                morph['gIM_v'],
+                morph['gNaP_v'],
+                morph['gNaR_v'],
+            ]),
             "ena": cfg.channels.ENa,
             "ek": cfg.channels.EK,
             "el": cfg.channels.EL,
@@ -249,61 +253,42 @@ class NeuronSolver:
             "l_data": morph['L_data'],
             "l_indices": morph['L_indices'],
             "l_indptr": morph['L_indptr'],
-            "phi_na": cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
-            "phi_k": cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
-            "phi_ih": cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
-            "phi_ca": cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
-            "phi_ia": cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
-            "phi_tca": cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
-            "phi_im": cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
-            "phi_nap": cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
-            "phi_nar": cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
-            "t_kelvin": t_kelvin,
-            "ca_ext": cfg.calcium.Ca_ext,
-            "ca_rest": cfg.calcium.Ca_rest,
-            "tau_ca": cfg.calcium.tau_Ca,
+            "phi_mat": np.vstack([
+                cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
+                cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
+            ]),
+            "env_vec": np.array([
+                t_kelvin, cfg.calcium.Ca_ext, cfg.calcium.Ca_rest, cfg.calcium.tau_Ca, cfg.env.Mg_ext, cfg.channels.tau_SK,
+            ], dtype=np.float64),
             "b_ca": self._build_b_ca_vector(cfg, morph),
-            "mg_ext": cfg.env.Mg_ext,
-            "tau_sk": cfg.channels.tau_SK,
-            "stype": stype,
-            "iext": primary_iext,
-            "t0": primary_t0,
-            "td": primary_td,
-            "atau": primary_atau,
-            "zap_f0_hz": primary_zap_f0,
-            "zap_f1_hz": primary_zap_f1,
+            "stim1_vec": np.array([
+                stype, primary_iext, primary_t0, primary_td, primary_atau, primary_zap_f0, primary_zap_f1,
+                primary_stim_comp, stim_mode, use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
+            ], dtype=np.float64),
             "event_times_arr": np.array(cfg.stim.event_times or [], dtype=np.float64),
             "n_events": int(len(cfg.stim.event_times or [])),
-            "stim_comp": primary_stim_comp,
-            "stim_mode": stim_mode,
-            "use_dfilter_primary": use_dfilter_primary,
-            "dfilter_attenuation": dfilter_attenuation,
-            "dfilter_tau_ms": dfilter_tau_ms,
-            "dual_stim_enabled": dual_stim_enabled,
-            "stype_2": stype_2,
-            "iext_2": iext_2,
-            "t0_2": t0_2,
-            "td_2": td_2,
-            "atau_2": atau_2,
-            "zap_f0_hz_2": zap_f0_2,
-            "zap_f1_hz_2": zap_f1_2,
-            "stim_comp_2": stim_comp_2,
-            "stim_mode_2": stim_mode_2,
-            "use_dfilter_secondary": use_dfilter_secondary,
-            "dfilter_attenuation_2": dfilter_attenuation_2,
-            "dfilter_tau_ms_2": dfilter_tau_ms_2,
+            "stim2_vec": np.array([
+                dual_stim_enabled,
+                stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_2, zap_f1_2,
+                stim_comp_2, stim_mode_2, use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
+            ], dtype=np.float64),
         }
         validate_rhs_args_values(rhs_values)
         args = pack_rhs_args(rhs_values)
 
-        # Pre-allocate the RHS output buffer once.  rhs_multicompartment zeroes
+        # Pre-allocate the RHS output buffer once. rhs_multicompartment zeroes
         # it in-place via a Numba loop (no np.zeros_like heap alloc per step).
-        # The wrapper returns .copy() so scipy BDF can safely hold references to
-        # previous f-values without them being overwritten on the next call.
         _dydt_buf = np.empty(len(y0), dtype=np.float64)
 
         def _rhs_fn(t, y):
-            return rhs_multicompartment(t, y, *args, _dydt_buf).copy()
+            return rhs_multicompartment(t, y, *args, _dydt_buf)
 
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
 
@@ -342,19 +327,37 @@ class NeuronSolver:
         elif jacobian_mode != "dense_fd":
             raise ValueError(f"Unsupported jacobian_mode={jacobian_mode}")
 
-        sol = solve_ivp(
-            _rhs_fn,
-            (0.0, cfg.stim.t_sim),
-            y0,
-            # args= omitted: _rhs_fn captures args and _dydt_buf via closure
-            method='BDF',
-            t_eval=t_eval,
-            rtol=1e-5,
-            atol=1e-7,
-            max_step=max_step,
-            dense_output=False,  # Save memory
-            **jacobian_options,
-        )
+        def _solve(method: str, *, rtol: float, atol: float, use_jacobian: bool):
+            opts = jacobian_options if use_jacobian else {}
+            return solve_ivp(
+                _rhs_fn,
+                (0.0, cfg.stim.t_sim),
+                y0,
+                # args= omitted: _rhs_fn captures args and _dydt_buf via closure
+                method=method,
+                t_eval=t_eval,
+                rtol=rtol,
+                atol=atol,
+                max_step=max_step,
+                dense_output=False,  # Save memory
+                **opts,
+            )
+
+        try:
+            sol = _solve("BDF", rtol=1e-5, atol=1e-7, use_jacobian=True)
+            bdf_exception_message = None
+        except Exception as exc:
+            # Some sparse factorization failures (e.g., exactly singular Jacobian)
+            # can propagate from SciPy internals before `sol.success` is populated.
+            # Treat this path as a BDF failure and fall back to LSODA.
+            bdf_exception_message = f"{type(exc).__name__}: {exc}"
+            logger.warning("Primary integrator crashed during BDF step: %s", bdf_exception_message)
+            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            if not sol.success:
+                raise RuntimeError(
+                    "Integrator failed after fallback. "
+                    f"BDF exception='{bdf_exception_message}'; LSODA='{sol.message}'"
+                ) from exc
         
         # Report actual simulation time
         t_elapsed = time.time() - t_start
@@ -362,7 +365,17 @@ class NeuronSolver:
             logger.info("   Completed in %.1fs", t_elapsed)
 
         if not sol.success:
-            raise RuntimeError(f"Integrator failed: {sol.message}")
+            first_message = str(sol.message)
+            logger.warning("Primary integrator failed (BDF): %s", first_message)
+            # Fallback for stiff/ill-conditioned episodes where BDF can fail with
+            # "Required step size is less than spacing between numbers."
+            # LSODA often recovers these trajectories by switching methods internally.
+            sol = _solve("LSODA", rtol=3e-5, atol=3e-7, use_jacobian=False)
+            if not sol.success:
+                raise RuntimeError(
+                    "Integrator failed after fallback. "
+                    f"BDF='{first_message}'; LSODA='{sol.message}'"
+                )
 
         res = SimulationResult(sol.t, sol.y, n_comp, cfg)
         self._post_process_physics(res, morph)

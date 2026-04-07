@@ -9,11 +9,13 @@ from .dual_stimulation import (
 F_CONST = 96485.33
 R_GAS = 8.314
 TEMP_ZERO = 273.15
+CA_I_MIN_M_M = 1e-9
+CA_I_MAX_M_M = 10.0
 
 @njit(float64(float64, float64, float64), cache=True)
 def nernst_ca_ion(ca_i, ca_ext, t_kelvin):
     """Динамический потенциал Нернста для Кальция (z=2). | Dynamic Nernst potential for Calcium (z=2)."""
-    ca_i_safe = max(ca_i, 1e-9)
+    ca_i_safe = min(max(ca_i, CA_I_MIN_M_M), CA_I_MAX_M_M)
     return (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(ca_ext / ca_i_safe) * 1000.0
 
 @njit(float64(float64, float64, float64, float64), cache=True)
@@ -72,6 +74,60 @@ def nmda_mg_block(V, Mg_ext):
     """
     return 1.0 / (1.0 + (Mg_ext / 3.57) * np.exp(-0.062 * V))
 
+
+@njit(cache=True)
+def compute_ionic_currents_scalar(
+    vi, mi, hi, ni,
+    ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, sk_gate,
+    en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+    gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar,
+    ena, ek, el, eih, ea,
+    ca_i_val, ca_ext, ca_rest, t_kelvin,
+):
+    """Shared ionic-current math (deterministic RHS + stochastic EM path)."""
+    i_ion = gl * (vi - el)
+    i_ion += gna * (mi * mi * mi) * hi * (vi - ena)
+    i_ion += gk * (ni * ni * ni * ni) * (vi - ek)
+
+    i_ca_influx = 0.0
+    if dyn_ca:
+        ca_i_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
+        eca_i = nernst_ca_ion(ca_i_safe, ca_ext, t_kelvin)
+    else:
+        eca_i = 120.0
+
+    if en_ih:
+        i_ion += gih * ri * (vi - eih)
+
+    if en_ica:
+        i_ca_current = gca * (si * si) * ui * (vi - eca_i)
+        i_ion += i_ca_current
+        if i_ca_current < 0.0:
+            i_ca_influx += -i_ca_current
+
+    if en_ia:
+        i_ion += ga * ai * bi * (vi - ea)
+
+    if en_itca:
+        i_tca = gtca * (pi * pi) * qi * (vi - eca_i)
+        i_ion += i_tca
+        if i_tca < 0.0:
+            i_ca_influx += -i_tca
+
+    if en_sk:
+        i_ion += gsk * sk_gate * (vi - ek)
+
+    if en_im:
+        i_ion += gim * wi * (vi - ek)
+
+    if en_nap:
+        i_ion += gnap * xi * (vi - ena)
+
+    if en_nar:
+        i_ion += gnar * yi * ji * (vi - ena)
+
+    return i_ion, i_ca_influx
+
 @njit(float64(int32), cache=True)
 def _get_syn_reversal(stype):
     """Return synaptic reversal potential for conductance-based types."""
@@ -116,21 +172,16 @@ def rhs_multicompartment(
     t, y, n_comp,
     # Флаги включения каналов
     en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
-    # Векторы проводимостей (уже с учетом AIS-множителей)
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
+    # Packed per-compartment vectors (rows): conductances + thermal phi
+    gbar_mat,  # [gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar]
     # Потенциалы реверсии
     ena, ek, el, eih, ea,
     # Морфология и среда
     cm_v, l_data, l_indices, l_indptr,
-    phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar,
-    t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
-    # Стимуляция (primary)
-    stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
-    use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
-    # Dual stimulation (secondary) - optional
-    dual_stim_enabled,
-    stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, stim_comp_2, stim_mode_2,
-    use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
+    phi_mat,   # [phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar]
+    env_vec, b_ca,
+    # Стимуляция bundles + event queue
+    stim1_vec, event_times_arr, n_events, stim2_vec,
     # Pre-allocated output buffer (avoids heap allocation per solver step)
     dydt
 ):
@@ -142,6 +193,63 @@ def rhs_multicompartment(
     """
 
     # --- Compute variable offsets in state vector y ---
+    gna_v = gbar_mat[0]
+    gk_v = gbar_mat[1]
+    gl_v = gbar_mat[2]
+    gih_v = gbar_mat[3]
+    gca_v = gbar_mat[4]
+    ga_v = gbar_mat[5]
+    gsk_v = gbar_mat[6]
+    gtca_v = gbar_mat[7]
+    gim_v = gbar_mat[8]
+    gnap_v = gbar_mat[9]
+    gnar_v = gbar_mat[10]
+
+    phi_na = phi_mat[0]
+    phi_k = phi_mat[1]
+    phi_ih = phi_mat[2]
+    phi_ca = phi_mat[3]
+    phi_ia = phi_mat[4]
+    phi_tca = phi_mat[5]
+    phi_im = phi_mat[6]
+    phi_nap = phi_mat[7]
+    phi_nar = phi_mat[8]
+
+
+    t_kelvin = env_vec[0]
+    ca_ext = env_vec[1]
+    ca_rest = env_vec[2]
+    tau_ca = env_vec[3]
+    mg_ext = env_vec[4]
+    tau_sk = env_vec[5]
+
+    stype = int(stim1_vec[0])
+    iext = stim1_vec[1]
+    t0 = stim1_vec[2]
+    td = stim1_vec[3]
+    atau = stim1_vec[4]
+    zap_f0_hz = stim1_vec[5]
+    zap_f1_hz = stim1_vec[6]
+    stim_comp = int(stim1_vec[7])
+    stim_mode = int(stim1_vec[8])
+    use_dfilter_primary = int(stim1_vec[9])
+    dfilter_attenuation = stim1_vec[10]
+    dfilter_tau_ms = stim1_vec[11]
+
+    dual_stim_enabled = int(stim2_vec[0])
+    stype_2 = int(stim2_vec[1])
+    iext_2 = stim2_vec[2]
+    t0_2 = stim2_vec[3]
+    td_2 = stim2_vec[4]
+    atau_2 = stim2_vec[5]
+    zap_f0_hz_2 = stim2_vec[6]
+    zap_f1_hz_2 = stim2_vec[7]
+    stim_comp_2 = int(stim2_vec[8])
+    stim_mode_2 = int(stim2_vec[9])
+    use_dfilter_secondary = int(stim2_vec[10])
+    dfilter_attenuation_2 = stim2_vec[11]
+    dfilter_tau_ms_2 = stim2_vec[12]
+
     off_v = 0
     off_m = n_comp
     off_h = 2 * n_comp
@@ -228,6 +336,9 @@ def rhs_multicompartment(
     if stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 0.0:
         attenuated_current = dfilter_attenuation * base_current
         d_vfiltered_dt_primary = (attenuated_current - v_filtered_primary) / dfilter_tau_ms
+    use_dfilter_primary_eff = use_dfilter_primary
+    if dfilter_tau_ms <= 0.0:
+        use_dfilter_primary_eff = 0
 
     is_cond_2 = False
     e_syn_2 = 0.0
@@ -242,6 +353,9 @@ def rhs_multicompartment(
         if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 0.0:
             attenuated_current_2 = dfilter_attenuation_2 * base_current_2
             d_vfiltered_dt_secondary = (attenuated_current_2 - v_filtered_secondary) / dfilter_tau_ms_2
+    use_dfilter_secondary_eff = use_dfilter_secondary
+    if dfilter_tau_ms_2 <= 0.0:
+        use_dfilter_secondary_eff = 0
 
     # --- Zero the pre-allocated output buffer (Numba-native; no heap alloc) ---
     for _k in range(len(dydt)):
@@ -254,73 +368,28 @@ def rhs_multicompartment(
         hi = y[off_h + i]
         ni = y[off_n + i]
 
-        # Ionic currents (scalar accumulation)
-        i_ion = gl_v[i] * (vi - el)
-        i_ion += gna_v[i] * (mi * mi * mi) * hi * (vi - ena)
-        i_ion += gk_v[i] * (ni * ni * ni * ni) * (vi - ek)
+        ri = y[off_r + i] if en_ih else 0.0
+        si = y[off_s + i] if en_ica else 0.0
+        ui = y[off_u + i] if en_ica else 0.0
+        ai = y[off_a + i] if en_ia else 0.0
+        bi = y[off_b + i] if en_ia else 0.0
+        pi = y[off_p + i] if en_itca else 0.0
+        qi = y[off_q + i] if en_itca else 0.0
+        wi = y[off_w + i] if en_im else 0.0
+        xi = y[off_x + i] if en_nap else 0.0
+        yi = y[off_y + i] if en_nar else 0.0
+        ji = y[off_j + i] if en_nar else 0.0
+        zi = y[off_zsk + i] if en_sk else 0.0
+        ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
 
-        i_ca_influx = 0.0  # only inward Ca for calcium dynamics
-
-        if en_ih:
-            ri = y[off_r + i]
-            i_ion += gih_v[i] * ri * (vi - eih)
-
-        if en_ica:
-            si = y[off_s + i]
-            ui = y[off_u + i]
-            # Nernst for Ca: per-compartment when dynamic, else fixed
-            if dyn_ca:
-                ca_i_val = y[off_ca + i]
-                eca_i = nernst_ca_ion(ca_i_val, ca_ext, t_kelvin)
-            else:
-                ca_i_val = ca_rest
-                eca_i = 120.0
-            i_ca_current = gca_v[i] * (si * si) * ui * (vi - eca_i)
-            i_ion += i_ca_current
-            # Only inward (negative) Ca current contributes to Ca accumulation
-            if i_ca_current < 0.0:
-                i_ca_influx = -i_ca_current
-
-        if en_ia:
-            ai = y[off_a + i]
-            bi = y[off_b + i]
-            i_ion += ga_v[i] * ai * bi * (vi - ea)
-
-        # T-type Ca (low-threshold, Destexhe 1998)
-        if en_itca:
-            pi = y[off_p + i]
-            qi = y[off_q + i]
-            if dyn_ca:
-                if not en_ica:  # eca_i not yet computed
-                    ca_i_val = y[off_ca + i]
-                    eca_i = nernst_ca_ion(ca_i_val, ca_ext, t_kelvin)
-            else:
-                if not en_ica:
-                    eca_i = 120.0
-            i_tca = gtca_v[i] * (pi * pi) * qi * (vi - eca_i)
-            i_ion += i_tca
-            if i_tca < 0.0:
-                i_ca_influx += -i_tca
-
-        if en_sk:
-            zi = y[off_zsk + i]  # SK gate state variable (ODE-based)
-            i_ion += gsk_v[i] * zi * (vi - ek)
-
-        # M-type K (slow non-inactivating, KCNQ2/3)
-        if en_im:
-            wi = y[off_w + i]
-            i_ion += gim_v[i] * wi * (vi - ek)
-
-        # Persistent Na (subthreshold, non-inactivating)
-        if en_nap:
-            xi = y[off_x + i]
-            i_ion += gnap_v[i] * xi * (vi - ena)
-
-        # Resurgent Na (repolarization-activated window current)
-        if en_nar:
-            yi = y[off_y + i]
-            ji = y[off_j + i]
-            i_ion += gnar_v[i] * yi * ji * (vi - ena)
+        i_ion, i_ca_influx = compute_ionic_currents_scalar(
+            vi, mi, hi, ni,
+            ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
+            en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+            gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i], gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
+            ena, ek, el, eih, ea,
+            ca_i_val, ca_ext, ca_rest, t_kelvin,
+        )
 
         # Axial coupling (sparse Laplacian row i)
         i_ax = 0.0
@@ -331,7 +400,7 @@ def rhs_multicompartment(
         # Stimulus current: evaluate distributed contribution per-compartment.
         i_stim_primary = distributed_stimulus_current_for_comp(
             i, n_comp, base_current, stim_comp, stim_mode,
-            use_dfilter_primary, dfilter_attenuation, v_filtered_primary,
+            use_dfilter_primary_eff, dfilter_attenuation, dfilter_tau_ms, v_filtered_primary,
         )
         if is_conductance_based:
             g_syn = i_stim_primary  # distributed conductance [mS/cm²]
@@ -345,7 +414,7 @@ def rhs_multicompartment(
         if dual_stim_enabled == 1:
             i_stim_secondary = distributed_stimulus_current_for_comp(
                 i, n_comp, base_current_2, stim_comp_2, stim_mode_2,
-                use_dfilter_secondary, dfilter_attenuation_2, v_filtered_secondary,
+                use_dfilter_secondary_eff, dfilter_attenuation_2, dfilter_tau_ms_2, v_filtered_secondary,
             )
             if is_cond_2:
                 g2 = i_stim_secondary
@@ -405,7 +474,7 @@ def rhs_multicompartment(
         if en_sk:
             zi = y[off_zsk + i]
             if dyn_ca:
-                ca_sk = y[off_ca + i]
+                ca_sk = min(max(y[off_ca + i], CA_I_MIN_M_M), CA_I_MAX_M_M)
             else:
                 ca_sk = ca_rest
             z_inf = z_inf_SK(ca_sk)
@@ -415,8 +484,10 @@ def rhs_multicompartment(
         if dyn_ca:
             ca_i_val = y[off_ca + i]
             dca = b_ca[i] * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
-            # Hard clamp: prevent negative calcium
-            if ca_i_val < 1e-9 and dca < 0.0:
+            # Hard clamp: keep calcium in physiologically bounded range.
+            if ca_i_val <= CA_I_MIN_M_M and dca < 0.0:
+                dca = 0.0
+            if ca_i_val >= CA_I_MAX_M_M and dca > 0.0:
                 dca = 0.0
             dydt[off_ca + i] = dca
 

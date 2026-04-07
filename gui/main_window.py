@@ -398,6 +398,7 @@ class MainWindow(QMainWindow):
             self.config.stim,
             "Stimulation",
             on_change=self._on_stim_field_changed,
+            hidden_fields={"Iext_absolute_nA"},
         )
         self.form_stim_loc = PydanticFormWidget(
             self.config.stim_location,
@@ -429,7 +430,6 @@ class MainWindow(QMainWindow):
         self.form_ana = PydanticFormWidget(
             self.config.analysis,
             "Analysis / Sweep / Map",
-            hidden_fields={"enable_lyapunov"},
         )
 
         # Group 1: run setup (user-edited first)
@@ -530,8 +530,13 @@ class MainWindow(QMainWindow):
         else:
             jac_note = f" Jacobian: {jac}."
 
+        i_abs_nA = self._compute_display_iext_absolute_nA()
+        iext_note = f" | Iext(abs): {i_abs_nA:.3f} nA (read-only)"
+
         if hasattr(self, "lbl_params_hint"):
-            self.lbl_params_hint.setText(f"{priority_note}  {mode_note}{stim_note}{jac_note}")
+            self.lbl_params_hint.setText(
+                f"{priority_note}  {mode_note}{stim_note}{jac_note}{iext_note}"
+            )
         if hasattr(self, "lbl_dual_priority"):
             self.lbl_dual_priority.setText(priority_note)
 
@@ -587,12 +592,28 @@ class MainWindow(QMainWindow):
             if l is not None:
                 l.setVisible(is_visible)
 
+    def _compute_display_iext_absolute_nA(self) -> float:
+        """
+        Compute display-only absolute current from the active source of truth.
+
+        - Dual Stim ON  -> dual primary Iext is effective input.
+        - Dual Stim OFF -> canonical config.stim.Iext is effective input.
+        """
+        from core.unit_converter import density_to_absolute_current
+
+        d = float(self.config.morphology.d_soma)
+        area = np.pi * d * d
+        dual_cfg = getattr(self, "dual_stim_widget", None)
+        if dual_cfg is not None and bool(self.dual_stim_widget.config.enabled):
+            i_density = float(self.dual_stim_widget.config.primary_Iext)
+        else:
+            i_density = float(self.config.stim.Iext)
+        return float(density_to_absolute_current(i_density, area))
+
     def _recompute_absolute_iext(self) -> float:
-        """Compute display-only absolute current from canonical density source."""
-        i_abs = float(self.config.Iext_absolute_nA)
-        # Backward-compatible: if a display widget exists, keep it visually synced.
-        if "Iext_absolute_nA" in self.form_stim.widgets_map:
-            self._set_stim_form_value("Iext_absolute_nA", i_abs)
+        """Backward-compatible shim: returns display value and refreshes hints."""
+        i_abs = self._compute_display_iext_absolute_nA()
+        self._update_params_hint()
         return i_abs
 
     def _set_stim_form_value(self, field_name: str, value):
@@ -626,11 +647,8 @@ class MainWindow(QMainWindow):
         self._set_stim_form_value("pulse_dur", float(dc.primary_duration))
         self._set_stim_form_value("alpha_tau", float(dc.primary_alpha_tau))
 
-        if "Iext_absolute_nA" in self.form_stim.widgets_map:
-            d = float(self.config.morphology.d_soma)
-            area = np.pi * d * d
-            i_abs = float(dc.primary_Iext) * area * 1000.0
-            self._set_stim_form_value("Iext_absolute_nA", i_abs)
+        # Absolute current is displayed only in read-only hint text (SSoT).
+        self._update_params_hint()
 
     def _on_morph_field_changed(self, field_name: str, _value):
         self.oscilloscope.sync_delay_controls_for_config(self.config)
@@ -721,7 +739,6 @@ class MainWindow(QMainWindow):
         overridden_stim_fields = (
             "stim_type",
             "Iext",
-            "Iext_absolute_nA",
             "pulse_start",
             "pulse_dur",
             "alpha_tau",
