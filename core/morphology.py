@@ -1,6 +1,47 @@
 import numpy as np
 from scipy.sparse import lil_matrix
 
+
+def _build_hines_order(parent_idx: np.ndarray, n_comp: int) -> np.ndarray:
+    """Build Hines elimination order (leaves-to-root) for tree solver.
+    
+    Returns array of compartment indices in order from distal (leaves)
+    to proximal (root), which is the correct order for forward elimination
+    in the Hines algorithm.
+    """
+    # Build children list for each node
+    children = [[] for _ in range(n_comp)]
+    for i in range(n_comp):
+        p = parent_idx[i]
+        if p >= 0:
+            children[p].append(i)
+    
+    # BFS/DFS from leaves to root
+    order = []
+    visited = [False] * n_comp
+    
+    def visit_leaves_first(node):
+        if visited[node]:
+            return
+        visited[node] = True
+        # Visit all children first (they are more distal)
+        for child in children[node]:
+            visit_leaves_first(child)
+        # Then add this node (post-order)
+        order.append(node)
+    
+    # Find root (parent = -1) and start from it
+    root = 0
+    for i in range(n_comp):
+        if parent_idx[i] < 0:
+            root = i
+            break
+    
+    visit_leaves_first(root)
+    # order is now root-to-leaves (post-order), reverse to get leaves-to-root
+    return np.array(order[::-1], dtype=np.int64)
+
+
 def gax(d: float, Ra: float, dx: float) -> float:
     """Аксиальная проводимость однородного цилиндра (мСм). | Axial conductance of uniform cylinder (mS)."""
     # Формула: g = (pi * r^2) / (Ra * dx), умножаем на 1000 для перевода в мСм | Formula: g = (pi * r^2) / (Ra * dx), multiply by 1000 for mS conversion
@@ -168,70 +209,6 @@ class MorphologyBuilder:
 
         # Преобразуем в CSR формат | Convert to CSR format
         L_csr = L_matrix.tocsr()
-
-        # ── TASK 1: Hines topology arrays ─────────────────────────────────────
-        # parent_idx[i]  : index of parent compartment (-1 for soma root)
-        # hines_order    : post-order (leaves → root) traversal for Hines elimination
-        # g_axial_to_parent[i]        : L_csr[i, parent[i]] — area-normalized coupling
-        #                               used as a[i] in child's row (positive off-diagonal)
-        # g_axial_parent_to_child[i]  : L_csr[parent[i], i] — coupling used as b[i]
-        #                               in parent's row for eliminating child i
-        parent_idx = np.full(N_comp, -1, dtype=np.int32)
-        g_axial_to_parent = np.zeros(N_comp, dtype=np.float64)
-        g_axial_parent_to_child = np.zeros(N_comp, dtype=np.float64)
-        _hines_list: list = []
-
-        if mc.single_comp:
-            _hines_list = [0]
-        else:
-            _ht_start = 1 + mc.N_ais           # index of first trunk compartment
-            _hfork    = _ht_start + mc.N_trunk - 1  # last trunk / fork point
-            _hb1      = _hfork + 1              # first branch-1 compartment
-            _hb2      = _hb1 + mc.N_b1          # first branch-2 compartment
-
-            # AIS chain: soma → AIS[1] → ... → AIS[N_ais]
-            if mc.N_ais > 0:
-                parent_idx[1] = 0
-                for _k in range(2, 1 + mc.N_ais):
-                    parent_idx[_k] = _k - 1
-
-            # Trunk chain: last-AIS (or soma) → trunk[0] → ... → fork
-            if mc.N_trunk > 0:
-                parent_idx[_ht_start] = mc.N_ais if mc.N_ais > 0 else 0
-                for _k in range(_ht_start + 1, _hfork + 1):
-                    parent_idx[_k] = _k - 1
-
-            # Branch-1 chain: fork → b1[0] → ... → b1[N_b1-1]
-            if mc.N_b1 > 0:
-                parent_idx[_hb1] = _hfork
-                for _k in range(_hb1 + 1, _hb1 + mc.N_b1):
-                    parent_idx[_k] = _k - 1
-
-            # Branch-2 chain: fork → b2[0] → ... → b2[N_b2-1]
-            if mc.N_b2 > 0:
-                parent_idx[_hb2] = _hfork
-                for _k in range(_hb2 + 1, _hb2 + mc.N_b2):
-                    parent_idx[_k] = _k - 1
-
-            # Hines order: leaves → root (post-order)
-            if mc.N_b1 > 0:
-                _hines_list.extend(range(_hb1 + mc.N_b1 - 1, _hb1 - 1, -1))
-            if mc.N_b2 > 0:
-                _hines_list.extend(range(_hb2 + mc.N_b2 - 1, _hb2 - 1, -1))
-            if mc.N_trunk > 0:
-                _hines_list.extend(range(_hfork, _ht_start - 1, -1))
-            if mc.N_ais > 0:
-                _hines_list.extend(range(mc.N_ais, 0, -1))
-            _hines_list.append(0)
-
-        hines_order = np.array(_hines_list, dtype=np.int32)
-
-        # Extract area-normalized coupling from L_csr (off-diagonals are positive)
-        for _i in range(1, N_comp):
-            _p = int(parent_idx[_i])
-            if _p >= 0:
-                g_axial_to_parent[_i]       = L_csr[_i, _p]   # a[i]
-                g_axial_parent_to_child[_i] = L_csr[_p, _i]   # b[i]
 
         return {
             'N_comp': N_comp,

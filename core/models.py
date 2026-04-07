@@ -245,8 +245,11 @@ class SimulationParams(BaseModel):
     pulse_start: float  = Field(default=10.0,        description="Pulse onset (ms)")
     pulse_dur:   float  = Field(default=1.0,         description="Pulse duration (ms)")
     alpha_tau:   float  = Field(default=2.0,         description="Alpha-synapse time constant (ms)")
+    
+    # ZAP (impedance) stimulus parameters
     zap_f0_hz: float = Field(default=0.5, ge=0.01, description="ZAP/chirp start frequency (Hz)")
     zap_f1_hz: float = Field(default=40.0, ge=0.01, description="ZAP/chirp end frequency (Hz)")
+    
     stim_comp:   int    = Field(default=0,           description="Compartment index to inject current")
     # Event-driven synaptic queue (Stage 6.3, preparation for network connectivity)
     # Each entry is a spike-arrival timestamp in ms. When non-empty and stim_type is

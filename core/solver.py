@@ -8,7 +8,7 @@ from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
-from core.rhs import rhs_multicompartment, F_CONST, R_GAS
+from core.rhs import rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS
 from core.physics_params import create_physics_params
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
@@ -339,7 +339,7 @@ class NeuronSolver:
             # Reuse pre-allocated buffer; rhs_multicompartment fills it in-place.
             # .copy() returns a UNIQUE array to SciPy so BDF can safely retain
             # references to previous evaluations in its history buffer.
-            # TODO v11.0: eliminate .copy() when switching to a native Numba
+            
             # time-loop that owns its own history — BDF will no longer be involved.
             _dydt_buf.fill(0.0)
             rhs_multicompartment(t, y, physics_params, _dydt_buf)
@@ -889,15 +889,19 @@ class NeuronSolver:
 
     # ─────────────────────────────────────────────────────────────────
     def run_native(self, custom_config: "FullModelConfig | None" = None) -> SimulationResult:
-        """Run simulation with the native Hines solver (v11.0).
+        """Run simulation with the native Hines solver (v11.1).
         
-        Fixed-step Backward-Euler + O(N) Hines tree solver.
+        Fixed-step Backward-Euler + TRUE O(N) Hines tree solver.
         Returns a standard SimulationResult compatible with GUI and analytics.
         """
         from core.native_loop import run_native_loop
         import scipy.sparse
+        import time
 
         cfg = custom_config or self.config
+        
+        logger.info("Using NATIVE HINES solver (O(N) tree solver, Exponential Euler)")
+        t_start = time.time()
 
         morph  = MorphologyBuilder.build(cfg)
         n_comp = morph['N_comp']
@@ -996,8 +1000,8 @@ class NeuronSolver:
         is_nmda_2 = stype_2 == 5
 
         # ── Synaptic reversal potentials ──
-        e_syn = _get_syn_reversal(cfg)
-        e_syn_2 = _get_syn_reversal(cfg) if dual_stim_enabled else 0.0
+        e_syn = _get_syn_reversal(stype)
+        e_syn_2 = _get_syn_reversal(stype_2) if dual_stim_enabled else 0.0
 
         # ── State offsets ──
         off_s = 0
@@ -1023,17 +1027,17 @@ class NeuronSolver:
         g_axial_parent_to_child = morph['g_axial_parent_to_child']
 
         # ── Conductance arrays ──
-        gna_v = np.full(n_comp, cfg.channels.gNa_soma)
-        gk_v = np.full(n_comp, cfg.channels.gK_soma)
-        gl_v = np.full(n_comp, cfg.channels.gL_soma)
-        gih_v = np.full(n_comp, cfg.channels.gIh_soma)
-        gca_v = np.full(n_comp, cfg.channels.gCa_soma)
-        ga_v = np.full(n_comp, cfg.channels.gA_soma)
-        gsk_v = np.full(n_comp, cfg.channels.gSK_soma)
-        gtca_v = np.full(n_comp, cfg.channels.gTCa_soma)
-        gim_v = np.full(n_comp, cfg.channels.gIM_soma)
-        gnap_v = np.full(n_comp, cfg.channels.gNaP_soma)
-        gnar_v = np.full(n_comp, cfg.channels.gNaR_soma)
+        gna_v = morph['gNa_v']
+        gk_v = morph['gK_v']
+        gl_v = morph['gL_v']
+        gih_v = morph['gIh_v']
+        gca_v = morph['gCa_v']
+        ga_v = morph['gA_v']
+        gsk_v = morph['gSK_v']
+        gtca_v = morph['gTCa_v']
+        gim_v = morph['gIM_v']
+        gnap_v = morph['gNaP_v']
+        gnar_v = morph['gNaR_v']
 
         # ── Reversal potentials ──
         ena = cfg.channels.E_Na
@@ -1062,16 +1066,35 @@ class NeuronSolver:
         # ── Build B_Ca vector ──
         b_ca_v = self._build_b_ca_vector(cfg, morph)
 
-        dt = float(cfg.stim.dt_eval)
+        # ── Time stepping: internal vs output ──
+        # Hodgkin-Huxley needs dt ≤ 0.025ms for stability
+        dt_eval = float(cfg.stim.dt_eval)
+        dt_internal = min(0.025, dt_eval / 4.0)  # At least 4 micro-steps per output point
+        
         t_out, y_out = run_native_loop(
             y0.astype(np.float64),
-            float(cfg.stim.t_sim), dt, dt,
+            float(cfg.stim.t_sim), dt_internal, dt_eval,
             int(n_comp),
             parent_idx.astype(np.int64),
             hines_order.astype(np.int64),
+            # Morphology arrays
+            g_axial_to_parent.astype(np.float64),
+            g_axial_parent_to_child.astype(np.float64),
+            cm_v.astype(np.float64),
+            # Conductance arrays
+            gna_v.astype(np.float64), gk_v.astype(np.float64), gl_v.astype(np.float64),
+            gih_v.astype(np.float64), gca_v.astype(np.float64), ga_v.astype(np.float64),
+            gsk_v.astype(np.float64), gtca_v.astype(np.float64), gim_v.astype(np.float64),
+            gnap_v.astype(np.float64), gnar_v.astype(np.float64),
+            # Reversal potentials
+            ena, ek, el, eih, ea, en_ica, en_sk, en_itca, en_im, en_nap, en_nar,
             # Environment
             t_kelvin, cfg.env.Ca_ext, cfg.calcium.Ca_rest,
             cfg.calcium.tau_Ca, cfg.env.Mg_ext, cfg.calcium.tau_SK,
+            # Channel enable flags
+            cfg.channels.enable_Ih, cfg.channels.enable_ICa, cfg.channels.enable_IA,
+            cfg.channels.enable_SK, cfg.channels.enable_ITCa, cfg.channels.enable_IM,
+            cfg.channels.enable_NaP, cfg.channels.enable_NaR, dyn_ca,
             # Primary stimulus
             stype, primary_iext, primary_t0, primary_td, primary_atau,
             primary_zap_f0, primary_zap_f1, primary_stim_comp, stim_mode,
@@ -1084,11 +1107,7 @@ class NeuronSolver:
             event_times.astype(np.float64), n_events,
             # Synaptic
             is_conductance_based, is_nmda,
-            e_syn, cfg.env.Mg_ext,
-            # State offsets
-            off_s, off_m, off_h, off_n, off_r, off_w, off_w_im,
-            off_ca, off_zsk, off_itca, off_im, off_nap, off_nar,
-            off_vfilt_primary, off_vfilt_secondary,
+            e_syn,
         )
 
         # ── Package result ──
@@ -1100,6 +1119,10 @@ class NeuronSolver:
             'gim_v': gim_v, 'gnap_v': gnap_v, 'gnar_v': gnar_v,
         }
         result.atp_estimate = self._estimate_atp_consumption(result, cfg)
+        
+        t_elapsed = time.time() - t_start
+        logger.info("Native Hines solver completed in %.2fs", t_elapsed)
+        
         return result
 
 

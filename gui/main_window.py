@@ -525,14 +525,29 @@ class MainWindow(QMainWindow):
     def _auto_select_jacobian_for_preset(self):
         """
         Prefer sparse_fd for computationally heavy multi-compartment presets
-        unless user explicitly selected another non-dense mode.
+        unless user explicitly selected another non-dense mode or native_hines.
         """
         p = (self._current_preset_name or "").lower()
         heavy_family = any(k in p for k in ("thalamic", "alzheimer", "hypoxia", "multiple sclerosis"))
         if not heavy_family or bool(self.config.morphology.single_comp):
             return
-        if str(getattr(self.config.stim, "jacobian_mode", "dense_fd")) == "dense_fd":
+        current_mode = str(getattr(self.config.stim, "jacobian_mode", "dense_fd"))
+        # Don't override user's Hines selection or other non-dense modes
+        if current_mode == "dense_fd":
             self.config.stim.jacobian_mode = "sparse_fd"
+            # Update Hines button state to reflect change
+            if hasattr(self, 'btn_hines'):
+                self.btn_hines.setChecked(False)
+                self.btn_hines.setText("⚡ HINES")
+                self.btn_hines.setStyleSheet("""
+                    QPushButton {
+                        background: #313244; color: #89DCEB; border-radius: 6px;
+                        border: 1px solid #45475A;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover { background: #3E3F5E; }
+                    QPushButton:disabled { color: #555568; }
+                """)
 
     def _sync_stim_type_controls(self):
         """Show only stimulation parameters relevant for current stim_type."""
@@ -787,6 +802,7 @@ class MainWindow(QMainWindow):
         self._current_preset_name = name
         apply_preset(self.config, name)
         self._auto_select_jacobian_for_preset()
+        self._sync_hines_button_state()
         self._refresh_all_forms()
         self.oscilloscope.sync_delay_controls_for_config(self.config)
         # Reset dual stim when loading new preset
@@ -860,6 +876,35 @@ class MainWindow(QMainWindow):
         self._lock_ui(False)
         QMessageBox.critical(self, "Simulation Error", msg)
         self._status("Error.")
+
+    def _sync_hines_button_state(self):
+        """Sync Hines button state with current jacobian_mode in config."""
+        if not hasattr(self, 'btn_hines'):
+            return
+        is_hines = str(getattr(self.config.stim, "jacobian_mode", "dense_fd")) == "native_hines"
+        self.btn_hines.setChecked(is_hines)
+        if is_hines:
+            self.btn_hines.setText("⚡ HINES ON")
+            self.btn_hines.setStyleSheet("""
+                QPushButton {
+                    background: #00BCD4; color: #FFFFFF; border-radius: 6px;
+                    border: 2px solid #00BCD4;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background: #00A97F; }
+                QPushButton:disabled { color: #555568; }
+            """)
+        else:
+            self.btn_hines.setText("⚡ HINES")
+            self.btn_hines.setStyleSheet("""
+                QPushButton {
+                    background: #313244; color: #89DCEB; border-radius: 6px;
+                    border: 1px solid #45475A;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background: #3E3F5E; }
+                QPushButton:disabled { color: #555568; }
+            """)
 
     def _on_hines_toggled(self, checked: bool):
         """Toggle native Hines solver mode."""
