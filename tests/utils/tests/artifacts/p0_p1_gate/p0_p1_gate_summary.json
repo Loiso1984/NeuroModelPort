@@ -1,0 +1,55 @@
+{
+  "status": "FAIL",
+  "blocking_steps": [
+    "core_contract_suite"
+  ],
+  "results": [
+    {
+      "name": "core_contract_suite",
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/core/test_rhs_contract.py",
+        "tests/core/test_jacobian_contract.py",
+        "tests/core/test_dual_stimulation_distribution.py",
+        "tests/core/test_delay_target_utils.py"
+      ],
+      "exit_code": 4,
+      "status": "ERROR",
+      "stdout_tail": "============================= test session starts =============================\nplatform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0\nrootdir: C:\\NeuroModelPort\nconfigfile: pytest.ini\ncollected 0 items\n\n============================ no tests ran in 0.01s ============================",
+      "stderr_tail": "ERROR: file or directory not found: tests/core/test_rhs_contract.py\n"
+    },
+    {
+      "name": "f_conduction_gate",
+      "command": [
+        "C:\\Python314\\python.exe",
+        "tests/utils/run_f_conduction_extended.py",
+        "--target-ratio",
+        "0.3",
+        "--output",
+        "tests\\artifacts\\p0_p1_gate\\f_conduction_gate.json"
+      ],
+      "exit_code": 2,
+      "status": "WARN_DEPENDENCY",
+      "stdout_tail": "",
+      "stderr_tail": "C:\\Python314\\python.exe: can't open file 'C:\\\\NeuroModelPort\\\\tests\\\\utils\\\\tests\\\\utils\\\\run_f_conduction_extended.py': [Errno 2] No such file or directory"
+    },
+    {
+      "name": "preset_stress_gate",
+      "command": [
+        "C:\\Python314\\python.exe",
+        "tests/utils/run_preset_stress_validation.py",
+        "--out",
+        "tests\\artifacts\\p0_p1_gate\\preset_stress_gate.json",
+        "--report-md",
+        "tests\\artifacts\\p0_p1_gate\\preset_stress_gate.md"
+      ],
+      "exit_code": 2,
+      "status": "WARN_DEPENDENCY",
+      "stdout_tail": "",
+      "stderr_tail": "C:\\Python314\\python.exe: can't open file 'C:\\\\NeuroModelPort\\\\tests\\\\utils\\\\tests\\\\utils\\\\run_preset_stress_validation.py': [Errno 2] No such file or directory"
+    }
+  ]
+}

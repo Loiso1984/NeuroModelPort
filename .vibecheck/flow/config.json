@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "projectName": "NeuroModelPort",
+  "userName": "developer",
+  "skillLevel": "intermediate",
+  "outputFolder": ".vibecheck/flow",
+  "planningArtifacts": ".vibecheck\\flow\\planning-artifacts",
+  "implementationArtifacts": ".vibecheck\\flow\\implementation-artifacts",
+  "installedAt": "2026-04-07T01:31:15.049Z",
+  "ide": [
+    "windsurf",
+    "claude-code"
+  ]
+}

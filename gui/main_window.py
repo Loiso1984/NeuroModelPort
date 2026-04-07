@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QPushButton, QLabel, QComboBox, QStatusBar,
     QScrollArea, QMessageBox, QApplication, QFileDialog,
-    QGroupBox, QToolBar, QProgressDialog
+    QGroupBox, QToolBar, QProgressDialog, QLayout, QSizePolicy
 )
-from PySide6.QtCore import Qt, QThread, Signal, QObject, QRunnable, QThreadPool
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QIcon, QAction
 
 from gui.locales import T
+from gui.simulation_controller import SimulationController
 from core.models import FullModelConfig
 from core.solver import NeuronSolver
 from core.errors import SimulationParameterError
@@ -34,41 +35,6 @@ from gui.analytics import AnalyticsWidget
 from gui.topology import TopologyWidget
 from gui.axon_biophysics import AxonBiophysicsWidget
 from gui.dual_stimulation_widget import DualStimulationWidget
-
-
-# ─────────────────────────────────────────────────────────────────────
-#  WORKER (background thread for long-running analyses)
-# ─────────────────────────────────────────────────────────────────────
-class WorkerSignals(QObject):
-    finished = Signal(object)
-    error    = Signal(str)
-    progress = Signal(int, int, str)
-
-
-class Worker(QRunnable):
-    def __init__(self, fn, *args, progress_fn=None, **kwargs):
-        super().__init__()
-        self.fn      = fn
-        self.args    = args
-        self.kwargs  = kwargs
-        self.signals = WorkerSignals()
-        self.progress_fn = progress_fn  # Callback to report progress
-        
-        # If progress callback requested, inject it into kwargs
-        if progress_fn is not None:
-            self.kwargs['progress_cb'] = self._progress_callback
-
-    def _progress_callback(self, i, n, val):
-        """Report progress to UI layer."""
-        if self.progress_fn:
-            self.progress_fn(i, n, val)
-
-    def run(self):
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-            self.signals.finished.emit(result)
-        except Exception as e:
-            self.signals.error.emit(str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -115,7 +81,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(self._STYLE)
         self.config = FullModelConfig()
         self._current_preset_name = ""
-        self._thread_pool = QThreadPool()
+        self.sim_controller = SimulationController()
         self._dual_stim_signal_connected = False
         self._delay_target_name = "Terminal"
         self._delay_custom_index = 1
@@ -125,6 +91,9 @@ class MainWindow(QMainWindow):
         self._main_layout = QVBoxLayout(central)
         self._main_layout.setContentsMargins(6, 6, 6, 6)
         self._main_layout.setSpacing(6)
+        self._main_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        central.setMinimumSize(0, 0)
+        self.setMinimumSize(900, 650)
 
         self._setup_top_bar()
         self._setup_tabs()
@@ -278,6 +247,18 @@ class MainWindow(QMainWindow):
         """)
         self.btn_export.clicked.connect(self.export_csv)
 
+        self.btn_export_nml = QPushButton("📄 NeuroML")
+        self.btn_export_nml.setMinimumHeight(46)
+        self.btn_export_nml.setToolTip("Export model config to NeuroML 2.2 XML (Stage 6.4)")
+        self.btn_export_nml.setStyleSheet("""
+            QPushButton {
+                background: #313244; color: #CBA6F7; border-radius: 6px;
+                font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background: #45475A; }
+        """)
+        self.btn_export_nml.clicked.connect(self.export_neuroml)
+
         # ── Preset selector ───────────────────────────────────────────
         self.lbl_preset = QLabel("Preset:")
         self.combo_presets = QComboBox()
@@ -312,6 +293,7 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────
     def _setup_tabs(self):
         self.tabs = QTabWidget()
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # ── Tab 0: Parameters ─────────────────────────────────────────
         # Step 1: Setup
@@ -383,10 +365,13 @@ class MainWindow(QMainWindow):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustIgnored)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         scroll.setStyleSheet("QScrollArea { border: none; }")
 
         content = QWidget()
+        content.setMinimumSize(0, 0)
         c_layout = QVBoxLayout(content)
         c_layout.setSpacing(10)
 
@@ -395,6 +380,7 @@ class MainWindow(QMainWindow):
             self.config.stim,
             "Stimulation",
             on_change=self._on_stim_field_changed,
+            hidden_fields={"Iext_absolute_nA"},
         )
         self.form_stim_loc = PydanticFormWidget(
             self.config.stim_location,
@@ -423,7 +409,10 @@ class MainWindow(QMainWindow):
             on_change=self._on_morph_field_changed,
         )
         self.form_env = PydanticFormWidget(self.config.env, "Environment")
-        self.form_ana = PydanticFormWidget(self.config.analysis, "Analysis / Sweep / Map")
+        self.form_ana = PydanticFormWidget(
+            self.config.analysis,
+            "Analysis / Sweep / Map",
+        )
 
         # Group 1: run setup (user-edited first)
         grp_setup = QGroupBox("Run Setup (Edit First)")
@@ -523,8 +512,13 @@ class MainWindow(QMainWindow):
         else:
             jac_note = f" Jacobian: {jac}."
 
+        i_abs_nA = self._compute_display_iext_absolute_nA()
+        iext_note = f" | Iext(abs): {i_abs_nA:.3f} nA (read-only)"
+
         if hasattr(self, "lbl_params_hint"):
-            self.lbl_params_hint.setText(f"{priority_note}  {mode_note}{stim_note}{jac_note}")
+            self.lbl_params_hint.setText(
+                f"{priority_note}  {mode_note}{stim_note}{jac_note}{iext_note}"
+            )
         if hasattr(self, "lbl_dual_priority"):
             self.lbl_dual_priority.setText(priority_note)
 
@@ -557,15 +551,20 @@ class MainWindow(QMainWindow):
         alpha_like = {"alpha"}
         synaptic_like = {"AMPA", "NMDA", "GABAA", "GABAB", "Kainate", "Nicotinic"}
         pulse_like = {"pulse"}
+        zap_like = {"zap"}
 
-        show_pulse_start = stype in (alpha_like | synaptic_like | pulse_like)
-        show_pulse_dur = stype in pulse_like
+        show_pulse_start = stype in (alpha_like | synaptic_like | pulse_like | zap_like)
+        show_pulse_dur = stype in (pulse_like | zap_like)
         show_alpha_tau = stype in (alpha_like | synaptic_like)
+
+        show_zap = stype in zap_like
 
         visibility = {
             "pulse_start": show_pulse_start,
             "pulse_dur": show_pulse_dur,
             "alpha_tau": show_alpha_tau,
+            "zap_f0_hz": show_zap,
+            "zap_f1_hz": show_zap,
         }
         for field_name, is_visible in visibility.items():
             w = stim_fields.get(field_name)
@@ -575,11 +574,23 @@ class MainWindow(QMainWindow):
             if l is not None:
                 l.setVisible(is_visible)
 
-    def _recompute_absolute_iext(self):
-        """Update display-only absolute current from density and current soma size."""
+    def _compute_display_iext_absolute_nA(self) -> float:
+        """
+        Compute display-only absolute current from the active source of truth.
+
+        - Dual Stim ON  -> dual primary Iext is effective input.
+        - Dual Stim OFF -> canonical config.stim.Iext is effective input.
+        """
+        from core.unit_converter import density_to_absolute_current
+
         d = float(self.config.morphology.d_soma)
         area = np.pi * d * d
-        self.config.stim.Iext_absolute_nA = float(self.config.stim.Iext) * area * 1000.0
+        dual_cfg = getattr(self, "dual_stim_widget", None)
+        if dual_cfg is not None and bool(self.dual_stim_widget.config.enabled):
+            i_density = float(self.dual_stim_widget.config.primary_Iext)
+        else:
+            i_density = float(self.config.stim.Iext)
+        return float(density_to_absolute_current(i_density, area))
 
     def _set_stim_form_value(self, field_name: str, value):
         """Set stim-form widget value without emitting change callbacks."""
@@ -612,17 +623,13 @@ class MainWindow(QMainWindow):
         self._set_stim_form_value("pulse_dur", float(dc.primary_duration))
         self._set_stim_form_value("alpha_tau", float(dc.primary_alpha_tau))
 
-        d = float(self.config.morphology.d_soma)
-        area = np.pi * d * d
-        i_abs = float(dc.primary_Iext) * area * 1000.0
-        self._set_stim_form_value("Iext_absolute_nA", i_abs)
+        # Absolute current is displayed only in read-only hint text (SSoT).
+        self._update_params_hint()
 
     def _on_morph_field_changed(self, field_name: str, _value):
         self.oscilloscope.sync_delay_controls_for_config(self.config)
         if field_name == "d_soma":
-            self._recompute_absolute_iext()
-            if "Iext_absolute_nA" in self.form_stim.widgets_map:
-                self.form_stim.refresh()
+            self._update_params_hint()
         self._refresh_topology_preview()
 
     def _on_stim_field_changed(self, field_name: str, value):
@@ -642,7 +649,7 @@ class MainWindow(QMainWindow):
             self._sync_stim_type_controls()
             self.form_stim.refresh()
         if field_name in {"Iext", "stim_type"}:
-            self._recompute_absolute_iext()
+            self._update_params_hint()
             self.form_stim.refresh()
         self._update_params_hint()
         self._refresh_topology_preview()
@@ -708,7 +715,6 @@ class MainWindow(QMainWindow):
         overridden_stim_fields = (
             "stim_type",
             "Iext",
-            "Iext_absolute_nA",
             "pulse_start",
             "pulse_dur",
             "alpha_tau",
@@ -799,8 +805,7 @@ class MainWindow(QMainWindow):
                      self.form_calcium, self.form_stim, self.form_stim_loc,
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
-        self._recompute_absolute_iext()
-        self.form_stim.refresh()
+        self._update_params_hint()
         self._sync_stim_type_controls()
         self._sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
@@ -846,7 +851,7 @@ class MainWindow(QMainWindow):
             self._cancel_requested = False
 
     def _request_cancel(self):
-        """User clicked Cancel — set flag for running workers to check."""
+        """User clicked Cancel - set flag for running simulations to check."""
         self._cancel_requested = True
         self._status("Cancellation requested…")
         self.btn_cancel.setEnabled(False)
@@ -929,7 +934,7 @@ class MainWindow(QMainWindow):
         # Sync dual stim config from widget to main config.
         self._sync_dual_stim_into_config()
 
-        # Capture config snapshot and flags for the worker thread
+        # Capture config snapshot and flags for the simulation thread
         run_mc = self.config.analysis.run_mc
         run_bif = self.config.analysis.run_bifurcation
         bif_param = self.config.analysis.bif_param
@@ -939,23 +944,20 @@ class MainWindow(QMainWindow):
             self._status(f"Monte-Carlo ({mc_trials} trials)…")
         QApplication.processEvents()
 
-        def _compute():
-            """Run solver in background thread (scipy/numba release GIL)."""
-            solver = NeuronSolver(self.config)
-            result = {}
-            if run_mc:
-                result['mc_results'] = solver.run_monte_carlo()
-            else:
-                result['single'] = solver.run_single()
-            if run_bif:
-                result['bif'] = solver.run_bifurcation()
-                result['bif_param'] = bif_param
-            return result
-
-        w = Worker(_compute)
-        w.signals.finished.connect(self._on_simulation_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run simulation through SimulationController
+        if run_mc:
+            self.sim_controller.run_monte_carlo(
+                self.config,
+                mc_trials,
+                on_success=self._on_simulation_done,
+                on_error=self._on_sim_error
+            )
+        else:
+            self.sim_controller.run_single(
+                self.config,
+                on_success=self._on_simulation_done,
+                on_error=self._on_sim_error
+            )
 
     def _on_simulation_done(self, result: dict):
         """Handle simulation results on the main thread (UI updates)."""
@@ -1021,13 +1023,13 @@ class MainWindow(QMainWindow):
 
         self._sync_dual_stim_into_config()
 
-        def _do():
-            return run_euler_maruyama(self.config)
-
-        w = Worker(_do)
-        w.signals.finished.connect(self._on_stoch_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run stochastic simulation through SimulationController
+        self.sim_controller.run_stochastic(
+            self.config,
+            1,  # Single trial for Euler-Maruyama
+            on_success=self._on_stoch_done,
+            on_error=self._on_sim_error
+        )
 
     def _on_stoch_done(self, res):
         self._last_result = res
@@ -1068,15 +1070,14 @@ class MainWindow(QMainWindow):
                      f"{ana.sweep_steps} steps…")
         QApplication.processEvents()
 
-        def _do():
-            return run_sweep(self.config, ana.sweep_param, param_vals)
-
-        w = Worker(_do)
-        w.signals.finished.connect(
-            lambda res: self._on_sweep_done(res, ana.sweep_param)
+        # Run sweep through SimulationController
+        self.sim_controller.run_sweep(
+            self.config,
+            ana.sweep_param,
+            param_vals,
+            on_success=lambda res: self._on_sweep_done(res, ana.sweep_param),
+            on_error=self._on_sim_error
         )
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
 
     def _on_sweep_done(self, results, param_name):
         self.analytics.update_sweep(results, param_name)
@@ -1102,10 +1103,13 @@ class MainWindow(QMainWindow):
         else:
             self._status("Computing Strength-Duration curve (binary search)…")
         QApplication.processEvents()
-        w = Worker(run_sd_curve, cfg_for_sd, progress_fn=self._report_progress)
-        w.signals.finished.connect(self._on_sd_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run S-D curve through SimulationController
+        self.sim_controller.run_sd_curve(
+            cfg_for_sd,
+            on_success=self._on_sd_done,
+            on_error=self._on_sim_error,
+            on_progress=self._report_progress
+        )
 
     def _on_sd_done(self, sd):
         rh = sd['rheobase']
@@ -1141,10 +1145,13 @@ class MainWindow(QMainWindow):
         else:
             self._status(f"Excitability map {ana.excmap_NI}×{ana.excmap_ND} = {total} runs…")
         QApplication.processEvents()
-        w = Worker(run_excitability_map, cfg_for_excmap, progress_fn=self._report_progress)
-        w.signals.finished.connect(self._on_excmap_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run excitability map through SimulationController
+        self.sim_controller.run_excmap(
+            cfg_for_excmap,
+            on_success=self._on_excmap_done,
+            on_error=self._on_sim_error,
+            on_progress=self._report_progress
+        )
 
     def _on_excmap_done(self, exc):
         self.analytics.update_excmap(exc)
@@ -1224,6 +1231,26 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Export", f"Saved to:\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
+
+    # ─────────────────────────────────────────────────────────────────
+    #  EXPORT NEUROML (Stage 6.4)
+    # ─────────────────────────────────────────────────────────────────
+    def export_neuroml(self):
+        """Export current FullModelConfig to NeuroML 2.2 XML."""
+        from core.neuroml_export import export_neuroml as _export
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export NeuroML", "neuron_model.nml",
+            "NeuroML 2 Files (*.nml *.xml);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            _export(self.config, path=path)
+            self._status(f"NeuroML exported: {path}")
+            QMessageBox.information(self, "NeuroML Export",
+                                    f"Model exported to NeuroML 2.2:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "NeuroML Export Error", str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────
