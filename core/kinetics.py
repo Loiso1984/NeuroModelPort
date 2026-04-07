@@ -114,6 +114,40 @@ def bb_IA(V):
 # НОВЫЙ КАНАЛ: ISK - Ca2+-зависимый K+ ток (Спайковая адаптация) | NEW CHANNEL: ISK - Ca2+-dependent K+ current (Spike adaptation)
 # =====================================================================
 
+# =====================================================================
+# I_M — Muscarinic-sensitive K⁺ Current (KCNQ/Kv7, spike-frequency adaptation)
+# Yamada, Koch & Adams 1989, Methods in Neuronal Modeling (MIT Press).
+# Gating: w (single activation, no inactivation).
+# I_M = g_M * w * (V - E_K)
+# w_inf(V) = 1/(1+exp(-(V+35)/10)),  V½ = -35 mV, k = 10 mV
+# tau_w(V) = taumax / (3.3*exp((V+35)/20) + exp(-(V+35)/20))
+# Original kinetics defined at 36°C with taumax=1000 ms, Q10=2.3.
+# Pre-scaled to T_ref=6.3°C: taumax_raw = 1000 * 2.3^((36-6.3)/10)
+# so that our standard phi_channel(Q10_M) handles temperature correctly.
+# =====================================================================
+
+# taumax at T_ref=6.3°C: raw kinetics are slow at cold temperature
+_IM_TAUMAX_RAW = 1000.0 * 2.3 ** ((36.0 - 6.3) / 10.0)  # ≈ 11870 ms
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def aw_M(V):
+    """I_M activation alpha (Yamada/Koch/Adams 1989). V½ = -35 mV."""
+    x = V + 35.0
+    w_inf = 1.0 / (1.0 + np.exp(-x / 10.0))
+    denom = 3.3 * np.exp(x / 20.0) + np.exp(-x / 20.0)
+    tau_w = _IM_TAUMAX_RAW / denom
+    return w_inf / tau_w
+
+@vectorize([float64(float64)], nopython=True, cache=True)
+def bw_M(V):
+    """I_M activation beta (Yamada/Koch/Adams 1989)."""
+    x = V + 35.0
+    w_inf = 1.0 / (1.0 + np.exp(-x / 10.0))
+    denom = 3.3 * np.exp(x / 20.0) + np.exp(-x / 20.0)
+    tau_w = _IM_TAUMAX_RAW / denom
+    return (1.0 - w_inf) / tau_w
+
+
 @vectorize([float64(float64)], nopython=True, cache=True)
 def z_inf_SK(Ca_i):
     """

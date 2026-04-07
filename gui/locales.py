@@ -81,19 +81,26 @@ class Translator:
             'B_Ca':      'Current-to-concentration factor (mM / (µA/cm² · ms)).',
 
             # ── Environment descriptions ─────────────────────────────
-            'T_celsius': 'Experiment temperature (°C). Scales all kinetics via Q10.',
-            'T_ref':     'Reference temperature for channel kinetics (°C).',
-            'Q10':       'Q10 coefficient. Rate doubles per 10°C if Q10 = 2.',
+            'T_celsius':     'Experiment temperature (°C). Scales all kinetics via Q10.',
+            'T_ref':         'Reference temperature for channel kinetics (°C).',
+            'Q10':           'Q10 coefficient. Rate doubles per 10°C if Q10 = 2.',
+            'T_dend_offset': 'Dendrite–soma temperature difference (°C). Positive = dendrites warmer. Creates linear axial gradient.',
 
             # ── Simulation descriptions ──────────────────────────────
             't_sim':       'Total simulation time (ms).',
             'dt_eval':     'Output sample interval (ms). Does not affect solver accuracy.',
-            'stim_type':   'Stimulus waveform: const / pulse / alpha (synapse) / OU noise.',
+            'stim_type':   'Stimulus waveform: const / pulse / alpha / OU noise / synaptic receptors / zap chirp.',
             'Iext':        'Stimulus amplitude (µA/cm²).',
             'pulse_start': 'Pulse onset time (ms).',
             'pulse_dur':   'Pulse duration (ms).',
             'alpha_tau':   'Alpha-synapse time constant (ms). Peak at t = τ after onset.',
+            'zap_f0_hz':   'ZAP start frequency (Hz) for chirp stimulus.',
+            'zap_f1_hz':   'ZAP end frequency (Hz) for chirp stimulus.',
             'stim_comp':   'Compartment index to inject current into (0 = soma).',
+            'event_times': 'Synaptic event queue (ms). Comma-separated timestamps; e.g. "10,25,40". Overrides pulse_start for AMPA/NMDA/GABA types.',
+            'synaptic_train_type': 'Spike Train Generator: none / regular (fixed ISI) / poisson (random).',
+            'synaptic_train_freq_hz': 'Frequency of the generated spike train (Hz).',
+            'synaptic_train_duration_ms': 'Duration of the spike train (ms).',
             'stoch_gating':'Langevin gate noise via Euler-Maruyama (Fox & Lu 1994). Use 🎲 button.',
             'noise_sigma': 'Additive white noise amplitude σ (µA/cm²). Added to dV/dt.',
 
@@ -206,19 +213,26 @@ class Translator:
             'B_Ca':      'Конверсия тока в концентрацию (мМ / (мкА/см² · мс)).',
 
             # ── Среда ────────────────────────────────────────────────
-            'T_celsius': 'Температура эксперимента (°C). Масштабирует кинетику через Q10.',
-            'T_ref':     'Референсная температура каналов (°C).',
-            'Q10':       'Коэффициент Q10. При Q10=3 скорость растёт в 3 раза за 10°C.',
+            'T_celsius':     'Температура эксперимента (°C). Масштабирует кинетику через Q10.',
+            'T_ref':         'Референсная температура каналов (°C).',
+            'Q10':           'Коэффициент Q10. При Q10=3 скорость растёт в 3 раза за 10°C.',
+            'T_dend_offset': 'Разница температур дендриты–сома (°C). Плюс = дендриты теплее. Линейный аксиальный градиент.',
 
             # ── Симуляция ────────────────────────────────────────────
             't_sim':       'Длительность симуляции (мс).',
             'dt_eval':     'Шаг вывода (мс). Не влияет на точность интегратора.',
-            'stim_type':   'Тип стимула: const / pulse / alpha (ВПСП) / шум OU.',
+            'stim_type':   'Тип стимула: const / pulse / alpha / шум OU / синаптические рецепторы / ZAP-чирп.',
             'Iext':        'Амплитуда стимула (мкА/см²).',
             'pulse_start': 'Начало импульса (мс).',
             'pulse_dur':   'Длительность импульса (мс).',
             'alpha_tau':   'Постоянная времени alpha-синапса (мс). Пик при t = τ.',
+            'zap_f0_hz':   'Начальная частота ZAP-чирпа (Гц).',
+            'zap_f1_hz':   'Конечная частота ZAP-чирпа (Гц).',
             'stim_comp':   'Компартмент стимуляции (0 = сома).',
+            'event_times': 'Очередь синаптических событий (мс). Временные метки через запятую: "10,25,40". Замещает pulse_start для AMPA/NMDA/GABA.',
+            'synaptic_train_type': 'Генератор поездок импульсов: none (отсутствует) / regular (фиксированный ИПВ) / poisson (случайный).',
+            'synaptic_train_freq_hz': 'Частота сгенерированного поезда импульсов (Гц).',
+            'synaptic_train_duration_ms': 'Длительность поезда импульсов (мс).',
             'stoch_gating':'Шум Ланжевена в гейтах (Эйлер-Маруяма). Кнопка 🎲.',
             'noise_sigma': 'Амплитуда белого шума на мембрану σ (мкА/см²).',
 

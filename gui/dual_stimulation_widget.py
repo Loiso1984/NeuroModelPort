@@ -90,7 +90,7 @@ class DualStimulationWidget(QWidget):
         
         primary_layout.addWidget(QLabel("Type:"), 0, 2)
         self.combo_primary_type = QComboBox()
-        self.combo_primary_type.addItems(["const", "alpha", "pulse", "AMPA", "NMDA"])
+        self.combo_primary_type.addItems(["const", "pulse", "alpha", "ou_noise", "AMPA", "NMDA", "GABAA", "GABAB", "Kainate", "Nicotinic", "zap"])
         self.combo_primary_type.currentTextChanged.connect(self.on_config_changed)
         primary_layout.addWidget(self.combo_primary_type, 0, 3)
         
@@ -140,7 +140,7 @@ class DualStimulationWidget(QWidget):
         
         secondary_layout.addWidget(QLabel("Type:"), 0, 2)
         self.combo_secondary_type = QComboBox()
-        self.combo_secondary_type.addItems(["const", "alpha", "pulse", "GABAA", "GABAB"])
+        self.combo_secondary_type.addItems(["const", "pulse", "alpha", "ou_noise", "AMPA", "NMDA", "GABAA", "GABAB", "Kainate", "Nicotinic", "zap"])
         self.combo_secondary_type.currentTextChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.combo_secondary_type, 0, 3)
         

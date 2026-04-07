@@ -22,6 +22,9 @@ class MorphologyParams(BaseModel):
     # Axon trunk
     N_trunk: int   = Field(default=35, ge=0, description="Number of trunk segments")
     d_trunk: float = Field(default=2e-4,  gt=0, description="Trunk diameter (cm)")
+    gNa_trunk_mult: float = Field(default=1.0, ge=0.0, le=1.0,
+        description="gNa multiplier in trunk (0–1×). Default 1.0 = uniform density; "
+                    "set <1 to model internodal Na-channel scarcity (demyelination).")
 
     # Bifurcation and branches (Rall's law)
     N_b1: int  = Field(default=4,    ge=0, description="Branch 1 segments")
@@ -112,6 +115,11 @@ class EnvironmentParams(BaseModel):
     Q10_NaR:   float = Field(default=2.2,              description="Q10 for resurgent Na channel (y,j gates)")
     # NMDA Mg²⁺ block: Jahr & Stevens 1990, J Neurosci 10:1830
     Mg_ext:    float = Field(default=1.0,              description="Extracellular [Mg²⁺] (mM, for NMDA block)")
+    # Thermal gradient: soma–dendrite temperature offset (°C).
+    # Positive = dendrites warmer than soma (rare), negative = cooler (typical for in vitro slices).
+    # Bhattacharyya et al. 2008 (J Neurophysiol 100:927) measured ~0.5–1.5°C axial gradients.
+    T_dend_offset: float = Field(default=0.0, ge=-15.0, le=15.0,
+                                  description="Dendrite–soma temperature offset (°C, positive=dendrites warmer)")
 
     @property
     def phi(self) -> float:
@@ -119,8 +127,22 @@ class EnvironmentParams(BaseModel):
         return self.Q10 ** ((self.T_celsius - self.T_ref) / 10.0)
 
     def phi_channel(self, q10: float) -> float:
-        """Per-channel temperature scaling: q10^((T - T_ref)/10)."""
+        """Per-channel temperature scaling at soma temperature: q10^((T_soma - T_ref)/10)."""
         return q10 ** ((self.T_celsius - self.T_ref) / 10.0)
+
+    def build_phi_vector(self, q10: float, n_comp: int) -> 'np.ndarray':
+        """Per-compartment temperature scaling vector (length n_comp).
+
+        When T_dend_offset == 0 (uniform temperature), all elements equal phi_channel(q10).
+        Otherwise, temperature is linearly interpolated from T_celsius (soma, i=0) to
+        T_celsius + T_dend_offset (distal, i=n_comp-1).
+        """
+        import numpy as np
+        if n_comp == 1 or self.T_dend_offset == 0.0:
+            return np.full(n_comp, self.phi_channel(q10))
+        frac = np.linspace(0.0, 1.0, n_comp)
+        T_comp = self.T_celsius + frac * self.T_dend_offset
+        return q10 ** ((T_comp - self.T_ref) / 10.0)
 
 
 class DendriticFilterParams(BaseModel):
@@ -197,7 +219,8 @@ class SimulationParams(BaseModel):
     Iext is in µA/cm² (current density). The unit_converter module provides
     display conversions for user-facing interfaces.
 
-    For GUI display, absolute current in nanoamperes (nA) is computed as:
+    For GUI display, absolute current in nanoamperes (nA) is computed
+    from `FullModelConfig.Iext_absolute_nA` property:
         I_absolute_nA = Iext * Area_soma_cm² * 1000
         Area_soma_cm² = π * (d_soma_cm)²
     """
@@ -210,7 +233,7 @@ class SimulationParams(BaseModel):
     stim_type:  Literal[
         'const', 'pulse', 'alpha', 'ou_noise',
         'AMPA', 'NMDA', 'GABAA', 'GABAB',
-        'Kainate', 'Nicotinic'
+        'Kainate', 'Nicotinic', 'zap'
     ] = Field(
         default='const',
         description=(
@@ -219,16 +242,47 @@ class SimulationParams(BaseModel):
         )
     )
     Iext:       float   = Field(default=10.0,        description="Stimulus amplitude (uA/cm2 density)")
-    Iext_absolute_nA: float = Field(default=0.0,     description="Stimulus absolute current (nanoamperes, for GUI display only)")
     pulse_start: float  = Field(default=10.0,        description="Pulse onset (ms)")
     pulse_dur:   float  = Field(default=1.0,         description="Pulse duration (ms)")
     alpha_tau:   float  = Field(default=2.0,         description="Alpha-synapse time constant (ms)")
     
     # ZAP (impedance) stimulus parameters
-    zap_f0_hz:   float  = Field(default=0.0,         description="ZAP start frequency (Hz)")
-    zap_f1_hz:   float  = Field(default=20.0,        description="ZAP end frequency (Hz)")
+    zap_f0_hz: float = Field(default=0.5, ge=0.01, description="ZAP/chirp start frequency (Hz)")
+    zap_f1_hz: float = Field(default=40.0, ge=0.01, description="ZAP/chirp end frequency (Hz)")
     
     stim_comp:   int    = Field(default=0,           description="Compartment index to inject current")
+    # Event-driven synaptic queue (Stage 6.3, preparation for network connectivity)
+    # Each entry is a spike-arrival timestamp in ms. When non-empty and stim_type is
+    # a conductance-based synapse (AMPA/NMDA/GABAA/GABAB/Kainate/Nicotinic), the
+    # conductance waveforms are summed for every event, overriding pulse_start.
+    event_times: List[float] = Field(
+        default_factory=list,
+        description=(
+            "Synaptic event queue: spike-arrival timestamps (ms). "
+            "When non-empty with AMPA/NMDA/GABA stim types, "
+            "conductance waveforms are summed for each event (overrides pulse_start)."
+        )
+    )
+    event_times_2: List[float] = Field(
+        default_factory=list,
+        description=(
+            "Secondary synaptic event queue: spike-arrival timestamps (ms). "
+            "When non-empty with conductance-based secondary stim type (dual stimulation), "
+            "conductance waveforms are summed for each event (overrides secondary pulse_start)."
+        )
+    )
+    synaptic_train_type: Literal['none', 'regular', 'poisson'] = Field(
+        default='none', 
+        description="Auto-generate spike train pattern. Overrides manual event_times."
+    )
+    synaptic_train_freq_hz: float = Field(
+        default=40.0, ge=0.1, le=500.0, 
+        description="Frequency of the generated spike train (Hz)."
+    )
+    synaptic_train_duration_ms: float = Field(
+        default=200.0, ge=1.0, 
+        description="Duration of the generated spike train (ms)."
+    )
 
     # Stochastic
     stoch_gating: bool  = Field(default=False, description="Langevin gate noise (Euler-Maruyama solver)")
@@ -296,8 +350,7 @@ class AnalysisParams(BaseModel):
     excmap_D_max: float = Field(default=5.0,   description="Excitability map: max duration (ms)")
     excmap_ND:    int   = Field(default=15,   ge=2, description="Excitability map: duration resolution")
 
-    # Lyapunov / FTLE analysis (default OFF)
-    enable_lyapunov: bool = Field(default=False, description="Enable FTLE/LLE stability analysis")
+    # Lyapunov / FTLE analysis parameters (execution is action-driven)
     lyapunov_embedding_dim: int = Field(default=3, ge=2, le=8, description="Delay-embedding dimension for FTLE/LLE")
     lyapunov_lag_steps: int = Field(default=2, ge=1, le=50, description="Delay-embedding lag in samples")
     lyapunov_min_separation_ms: float = Field(default=10.0, ge=0.0, description="Minimum temporal separation for neighbor search (ms)")
@@ -341,6 +394,15 @@ class FullModelConfig(BaseModel):
     dual_stimulation: Optional[Any] = None  # Optional dual stimulation config (DualStimulationConfig or None)
     analysis:   AnalysisParams    = AnalysisParams()
     preset_modes: PresetModeParams = PresetModeParams()
+
+    @property
+    def Iext_absolute_nA(self) -> float:
+        """Derived absolute stimulus current (nA) from canonical density source `stim.Iext`."""
+        import numpy as np
+        from core.unit_converter import density_to_absolute_current
+
+        soma_area_cm2 = np.pi * float(self.morphology.d_soma) ** 2
+        return density_to_absolute_current(float(self.stim.Iext), soma_area_cm2)
 
 
 # Rebuild FullModelConfig after importing DualStimulationConfig (optional)

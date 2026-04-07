@@ -17,10 +17,11 @@ Architecture:
 """
 
 import numpy as np
-from typing import Tuple
+from typing import Tuple, TYPE_CHECKING
 from numba import njit, float64
 
-from .models import FullModelConfig
+if TYPE_CHECKING:
+    from .models import FullModelConfig
 
 
 class DualStimulationConfig:
@@ -61,88 +62,6 @@ class DualStimulationState:
         self.secondary_filtered = 0.0
 
 
-@njit(cache=True)
-def get_dual_stim_current(
-    t: float,
-    primary_type: int,
-    primary_iext: float,
-    primary_t0: float,
-    primary_td: float,
-    primary_atau: float,
-    secondary_type: int,
-    secondary_iext: float,
-    secondary_t0: float,
-    secondary_td: float,
-    secondary_atau: float
-) -> Tuple[float64, float64]:
-    """
-    Calculate both stimulus currents at time t.
-    
-    Returns:
-        (primary_current, secondary_current)
-    """
-    
-    # Primary stimulus
-    if primary_type == 1:  # pulse
-        primary_current = primary_iext if primary_t0 <= t <= primary_t0 + primary_td else 0.0
-    elif primary_type == 2:  # alpha
-        if t < primary_t0:
-            primary_current = 0.0
-        else:
-            dt = (t - primary_t0) / primary_atau
-            primary_current = primary_iext * dt * np.exp(1.0 - dt)
-    elif primary_type == 4:  # AMPA
-        if t < primary_t0:
-            primary_current = 0.0
-        else:
-            dt = t - primary_t0
-            tau_rise, tau_decay = 0.5, 3.0
-            t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-            norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-            primary_current = abs(primary_iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    elif primary_type == 6:  # GABA-A
-        if t < secondary_t0:  # Using secondary timing for inhibitory
-            primary_current = 0.0
-        else:
-            dt = t - secondary_t0
-            tau_rise, tau_decay = 1.0, 7.0
-            t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-            norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-            primary_current = -abs(primary_iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    else:
-        primary_current = primary_iext  # const
-    
-    # Secondary stimulus
-    if secondary_type == 1:  # pulse
-        secondary_current = secondary_iext if secondary_t0 <= t <= secondary_t0 + secondary_td else 0.0
-    elif secondary_type == 2:  # alpha
-        if t < secondary_t0:
-            secondary_current = 0.0
-        else:
-            dt = (t - secondary_t0) / secondary_atau
-            secondary_current = secondary_iext * dt * np.exp(1.0 - dt)
-    elif secondary_type == 4:  # AMPA
-        if t < secondary_t0:
-            secondary_current = 0.0
-        else:
-            dt = t - secondary_t0
-            tau_rise, tau_decay = 0.5, 3.0
-            t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-            norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-            secondary_current = abs(secondary_iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    elif secondary_type == 6:  # GABA-A
-        if t < secondary_t0:
-            secondary_current = 0.0
-        else:
-            dt = t - secondary_t0
-            tau_rise, tau_decay = 1.0, 7.0
-            t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
-            norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
-            secondary_current = -abs(secondary_iext) * (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
-    else:
-        secondary_current = secondary_iext  # const
-    
-    return primary_current, secondary_current
 
 
 @njit(cache=True)
@@ -224,100 +143,39 @@ def apply_secondary_stimulus_current(
 
 
 @njit(cache=True)
-def apply_dual_stimulation(
-    t: float,
-    y: np.ndarray,
+def distributed_stimulus_current_for_comp(
+    comp_idx: int,
     n_comp: int,
-    # Dual stimulation parameters
-    primary_type: int,
-    primary_iext: float,
-    primary_t0: float,
-    primary_td: float,
-    primary_atau: float,
-    primary_location: int,
-    secondary_type: int,
-    secondary_iext: float,
-    secondary_t0: float,
-    secondary_td: float,
-    secondary_atau: float,
-    secondary_location: int,
-    secondary_attenuation: float,
-    secondary_tau_dendritic: float,
-    # Filter states
-    primary_filtered_state: float,
-    secondary_filtered_state: float,
-    use_primary_filter: int,
-    use_secondary_filter: int,
-    # Standard RHS parameters (truncated for brevity)
-    en_ih: bool,
-    en_ica: bool,
-    en_ia: bool,
-    en_sk: bool,
-    dyn_ca: bool,
-    gna_v: np.ndarray,
-    gk_v: np.ndarray,
-    gl_v: np.ndarray,
-    gih_v: np.ndarray,
-    gca_v: np.ndarray,
-    ga_v: np.ndarray,
-    gsk_v: np.ndarray,
-    ena: float,
-    ek: float,
-    el: float,
-    eih: float,
-    ea: float,
-    cm_v: np.ndarray,
-    l_data: np.ndarray,
-    l_indices: np.ndarray,
-    l_indptr: np.ndarray,
-    phi: float,
-    t_kelvin: float,
-    ca_ext: float,
-    ca_rest: float,
-    tau_ca: float,
-    b_ca: float
-) -> Tuple[np.ndarray, float, float]:
+    base_current: float,
+    stim_comp: int,
+    stim_mode: int,
+    use_dfilter: int,
+    dfilter_attenuation: float,
+    dfilter_tau_ms: float,
+    v_filtered: float,
+) -> float:
+    """Return stimulus contribution for a single compartment without temp vectors.
+
+    stim_mode:
+      0 = soma/custom compartment (uses stim_comp),
+      1 = AIS,
+      2 = dendritic_filtered (projects to soma via optional filter state).
     """
-    Apply dual stimulation to multi-compartment model.
-    
-    This function extends the standard RHS to handle two simultaneous stimuli.
-    """
-    
-    # Calculate both stimulus currents
-    primary_current, secondary_current = get_dual_stim_current(
-        t, primary_type, primary_iext, primary_t0, primary_td, primary_atau,
-        secondary_type, secondary_iext, secondary_t0, secondary_td, secondary_atau
-    )
-    
-    # Initialize stimulus array
-    i_stim = np.zeros(n_comp)
-    d_primary_filtered_dt = 0.0
-    d_secondary_filtered_dt = 0.0
-    
-    # Apply primary stimulus
-    if primary_location == 0:  # soma
-        i_stim[0] += primary_current
-    elif primary_location == 1:  # ais
+    if stim_mode == 0:
+        return base_current if (0 <= stim_comp < n_comp and comp_idx == stim_comp) else 0.0
+    if stim_mode == 1:
         ais_comp = 1 if n_comp > 1 else 0
-        i_stim[ais_comp] += primary_current
-    
-    # Apply secondary stimulus with filtering
-    if secondary_location == 0:  # soma
-        i_stim[0] += secondary_current
-    elif secondary_location == 1:  # ais
-        ais_comp = 1 if n_comp > 1 else 0
-        i_stim[ais_comp] += secondary_current
-    elif secondary_location == 2:  # dendritic_filtered
-        if use_secondary_filter == 1 and secondary_tau_dendritic > 0.0:
-            # Apply dendritic filtering to secondary stimulus
-            attenuated_secondary = secondary_attenuation * secondary_current
-            d_secondary_filtered_dt = (attenuated_secondary - secondary_filtered_state) / secondary_tau_dendritic
-            i_stim[0] += secondary_filtered_state
-        else:
-            # Direct injection with attenuation
-            i_stim[0] += secondary_attenuation * secondary_current
-    
-    return i_stim, d_primary_filtered_dt, d_secondary_filtered_dt
+        return base_current if comp_idx == ais_comp else 0.0
+    if stim_mode == 2:
+        if comp_idx != 0:
+            return 0.0
+        # tau <= 0 means filter is effectively disabled (pure attenuation path).
+        if use_dfilter == 1 and dfilter_tau_ms > 0.0:
+            return v_filtered
+        return dfilter_attenuation * base_current
+    return base_current if (0 <= stim_comp < n_comp and comp_idx == stim_comp) else 0.0
+
+
 
 
 def create_dual_stimulation_preset() -> DualStimulationConfig:
@@ -356,7 +214,7 @@ def create_dual_stimulation_preset() -> DualStimulationConfig:
     return config
 
 
-def create_dual_stimulation_config_from_full(config: FullModelConfig) -> DualStimulationConfig:
+def create_dual_stimulation_config_from_full(config: "FullModelConfig") -> DualStimulationConfig:
     """
     Convert FullModelConfig to DualStimulationConfig for backward compatibility.
     """

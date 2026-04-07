@@ -107,6 +107,11 @@ def _apply_k_mode(cfg: FullModelConfig) -> None:
 
 def _apply_alzheimer_mode(cfg: FullModelConfig) -> None:
     """Apply Alzheimer's stage variants."""
+    # Enable calcium dynamics and channels for Alzheimer pathology
+    cfg.calcium.dynamic_Ca = True
+    cfg.channels.enable_ICa = True
+    cfg.channels.enable_SK = True
+    
     if cfg.preset_modes.alzheimer_mode == "terminal":
         # Terminal stage: severe network failure, near-silent response.
         cfg.calcium.tau_Ca = 1200.0
@@ -126,6 +131,11 @@ def _apply_alzheimer_mode(cfg: FullModelConfig) -> None:
 
 def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
     """Apply hypoxia stage variants."""
+    # Enable calcium dynamics for hypoxia pathology
+    cfg.calcium.dynamic_Ca = True
+    cfg.channels.enable_ICa = True
+    cfg.channels.enable_SK = False  # SK may not work under ATP depletion
+    
     if cfg.preset_modes.hypoxia_mode == "terminal":
         # Terminal stage: profound depolarization block and pump collapse.
         cfg.channels.EK = -45.0
@@ -171,7 +181,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.d_soma = 500e-4  # 500 µm giant axon diameter
         cfg.stim.Iext = 10.0  # Classic HH: ~68 Hz tonic firing, Vmax ≈ 40 mV
 
-    # --- 2. БАЗОВЫЙ ПРЕСЕТ: ПИРАМИДНЫЙ L5 (Млекопитающие) ---
+    # --- 2. БАЗОВЫЙ ПРЕСЕТ: ПИРАМИДАЛЬНЫЙ L5 (Млекопитающие) ---
     elif "Pyramidal L5" in name:
         cfg.morphology.single_comp = False
         cfg.stim_location.location = "dendritic_filtered"
@@ -202,9 +212,20 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.d_trunk = 2e-4  # Dendrite trunk diameter
         cfg.morphology.Ra = 150.0      # Axial resistance [Ω·cm]
         
-        cfg.channels.enable_SK = False  # Disabled for development, enable later with Ca-dyn
-        cfg.calcium.dynamic_Ca = False  # Disabled for development, enable with SK+ICa
-        cfg.channels.enable_ICa = False  # Disabled for development
+        # CALCIUM DYNAMICS: Enable for realistic adaptation
+        cfg.channels.enable_SK = True  # Enable SK for calcium-dependent adaptation
+        cfg.calcium.dynamic_Ca = True  # Enable calcium dynamics
+        cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
+        cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
+        cfg.calcium.tau_Ca = 200.0
+        cfg.calcium.B_Ca = 1e-5
+        cfg.channels.enable_ICa = True  # L-type calcium channel
+        cfg.channels.gCa_max = 0.08  # Moderate ICa for calcium dynamics
+        cfg.channels.gSK_max = 1.5  # SK channel for calcium-dependent adaptation
+        
+        # M-TYPE K CURRENT: Enable for spike frequency adaptation
+        cfg.channels.enable_IM = True  # KCNQ2/3 channels for adaptation
+        cfg.channels.gIM_max = 0.02  # Slow non-inactivating K+ current
         
         # CALIBRATED: Literature-based rheobase (Mainen 1996)
         # Soma mode with const stimulus: ~6 µA/cm² rheobase range
@@ -247,10 +268,23 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.d_soma = 60e-4
         cfg.morphology.N_ais = 5
         cfg.morphology.Ra = 70.0
+        
+        # CALCIUM DYNAMICS: Enable for PICs and AHP
+        cfg.calcium.dynamic_Ca = True
+        cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
+        cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
+        cfg.calcium.tau_Ca = 200.0
+        cfg.calcium.B_Ca = 1e-5
+        cfg.channels.enable_ICa = True  # L-type calcium channels for PICs
+        cfg.channels.gCa_max = 0.08  # Moderate L-type Ca for persistent inward currents
+        cfg.channels.enable_SK = True  # SK channels for AHP
+        cfg.channels.gSK_max = 1.0  # SK for afterhyperpolarization
+        
         # IA channel: Moderate for frequency adaptation and spike-frequency accommodation
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.25  # Moderate IA for adaptation dynamics
         cfg.channels.E_A = -77.0    # K+ reversal potential
+        
         # Alpha stimulus: represents one synaptic volley from descending pathways
         # Multi-comp with AIS produces burst of ~16 spikes, Vmax ≈ 34 mV
         cfg.stim.stim_type = 'alpha'
@@ -271,19 +305,28 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.d_soma = 25e-4
         cfg.morphology.N_ais = 3
         cfg.morphology.gNa_ais_mult = 30.0
-        cfg.channels.enable_SK = False  # SK disabled - too much hyperpolarization with calcium
+        cfg.channels.enable_SK = True  # Re-enable SK - critical for Purkinje physiology
+        cfg.channels.gSK_max = 0.5  # Moderate SK for calcium-dependent adaptation
+        
+        # CALCIUM DYNAMICS: Purkinje is calcium processing machine
         cfg.calcium.dynamic_Ca = True
+        cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
+        cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
         cfg.calcium.tau_Ca = 150.0  # Fast extrusion (Purkinje: excellent calcium buffering)
         cfg.calcium.B_Ca = 1e-5  # Calibrated conversion: keeps spike-driven Ca transients in physiological nM-µM range
-        cfg.channels.enable_ICa = True
+        cfg.channels.enable_ICa = True  # L-type calcium channels
         cfg.channels.gCa_max = 0.08  # Physiological L-type calcium conductance
-        cfg.channels.gSK_max = 0.5
+        
+        # RESURGENT Na: Enables high-frequency firing >200 Hz
+        cfg.channels.enable_NaR = True  # Enable resurgent Na for high-frequency bursts
+        cfg.channels.gNaR_max = 0.5  # Moderate resurgent Na conductance
+        
         # IA channel: High for complex spike dynamics and dendritic integration
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.4   # IA for complex spike dynamics
         cfg.channels.E_A = -77.0    # K+ reversal potential
+        
         # Tuned to preserve tonic Purkinje spiking and avoid a silent island
-        # at moderate low-drive screening points in the branch validation contour.
         cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 2.0
         cfg.stim.Iext = 32.0
@@ -323,14 +366,19 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 7. ПАТОЛОГИЯ: РАССЕЯННЫЙ СКЛЕРОЗ (Демиелинизация) ---
     elif "Multiple Sclerosis" in name:
         apply_preset(cfg, "alpha-Motoneuron (Powers 2001)")
-        # Stronger axial resistance increase to emphasize impaired conduction.
-        cfg.morphology.Ra = 450.0  # Demyelination: 70 → 450 (axial resistance ↑)
-        cfg.channels.gL = 1.2  # Increased leak: 0.3 → 1.2 (exposed membrane)
+        # Severe demyelination profile:
+        # - high axial resistance (internodal conduction impairment),
+        # - high leak shunt + higher effective membrane capacitance (myelin loss),
+        # - reduced Na drive to favor distal propagation failure/block.
+        cfg.morphology.Ra = 900.0
+        cfg.channels.gL = 3.2
+        cfg.channels.gNa_max = 45.0
+        cfg.channels.Cm = 6.0
         cfg.stim.jacobian_mode = 'sparse_fd'
-        # Pathology signature: reduced spike amplitude (~21 vs ~34 mV) due to leak shunt
+        # Keep the same input class as control; pathology should emerge from membrane/cable changes.
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.5
-        cfg.stim.Iext = 50.0  # Same as base motoneuron
+        cfg.stim.Iext = 50.0
 
     # --- 8. ПАТОЛОГИЯ: ЭПИЛЕПСИЯ (SCN1A GAIN-OF-FUNCTION) ---
     elif "Epilepsy" in name:
@@ -352,15 +400,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 9. ПАТОЛОГИЯ: АЛЬЦГЕЙМЕР (CALCIUM TOXICITY - SLOW EXTRUSION) ---
     elif "Alzheimer's" in name:
         apply_preset(cfg, "Pyramidal L5 (Mainen 1996)")
-        # CALCIUM DYNAMICS: Model pathological calcium accumulation
-        cfg.calcium.dynamic_Ca = True  # ENABLED: Model impaired clearance
-        cfg.calcium.tau_Ca = 800.0  # Slow pump: 200 → 800ms (impaired Ca clearance)
-        cfg.calcium.B_Ca = 1e-5  # Calibrated conversion for slow-clearance pathology
-        # Enable calcium-dependent adaptive current
-        cfg.channels.enable_ICa = True  # L-type calcium channel
-        cfg.channels.gCa_max = 0.08  # Moderate ICa - PHYSIOLOGICAL range (was 0.8, too high)
-        cfg.channels.enable_SK = True  # SK channel activated by calcium
-        cfg.channels.gSK_max = 1.5  # Stronger SK for calcium-dependent adaptation
+        # Apply Alzheimer mode overlay immediately
+        _apply_alzheimer_mode(cfg)
         cfg.stim.jacobian_mode = 'sparse_fd'
         # Alpha stim: Shows reduced firing due to SK activation by calcium
         cfg.stim.stim_type = 'alpha'
@@ -374,12 +415,9 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.EK = -50.0  # Reduced: -90 → -50 (K+ accumulation)
         cfg.channels.EL = -45.0  # Reduced: -65 → -45 (Na+ accumulation)
         # CALCIUM OVERLOAD: Hypoxia causes Ca2+ accumulation and mitochondrial dysfunction
-        cfg.calcium.dynamic_Ca = True  # ENABLED: Model calcium overload
         cfg.calcium.tau_Ca = 900.0  # Slow clearance: pump failure (fixed from 1500ms)
         cfg.calcium.B_Ca = 1e-5  # Calibrated conversion for hypoxic overload scenarios
-        cfg.channels.enable_ICa = True  # Unregulated Ca entry
         cfg.channels.gCa_max = 0.08  # Elevated ICa - PHYSIOLOGICAL range (was 1.2, too high)
-        cfg.channels.enable_SK = False  # SK may not work under ATP depletion
         cfg.stim.jacobian_mode = 'sparse_fd'
         # Pathology: depolarization block after 1-2 spikes due to ion imbalance + Ca overload
         cfg.stim.stim_type = 'alpha'
@@ -564,39 +602,10 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # Stage/mode overlays for selected presets.
     if "Thalamic" in name:
         _apply_k_mode(cfg)
-    elif "Alzheimer's" in name:
-        _apply_alzheimer_mode(cfg)
     elif "Hypoxia" in name:
         _apply_hypoxia_mode(cfg)
 
-    # Calculate absolute current for GUI display
-    _calculate_absolute_iext(cfg)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPER: CALCULATE ABSOLUTE CURRENT FOR GUI DISPLAY
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _calculate_absolute_iext(cfg: FullModelConfig):
-    """
-    Calculate absolute stimulus current (nanoamperes) from density for GUI display.
-
-    This function should be called AFTER setting cfg.stim.Iext density to populate
-    the Iext_absolute_nA field for user-friendly display.
-
-    Parameters
-    ----------
-    cfg : FullModelConfig
-        Configuration with set Iext and morphology
-    """
-    from core.unit_converter import density_to_absolute_current
-
-    soma_diameter_cm = cfg.morphology.d_soma
-    soma_area_cm2 = np.pi * soma_diameter_cm ** 2
-
-    cfg.stim.Iext_absolute_nA = density_to_absolute_current(
-        cfg.stim.Iext, soma_area_cm2
-    )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # СИНАПТИЧЕСКИЕ СТИМУЛЫ: Неврофизиологически корректные расширения alpha-функции

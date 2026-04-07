@@ -112,9 +112,23 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
         return np.array([], dtype=int), np.array([]), np.array([])
 
     if len(V) != len(t):
+        import logging
+        length_diff = abs(len(V) - len(t))
+        if length_diff > 10:  # Significant mismatch
+            logging.error(f"Significant array length mismatch: V={len(V)}, t={len(t)} (diff={length_diff}). "
+                         "This indicates serious data integrity issues.")
+            raise ValueError(f"Array length mismatch too large ({length_diff} points). "
+                           f"Voltage: {len(V)}, Time: {len(t)}")
+        else:
+            logging.warning(f"Minor array length mismatch: V={len(V)}, t={len(t)} (diff={length_diff}). "
+                           "Truncating to minimum length.")
+        # Truncate to minimum length but warn user
         n = min(len(V), len(t))
         V = V[:n]
         t = t[:n]
+        if n < 10:
+            logging.error("Array length too short after truncation (< 10 points). Results may be unreliable.")
+            raise ValueError("Arrays too short after truncation for reliable analysis")
 
     dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.05
     dt_ms = max(dt_ms, 1e-6)
@@ -596,12 +610,16 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     I_ion_soma = sum(result.currents.values())
 
     # Stimulus current
-    s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0}
+    s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10}
     stype = s_map.get(cfg.stim.stim_type, 0)
     I_stim = np.array([
-        get_stim_current(float(ti), stype,
-                         cfg.stim.Iext, cfg.stim.pulse_start,
-                         cfg.stim.pulse_dur, cfg.stim.alpha_tau)
+        get_stim_current(
+            float(ti), stype,
+            cfg.stim.Iext, cfg.stim.pulse_start,
+            cfg.stim.pulse_dur, cfg.stim.alpha_tau,
+            float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+            float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+        )
         for ti in t
     ])
 
@@ -799,6 +817,7 @@ def _stim_type_to_code(stim_type: str) -> int:
         "GABAB": 7,
         "Kainate": 8,
         "Nicotinic": 9,
+        "zap": 10,
     }.get(stim_type, 0)
 
 
@@ -810,7 +829,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
     1) If dendritic filtering state exists in solution, use that directly.
     2) Otherwise reconstruct from configured stimulus equations.
     """
-    from core.rhs import get_stim_current
+    from core.rhs import get_stim_current, get_event_driven_conductance
 
     t = np.asarray(result.t, dtype=float)
     n = len(t)
@@ -835,16 +854,36 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             attenuation = float(
                 np.exp(-cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um)
             )
-        for i, ti in enumerate(t):
-            base = get_stim_current(
-                float(ti),
-                stype,
-                cfg.stim.Iext,
-                cfg.stim.pulse_start,
-                cfg.stim.pulse_dur,
-                cfg.stim.alpha_tau,
-            )
-            stim[i] += attenuation * float(base)
+        
+        # Check for event-driven synaptic stimulation
+        if (stype >= 4 and 
+            hasattr(cfg.stim, 'n_events') and cfg.stim.n_events > 0 and 
+            hasattr(cfg.stim, 'event_times_arr') and len(cfg.stim.event_times_arr) > 0):
+            # Use event-driven conductance for synaptic types
+            for i, ti in enumerate(t):
+                conductance = get_event_driven_conductance(
+                    float(ti),
+                    stype,
+                    cfg.stim.Iext,
+                    cfg.stim.event_times_arr,
+                    cfg.stim.n_events,
+                    cfg.stim.alpha_tau
+                )
+                stim[i] += attenuation * float(conductance)
+        else:
+            # Use regular stimulus current
+            for i, ti in enumerate(t):
+                base = get_stim_current(
+                    float(ti),
+                    stype,
+                    cfg.stim.Iext,
+                    cfg.stim.pulse_start,
+                    cfg.stim.pulse_dur,
+                    cfg.stim.alpha_tau,
+                    float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+                    float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+                )
+                stim[i] += attenuation * float(base)
 
     dual_cfg = getattr(cfg, "dual_stimulation", None)
     if dual_cfg is not None and getattr(dual_cfg, "enabled", False):
@@ -864,6 +903,8 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                 float(getattr(dual_cfg, "secondary_start", 0.0)),
                 float(getattr(dual_cfg, "secondary_duration", 0.0)),
                 float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
+                float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
+                float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
             )
             stim[i] += attenuation_2 * float(base_2)
 
@@ -1004,7 +1045,8 @@ def estimate_spike_modulation(
     if surrogate_count > 0:
         s_count = int(surrogate_count)
         if s_count > 0:
-            rng = np.random.default_rng(20260404)
+            from core.stochastic_rng import get_rng
+            rng = get_rng()
             plv_surr = np.empty(s_count, dtype=float)
             for i in range(s_count):
                 st_surr = np.sort(rng.choice(t, size=len(st), replace=True))
@@ -1037,7 +1079,81 @@ def estimate_spike_modulation(
     return out
 
 
-def full_analysis(result) -> dict:
+def compute_membrane_impedance(
+    t_ms: np.ndarray,
+    v_mV: np.ndarray,
+    i_stim_uA_cm2: np.ndarray,
+    fmin_hz: float = 0.5,
+    fmax_hz: float = 200.0,
+) -> dict:
+    """Estimate membrane impedance Z(f)=V(f)/I(f) from time-domain traces.
+
+    Returns magnitude in kOhm*cm^2 because input units are mV and uA/cm^2.
+    """
+    t_ms = np.asarray(t_ms, dtype=float)
+    v_mV = np.asarray(v_mV, dtype=float)
+    i_stim_uA_cm2 = np.asarray(i_stim_uA_cm2, dtype=float)
+
+    out = {
+        "valid": False,
+        "freq_hz": np.array([]),
+        "z_mag_kohm_cm2": np.array([]),
+        "z_phase_deg": np.array([]),
+        "f_res_hz": np.nan,
+        "z_res_kohm_cm2": np.nan,
+    }
+
+    if len(t_ms) < 16 or len(v_mV) != len(t_ms) or len(i_stim_uA_cm2) != len(t_ms):
+        return out
+
+    dt_ms = float(np.mean(np.diff(t_ms)))
+    if not np.isfinite(dt_ms) or dt_ms <= 0.0:
+        return out
+
+    fs_hz = 1000.0 / dt_ms
+    n = len(t_ms)
+
+    v = v_mV - float(np.mean(v_mV))
+    i = i_stim_uA_cm2 - float(np.mean(i_stim_uA_cm2))
+
+    vf = np.fft.rfft(v)
+    inf = np.fft.rfft(i)
+    freq = np.fft.rfftfreq(n, d=dt_ms / 1000.0)
+
+    band = (freq >= float(fmin_hz)) & (freq <= float(fmax_hz))
+    if not np.any(band):
+        return out
+
+    eps = 1e-12
+    i_abs = np.abs(inf)
+    drive_mask = i_abs > (0.01 * np.max(i_abs) + eps)
+    mask = band & drive_mask
+    if not np.any(mask):
+        mask = band
+
+    z = np.zeros_like(vf, dtype=np.complex128)
+    z[mask] = vf[mask] / (inf[mask] + eps)
+
+    freq_b = freq[mask]
+    z_mag = np.abs(z[mask])
+    z_phase = np.angle(z[mask], deg=True)
+
+    if len(freq_b) == 0:
+        return out
+
+    k = int(np.argmax(z_mag))
+    out.update({
+        "valid": True,
+        "freq_hz": freq_b,
+        "z_mag_kohm_cm2": z_mag,
+        "z_phase_deg": z_phase,
+        "f_res_hz": float(freq_b[k]),
+        "z_res_kohm_cm2": float(z_mag[k]),
+    })
+    return out
+
+
+def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
     """
     Compute the complete Neuron Passport from a SimulationResult.
 
@@ -1215,7 +1331,8 @@ def full_analysis(result) -> dict:
         "lyapunov_class": "disabled",
         "lyapunov_valid_pairs": 0,
     }
-    if getattr(ana, "enable_lyapunov", False):
+    should_compute_lyapunov = bool(compute_lyapunov) if compute_lyapunov is not None else False
+    if should_compute_lyapunov:
         lyap_raw = estimate_ftle_lle(
             V,
             t,

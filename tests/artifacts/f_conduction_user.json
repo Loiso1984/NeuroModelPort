@@ -1,0 +1,4170 @@
+{
+  "status": "FAIL",
+  "config": {
+    "temps": [
+      23.0,
+      30.0,
+      37.0
+    ],
+    "f_ra_mults": [
+      0.9,
+      1.0,
+      1.2
+    ],
+    "f_gl_mults": [
+      0.85,
+      1.0,
+      1.2
+    ],
+    "i_mults": [
+      0.8,
+      1.0,
+      1.2
+    ],
+    "t_sim": 320.0,
+    "dt_eval": 0.15,
+    "delay_margin_ms": 0.3,
+    "fail_on_anomaly": false
+  },
+  "summary": {
+    "total_cases": 81,
+    "anomaly_count": 81,
+    "pass_ratio": 0.0,
+    "gate_exit_code": 0
+  },
+  "anomalies": [
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.191049549237995,
+        "junction_peak_mV": -62.62128432213165,
+        "prop_ratio": -2.0741671871991008,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.61130822070453,
+        "junction_peak_mV": -62.620359011158115,
+        "prop_ratio": -1.980948038403027,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 32.711801659210536,
+        "junction_peak_mV": -62.619491798808795,
+        "prop_ratio": -1.9142782917056869,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.123068470586254,
+        "junction_peak_mV": -62.2813407517023,
+        "prop_ratio": -2.2145997623567277,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.144133338282952,
+        "junction_peak_mV": -62.280997212779035,
+        "prop_ratio": -2.0661067450123825,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.079732192350118,
+        "junction_peak_mV": -62.28064550335775,
+        "prop_ratio": -2.003899039988747,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 26.826090915968518,
+        "junction_peak_mV": -61.93609555840972,
+        "prop_ratio": -2.308800628180291,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 27.500292299241984,
+        "junction_peak_mV": -61.936019990167374,
+        "prop_ratio": -2.2521949700103576,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.917208702380755,
+        "junction_peak_mV": -61.935928268196925,
+        "prop_ratio": -2.1418363337087145,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.192147147035932,
+        "junction_peak_mV": -62.61908596396896,
+        "prop_ratio": -2.0740189711918684,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.604666555694468,
+        "junction_peak_mV": -62.618780486467955,
+        "prop_ratio": -1.9813143852069979,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 32.71091553244665,
+        "junction_peak_mV": -62.61847588326578,
+        "prop_ratio": -1.9142990914195963,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.13665343095339,
+        "junction_peak_mV": -62.27924225708976,
+        "prop_ratio": -2.213455925379377,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.14416348402799,
+        "junction_peak_mV": -62.27910528794713,
+        "prop_ratio": -2.0660419162384773,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.084572512915237,
+        "junction_peak_mV": -62.27895728296014,
+        "prop_ratio": -2.00353269317389,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 26.808762102053368,
+        "junction_peak_mV": -61.93450602326923,
+        "prop_ratio": -2.310233713421832,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 27.51063161858485,
+        "junction_peak_mV": -61.93447957251661,
+        "prop_ratio": -2.2512925341443877,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.900770715369493,
+        "junction_peak_mV": -61.934446237697074,
+        "prop_ratio": -2.1430032730843473,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.192064925785125,
+        "junction_peak_mV": -62.61547510546113,
+        "prop_ratio": -2.0739050230375344,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.594018645924237,
+        "junction_peak_mV": -62.61541822907527,
+        "prop_ratio": -1.9818757129572349,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 32.71013381985041,
+        "junction_peak_mV": -62.615356235517304,
+        "prop_ratio": -1.9142494671641685,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.15743828829638,
+        "junction_peak_mV": -62.27631248308131,
+        "prop_ratio": -2.2117179782283825,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.14378308162734,
+        "junction_peak_mV": -62.27629010677925,
+        "prop_ratio": -2.0659745970882035,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.09132733855813,
+        "junction_peak_mV": -62.27626382402615,
+        "prop_ratio": -2.0030107800123993,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 26.780463387110682,
+        "junction_peak_mV": -61.93273897927964,
+        "prop_ratio": -2.312608937494621,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 27.52912618572486,
+        "junction_peak_mV": -61.932735404931385,
+        "prop_ratio": -2.249716717744801,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.873802093171694,
+        "junction_peak_mV": -61.93273080001317,
+        "prop_ratio": -2.144945463024404,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.133351800286242,
+        "junction_peak_mV": -62.800693405509655,
+        "prop_ratio": -3.119236877618003,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.110574277814322,
+        "junction_peak_mV": -62.8004026217193,
+        "prop_ratio": -2.840288173099738,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.639827180519674,
+        "junction_peak_mV": -62.800114220133715,
+        "prop_ratio": -2.7738778091985505,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 18.11083330278,
+        "junction_peak_mV": -62.467297992363754,
+        "prop_ratio": -3.4491675202363585,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.482152272129568,
+        "junction_peak_mV": -62.467237539394105,
+        "prop_ratio": -3.049837571239737,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.436661629020207,
+        "junction_peak_mV": -62.46716444199196,
+        "prop_ratio": -3.0566227290903587,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 15.01057134300888,
+        "junction_peak_mV": -62.12026916176444,
+        "prop_ratio": -4.13843468994248,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 17.593241116081757,
+        "junction_peak_mV": -62.120251126389604,
+        "prop_ratio": -3.530915691799749,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 19.1931259719307,
+        "junction_peak_mV": -62.12022726698912,
+        "prop_ratio": -3.236587273893677,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.13229072930484,
+        "junction_peak_mV": -62.79875050956199,
+        "prop_ratio": -3.119304770328558,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.1062761544475,
+        "junction_peak_mV": -62.79863768079038,
+        "prop_ratio": -2.840760571434194,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.654579617959453,
+        "junction_peak_mV": -62.798518777085,
+        "prop_ratio": -2.7720010627476563,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 18.12616072249946,
+        "junction_peak_mV": -62.46570817279399,
+        "prop_ratio": -3.4461632073722694,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.486483834914722,
+        "junction_peak_mV": -62.46568825951269,
+        "prop_ratio": -3.0491171038855196,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.4595532582963,
+        "junction_peak_mV": -62.46566317182085,
+        "prop_ratio": -3.0531293808427207,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 14.970909283748139,
+        "junction_peak_mV": -62.11915826005883,
+        "prop_ratio": -4.149324338468411,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 17.612805847183612,
+        "junction_peak_mV": -62.11915255111996,
+        "prop_ratio": -3.5269310915076697,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 19.168097165220924,
+        "junction_peak_mV": -62.11914508207034,
+        "prop_ratio": -3.2407570008973487,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.129562155124784,
+        "junction_peak_mV": -62.79599386205383,
+        "prop_ratio": -3.119590648724895,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.097530945670616,
+        "junction_peak_mV": -62.79597674534323,
+        "prop_ratio": -2.8417643989156316,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.67452657225973,
+        "junction_peak_mV": -62.79595692589683,
+        "prop_ratio": -2.7694495285613643,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 18.147112654205845,
+        "junction_peak_mV": -62.46383802165465,
+        "prop_ratio": -3.4420813499043215,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.49171130605907,
+        "junction_peak_mV": -62.46383561719767,
+        "prop_ratio": -3.0482488594658323,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.490440261462027,
+        "junction_peak_mV": -62.46383247045894,
+        "prop_ratio": -3.048437792131756,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 14.90516979293696,
+        "junction_peak_mV": -62.11814555310707,
+        "prop_ratio": -4.167557056783258,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 17.64022308395418,
+        "junction_peak_mV": -62.11814500780852,
+        "prop_ratio": -3.521392258599731,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 19.129348104783222,
+        "junction_peak_mV": -62.1181441902201,
+        "prop_ratio": -3.247269266572011,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 3.4140176379744247,
+        "junction_peak_mV": -62.98754628099482,
+        "prop_ratio": -18.4496839091804,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 6.3365586353496886,
+        "junction_peak_mV": -62.98742051266145,
+        "prop_ratio": -9.9403199966105,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 9.636140712246807,
+        "junction_peak_mV": -62.987290270289584,
+        "prop_ratio": -6.536568129421097,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 2.6611832415232324,
+        "junction_peak_mV": -62.66731751058296,
+        "prop_ratio": -23.548666823376234,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.7051641632721894,
+        "junction_peak_mV": -62.66729857939132,
+        "prop_ratio": -10.984311193500973,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 8.091216727257091,
+        "junction_peak_mV": -62.66727395364655,
+        "prop_ratio": -7.745098922210016,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 0.4780116163874556,
+        "junction_peak_mV": -62.328226217272544,
+        "prop_ratio": -130.39060993603965,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 4.239494318783314,
+        "junction_peak_mV": -62.328221716422505,
+        "prop_ratio": -14.70180569420128,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.569248002678419,
+        "junction_peak_mV": -62.32821545511469,
+        "prop_ratio": -11.191495768394434,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 3.3791975021622345,
+        "junction_peak_mV": -62.986074818822786,
+        "prop_ratio": -18.6393588354987,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 6.308264409029642,
+        "junction_peak_mV": -62.98602999006058,
+        "prop_ratio": -9.984684519549063,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 9.63572655738082,
+        "junction_peak_mV": -62.985979940161926,
+        "prop_ratio": -6.536713092165906,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 2.642438615949933,
+        "junction_peak_mV": -62.66622775966606,
+        "prop_ratio": -23.71530123023808,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.683822424504939,
+        "junction_peak_mV": -62.66622235863429,
+        "prop_ratio": -11.025365973514297,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 8.099284629663936,
+        "junction_peak_mV": -62.666214848918635,
+        "prop_ratio": -7.737253067931611,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 0.48829590309715637,
+        "junction_peak_mV": -62.32754783396026,
+        "prop_ratio": -127.64298745623293,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 4.232797793213088,
+        "junction_peak_mV": -62.32754653939602,
+        "prop_ratio": -14.724905271717127,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.58816866706831,
+        "junction_peak_mV": -62.32754500086316,
+        "prop_ratio": -11.153483138074591,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 3.319426606927503,
+        "junction_peak_mV": -62.984203890296406,
+        "prop_ratio": -18.97442279906145,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 6.258386010003019,
+        "junction_peak_mV": -62.98419820445528,
+        "prop_ratio": -10.063968266544316,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 9.634810033577235,
+        "junction_peak_mV": -62.98419109510252,
+        "prop_ratio": -6.537149240680732,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 2.61074350163571,
+        "junction_peak_mV": -62.66512733897748,
+        "prop_ratio": -24.002789741587357,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.648956672233229,
+        "junction_peak_mV": -62.66512683745435,
+        "prop_ratio": -11.093221363420486,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 8.110124781286215,
+        "junction_peak_mV": -62.66512626350925,
+        "prop_ratio": -7.726777078462034,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 0.5029576747694074,
+        "junction_peak_mV": -62.32715499142825,
+        "prop_ratio": -123.92127234166091,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 4.220155092778498,
+        "junction_peak_mV": -62.32715496202711,
+        "prop_ratio": -14.768925215255935,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "delay_ok": false,
+      "ratio_ok": true,
+      "ratio_target_ok": true,
+      "abs_peak_ok": true,
+      "spike_ok": true,
+      "stable_ok": true,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.616904678073844,
+        "junction_peak_mV": -62.32715499839374,
+        "prop_ratio": -11.09635263024742,
+        "term_delay_ms": NaN,
+        "stable": true
+      }
+    }
+  ],
+  "rows": [
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.191049549237995,
+        "junction_peak_mV": -62.62128432213165,
+        "prop_ratio": -2.0741671871991008,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.61130822070453,
+        "junction_peak_mV": -62.620359011158115,
+        "prop_ratio": -1.980948038403027,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 32.711801659210536,
+        "junction_peak_mV": -62.619491798808795,
+        "prop_ratio": -1.9142782917056869,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.123068470586254,
+        "junction_peak_mV": -62.2813407517023,
+        "prop_ratio": -2.2145997623567277,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.144133338282952,
+        "junction_peak_mV": -62.280997212779035,
+        "prop_ratio": -2.0661067450123825,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.079732192350118,
+        "junction_peak_mV": -62.28064550335775,
+        "prop_ratio": -2.003899039988747,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 26.826090915968518,
+        "junction_peak_mV": -61.93609555840972,
+        "prop_ratio": -2.308800628180291,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 27.500292299241984,
+        "junction_peak_mV": -61.936019990167374,
+        "prop_ratio": -2.2521949700103576,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.917208702380755,
+        "junction_peak_mV": -61.935928268196925,
+        "prop_ratio": -2.1418363337087145,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.192147147035932,
+        "junction_peak_mV": -62.61908596396896,
+        "prop_ratio": -2.0740189711918684,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.604666555694468,
+        "junction_peak_mV": -62.618780486467955,
+        "prop_ratio": -1.9813143852069979,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 32.71091553244665,
+        "junction_peak_mV": -62.61847588326578,
+        "prop_ratio": -1.9142990914195963,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.13665343095339,
+        "junction_peak_mV": -62.27924225708976,
+        "prop_ratio": -2.213455925379377,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.14416348402799,
+        "junction_peak_mV": -62.27910528794713,
+        "prop_ratio": -2.0660419162384773,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.084572512915237,
+        "junction_peak_mV": -62.27895728296014,
+        "prop_ratio": -2.00353269317389,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 26.808762102053368,
+        "junction_peak_mV": -61.93450602326923,
+        "prop_ratio": -2.310233713421832,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 27.51063161858485,
+        "junction_peak_mV": -61.93447957251661,
+        "prop_ratio": -2.2512925341443877,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.900770715369493,
+        "junction_peak_mV": -61.934446237697074,
+        "prop_ratio": -2.1430032730843473,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.192064925785125,
+        "junction_peak_mV": -62.61547510546113,
+        "prop_ratio": -2.0739050230375344,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.594018645924237,
+        "junction_peak_mV": -62.61541822907527,
+        "prop_ratio": -1.9818757129572349,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 32.71013381985041,
+        "junction_peak_mV": -62.615356235517304,
+        "prop_ratio": -1.9142494671641685,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.15743828829638,
+        "junction_peak_mV": -62.27631248308131,
+        "prop_ratio": -2.2117179782283825,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 30.14378308162734,
+        "junction_peak_mV": -62.27629010677925,
+        "prop_ratio": -2.0659745970882035,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 31.09132733855813,
+        "junction_peak_mV": -62.27626382402615,
+        "prop_ratio": -2.0030107800123993,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.95641459997912,
+        "junction_peak_mV": 40.90180714304225,
+        "prop_ratio": 0.9748642140423173,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 26.780463387110682,
+        "junction_peak_mV": -61.93273897927964,
+        "prop_ratio": -2.312608937494621,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.96227614337696,
+        "junction_peak_mV": 40.90672322396131,
+        "prop_ratio": 0.9748451939115735,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 27.52912618572486,
+        "junction_peak_mV": -61.932735404931385,
+        "prop_ratio": -2.249716717744801,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 23.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 14,
+        "soma_peak_mV": 41.94431029563375,
+        "junction_peak_mV": 40.886135629862174,
+        "prop_ratio": 0.974771914037606,
+        "term_delay_ms": 1.2000000000000002,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 28.873802093171694,
+        "junction_peak_mV": -61.93273080001317,
+        "prop_ratio": -2.144945463024404,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.133351800286242,
+        "junction_peak_mV": -62.800693405509655,
+        "prop_ratio": -3.119236877618003,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.110574277814322,
+        "junction_peak_mV": -62.8004026217193,
+        "prop_ratio": -2.840288173099738,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.639827180519674,
+        "junction_peak_mV": -62.800114220133715,
+        "prop_ratio": -2.7738778091985505,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 18.11083330278,
+        "junction_peak_mV": -62.467297992363754,
+        "prop_ratio": -3.4491675202363585,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.482152272129568,
+        "junction_peak_mV": -62.467237539394105,
+        "prop_ratio": -3.049837571239737,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.436661629020207,
+        "junction_peak_mV": -62.46716444199196,
+        "prop_ratio": -3.0566227290903587,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 15.01057134300888,
+        "junction_peak_mV": -62.12026916176444,
+        "prop_ratio": -4.13843468994248,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 17.593241116081757,
+        "junction_peak_mV": -62.120251126389604,
+        "prop_ratio": -3.530915691799749,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 19.1931259719307,
+        "junction_peak_mV": -62.12022726698912,
+        "prop_ratio": -3.236587273893677,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.13229072930484,
+        "junction_peak_mV": -62.79875050956199,
+        "prop_ratio": -3.119304770328558,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.1062761544475,
+        "junction_peak_mV": -62.79863768079038,
+        "prop_ratio": -2.840760571434194,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.654579617959453,
+        "junction_peak_mV": -62.798518777085,
+        "prop_ratio": -2.7720010627476563,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 18.12616072249946,
+        "junction_peak_mV": -62.46570817279399,
+        "prop_ratio": -3.4461632073722694,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.486483834914722,
+        "junction_peak_mV": -62.46568825951269,
+        "prop_ratio": -3.0491171038855196,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.4595532582963,
+        "junction_peak_mV": -62.46566317182085,
+        "prop_ratio": -3.0531293808427207,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 14.970909283748139,
+        "junction_peak_mV": -62.11915826005883,
+        "prop_ratio": -4.149324338468411,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 17.612805847183612,
+        "junction_peak_mV": -62.11915255111996,
+        "prop_ratio": -3.5269310915076697,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 19.168097165220924,
+        "junction_peak_mV": -62.11914508207034,
+        "prop_ratio": -3.2407570008973487,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.129562155124784,
+        "junction_peak_mV": -62.79599386205383,
+        "prop_ratio": -3.119590648724895,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.097530945670616,
+        "junction_peak_mV": -62.79597674534323,
+        "prop_ratio": -2.8417643989156316,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 22.67452657225973,
+        "junction_peak_mV": -62.79595692589683,
+        "prop_ratio": -2.7694495285613643,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 18.147112654205845,
+        "junction_peak_mV": -62.46383802165465,
+        "prop_ratio": -3.4420813499043215,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.49171130605907,
+        "junction_peak_mV": -62.46383561719767,
+        "prop_ratio": -3.0482488594658323,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 20.490440261462027,
+        "junction_peak_mV": -62.46383247045894,
+        "prop_ratio": -3.048437792131756,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.841307664507,
+        "junction_peak_mV": 34.92876587832673,
+        "prop_ratio": 0.9480870276485105,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 14.90516979293696,
+        "junction_peak_mV": -62.11814555310707,
+        "prop_ratio": -4.167557056783258,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.83297633174374,
+        "junction_peak_mV": 34.52959907196605,
+        "prop_ratio": 0.9374642646569789,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 17.64022308395418,
+        "junction_peak_mV": -62.11814500780852,
+        "prop_ratio": -3.521392258599731,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 30.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 23,
+        "soma_peak_mV": 36.81645254163567,
+        "junction_peak_mV": 34.479608631004886,
+        "prop_ratio": 0.9365271841987478,
+        "term_delay_ms": 1.0499999999999998,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 19.129348104783222,
+        "junction_peak_mV": -62.1181441902201,
+        "prop_ratio": -3.247269266572011,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 3.4140176379744247,
+        "junction_peak_mV": -62.98754628099482,
+        "prop_ratio": -18.4496839091804,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 6.3365586353496886,
+        "junction_peak_mV": -62.98742051266145,
+        "prop_ratio": -9.9403199966105,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 9.636140712246807,
+        "junction_peak_mV": -62.987290270289584,
+        "prop_ratio": -6.536568129421097,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 2.6611832415232324,
+        "junction_peak_mV": -62.66731751058296,
+        "prop_ratio": -23.548666823376234,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.7051641632721894,
+        "junction_peak_mV": -62.66729857939132,
+        "prop_ratio": -10.984311193500973,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 8.091216727257091,
+        "junction_peak_mV": -62.66727395364655,
+        "prop_ratio": -7.745098922210016,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 0.4780116163874556,
+        "junction_peak_mV": -62.328226217272544,
+        "prop_ratio": -130.39060993603965,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 4.239494318783314,
+        "junction_peak_mV": -62.328221716422505,
+        "prop_ratio": -14.70180569420128,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 0.9,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.569248002678419,
+        "junction_peak_mV": -62.32821545511469,
+        "prop_ratio": -11.191495768394434,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 3.3791975021622345,
+        "junction_peak_mV": -62.986074818822786,
+        "prop_ratio": -18.6393588354987,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 6.308264409029642,
+        "junction_peak_mV": -62.98602999006058,
+        "prop_ratio": -9.984684519549063,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 9.63572655738082,
+        "junction_peak_mV": -62.985979940161926,
+        "prop_ratio": -6.536713092165906,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 2.642438615949933,
+        "junction_peak_mV": -62.66622775966606,
+        "prop_ratio": -23.71530123023808,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.683822424504939,
+        "junction_peak_mV": -62.66622235863429,
+        "prop_ratio": -11.025365973514297,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 8.099284629663936,
+        "junction_peak_mV": -62.666214848918635,
+        "prop_ratio": -7.737253067931611,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 0.48829590309715637,
+        "junction_peak_mV": -62.32754783396026,
+        "prop_ratio": -127.64298745623293,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 4.232797793213088,
+        "junction_peak_mV": -62.32754653939602,
+        "prop_ratio": -14.724905271717127,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.0,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.58816866706831,
+        "junction_peak_mV": -62.32754500086316,
+        "prop_ratio": -11.153483138074591,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 3.319426606927503,
+        "junction_peak_mV": -62.984203890296406,
+        "prop_ratio": -18.97442279906145,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 6.258386010003019,
+        "junction_peak_mV": -62.98419820445528,
+        "prop_ratio": -10.063968266544316,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 0.85,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 9.634810033577235,
+        "junction_peak_mV": -62.98419109510252,
+        "prop_ratio": -6.537149240680732,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 2.61074350163571,
+        "junction_peak_mV": -62.66512733897748,
+        "prop_ratio": -24.002789741587357,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.648956672233229,
+        "junction_peak_mV": -62.66512683745435,
+        "prop_ratio": -11.093221363420486,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.0,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 8.110124781286215,
+        "junction_peak_mV": -62.66512626350925,
+        "prop_ratio": -7.726777078462034,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 0.8,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.243915602417204,
+        "junction_peak_mV": 22.75651201736498,
+        "prop_ratio": 0.8352878620482116,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 0.5029576747694074,
+        "junction_peak_mV": -62.32715499142825,
+        "prop_ratio": -123.92127234166091,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.0,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.421098373995967,
+        "junction_peak_mV": 22.946971161629282,
+        "prop_ratio": 0.8368363239377166,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 4.220155092778498,
+        "junction_peak_mV": -62.32715496202711,
+        "prop_ratio": -14.768925215255935,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    },
+    {
+      "t_celsius": 37.0,
+      "f_ra_mult": 1.2,
+      "f_gl_mult": 1.2,
+      "i_mult": 1.2,
+      "D": {
+        "n_spikes": 30,
+        "soma_peak_mV": 27.213861925679407,
+        "junction_peak_mV": 23.05406031447878,
+        "prop_ratio": 0.8471440171718011,
+        "term_delay_ms": 0.8999999999999999,
+        "stable": true
+      },
+      "F": {
+        "n_spikes": 1,
+        "soma_peak_mV": 5.616904678073844,
+        "junction_peak_mV": -62.32715499839374,
+        "prop_ratio": -11.09635263024742,
+        "term_delay_ms": NaN,
+        "stable": true
+      },
+      "ok": false
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "status": "FAIL",
+  "blocking_steps": [
+    "f_conduction_gate",
+    "preset_stress_gate"
+  ],
+  "results": [
+    {
+      "name": "core_contract_suite",
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "C:\\NeuroModelPort\\tests\\core\\test_rhs_contract.py",
+        "C:\\NeuroModelPort\\tests\\core\\test_jacobian_contract.py",
+        "C:\\NeuroModelPort\\tests\\core\\test_dual_stimulation_distribution.py",
+        "C:\\NeuroModelPort\\tests\\core\\test_delay_target_utils.py"
+      ],
+      "exit_code": 0,
+      "status": "PASS",
+      "stdout_tail": "============================= test session starts =============================\nplatform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0\nrootdir: C:\\NeuroModelPort\nconfigfile: pytest.ini\ncollected 12 items\n\ntests\\core\\test_rhs_contract.py ....                                     [ 33%]\ntests\\core\\test_jacobian_contract.py .                                   [ 41%]\ntests\\core\\test_dual_stimulation_distribution.py ....                    [ 75%]\ntests\\core\\test_delay_target_utils.py ...                                [100%]\n\n============================= 12 passed in 3.57s ==============================",
+      "stderr_tail": "",
+      "duration_sec": 5.400010899989866
+    },
+    {
+      "name": "f_conduction_gate",
+      "command": [
+        "C:\\Python314\\python.exe",
+        "C:\\NeuroModelPort\\tests\\utils\\run_f_conduction_extended.py",
+        "--target-ratio",
+        "0.3",
+        "--output",
+        "C:\\NeuroModelPort\\tests\\artifacts\\p0_p1_gate_user\\f_conduction_gate.json"
+      ],
+      "exit_code": 1,
+      "status": "FAIL",
+      "stdout_tail": "056/81 T=37.0 ra=0.90 gl=0.85 i=1.00 ok=False\n057/81 T=37.0 ra=0.90 gl=0.85 i=1.20 ok=False\n058/81 T=37.0 ra=0.90 gl=1.00 i=0.80 ok=False\n059/81 T=37.0 ra=0.90 gl=1.00 i=1.00 ok=False\n060/81 T=37.0 ra=0.90 gl=1.00 i=1.20 ok=False\n061/81 T=37.0 ra=0.90 gl=1.20 i=0.80 ok=False\n062/81 T=37.0 ra=0.90 gl=1.20 i=1.00 ok=False\n063/81 T=37.0 ra=0.90 gl=1.20 i=1.20 ok=False\n064/81 T=37.0 ra=1.00 gl=0.85 i=0.80 ok=False\n065/81 T=37.0 ra=1.00 gl=0.85 i=1.00 ok=False\n066/81 T=37.0 ra=1.00 gl=0.85 i=1.20 ok=False\n067/81 T=37.0 ra=1.00 gl=1.00 i=0.80 ok=False\n068/81 T=37.0 ra=1.00 gl=1.00 i=1.00 ok=False\n069/81 T=37.0 ra=1.00 gl=1.00 i=1.20 ok=False\n070/81 T=37.0 ra=1.00 gl=1.20 i=0.80 ok=False\n071/81 T=37.0 ra=1.00 gl=1.20 i=1.00 ok=False\n072/81 T=37.0 ra=1.00 gl=1.20 i=1.20 ok=False\n073/81 T=37.0 ra=1.20 gl=0.85 i=0.80 ok=False\n074/81 T=37.0 ra=1.20 gl=0.85 i=1.00 ok=False\n075/81 T=37.0 ra=1.20 gl=0.85 i=1.20 ok=False\n076/81 T=37.0 ra=1.20 gl=1.00 i=0.80 ok=False\n077/81 T=37.0 ra=1.20 gl=1.00 i=1.00 ok=False\n078/81 T=37.0 ra=1.20 gl=1.00 i=1.20 ok=False\n079/81 T=37.0 ra=1.20 gl=1.20 i=0.80 ok=False\n080/81 T=37.0 ra=1.20 gl=1.20 i=1.00 ok=False\n081/81 T=37.0 ra=1.20 gl=1.20 i=1.20 ok=False\n\nSaved: C:\\NeuroModelPort\\tests\\artifacts\\p0_p1_gate_user\\f_conduction_gate.json\nAnomalies: 81 / 81\nResult status: FAIL (anomalies detected and fail-on-anomaly is enabled).",
+      "stderr_tail": "Primary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nPrimary integrator crashed during BDF step: RuntimeError: Factor is exactly singular\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.",
+      "duration_sec": 443.5482209000038
+    },
+    {
+      "name": "preset_stress_gate",
+      "command": [
+        "C:\\Python314\\python.exe",
+        "C:\\NeuroModelPort\\tests\\utils\\run_preset_stress_validation.py",
+        "--out",
+        "C:\\NeuroModelPort\\tests\\artifacts\\p0_p1_gate_user\\preset_stress_gate.json",
+        "--report-md",
+        "C:\\NeuroModelPort\\tests\\artifacts\\p0_p1_gate_user\\preset_stress_gate.md",
+        "--dt-eval",
+        "0.2"
+      ],
+      "exit_code": 124,
+      "status": "TIMEOUT",
+      "stdout_tail": "",
+      "stderr_tail": "Simulation config warning: Heavy simulation estimate: 4,000 steps, 46 compartments, 5 channel-gates, ~36.4s expected.\nHeavy simulation detected: steps=4,000, compartments=46, channel-gates=5, est=36.4s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 4,000 steps, 46 compartments, 5 channel-gates, ~36.4s expected.\nHeavy simulation detected: steps=4,000, compartments=46, channel-gates=5, est=36.4s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 4,000 steps, 46 compartments, 5 channel-gates, ~36.4s expected.\nHeavy simulation detected: steps=4,000, compartments=46, channel-gates=5, est=36.4s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 4,000 steps, 46 compartments, 5 channel-gates, ~36.4s expected.\nHeavy simulation detected: steps=4,000, compartments=46, channel-gates=5, est=36.4s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 4,000 steps, 46 compartments, 5 channel-gates, ~36.4s expected.\nHeavy simulation detected: steps=4,000, compartments=46, channel-gates=5, est=36.4s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 7,500 steps, 46 compartments, 5 channel-gates, ~68.2s expected.\nHeavy simulation detected: steps=7,500, compartments=46, channel-gates=5, est=68.2s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 7,500 steps, 46 compartments, 5 channel-gates, ~68.2s expected.\nHeavy simulation detected: steps=7,500, compartments=46, channel-gates=5, est=68.2s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 7,500 steps, 46 compartments, 5 channel-gates, ~68.2s expected.\nHeavy simulation detected: steps=7,500, compartments=46, channel-gates=5, est=68.2s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 7,500 steps, 46 compartments, 5 channel-gates, ~68.2s expected.\nHeavy simulation detected: steps=7,500, compartments=46, channel-gates=5, est=68.2s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\nSimulation config warning: Heavy simulation estimate: 7,500 steps, 46 compartments, 5 channel-gates, ~68.2s expected.\nHeavy simulation detected: steps=7,500, compartments=46, channel-gates=5, est=68.2s, jac=dense_fd\nPrimary integrator failed (BDF): Required step size is less than spacing between numbers.\n[timeout] step exceeded 900.0s",
+      "duration_sec": 900.1053049000911
+    }
+  ]
+}

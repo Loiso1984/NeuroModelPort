@@ -147,6 +147,11 @@ class MorphologyBuilder:
         # Membrane capacitance [µF/cm²]
         Cm_v = np.full(N_comp, cc.Cm, dtype=np.float64)
         
+        # Apply trunk gNa reduction (demyelination model: low internodal Na density)
+        if not mc.single_comp and mc.N_trunk > 0 and mc.gNa_trunk_mult < 1.0:
+            trunk_slice = slice(1 + mc.N_ais, 1 + mc.N_ais + mc.N_trunk)
+            gNa_v[trunk_slice] *= mc.gNa_trunk_mult
+
         # Apply AIS multipliers for all channels (matches Scilab v9.0 behaviour)
         if not mc.single_comp and mc.N_ais > 0:
             ais_slice = slice(1, 1 + mc.N_ais)
@@ -204,69 +209,6 @@ class MorphologyBuilder:
 
         # Преобразуем в CSR формат | Convert to CSR format
         L_csr = L_matrix.tocsr()
-
-        # Build parent_idx and hines_order for native Hines solver
-        parent_idx = np.full(N_comp, -1, dtype=np.int64)
-        hines_order = np.arange(N_comp, dtype=np.int64)  # Default: root-to-leaves order
-        
-        if not mc.single_comp:
-            # Build parent index array based on morphology topology
-            # Soma is root (parent = -1)
-            if mc.N_ais > 0:
-                # AIS compartments connect to soma (0) or previous AIS
-                parent_idx[1] = 0  # First AIS connects to soma
-                for k in range(2, 1 + mc.N_ais):
-                    parent_idx[k] = k - 1
-                
-                # Trunk connects to last AIS
-                if mc.N_trunk > 0:
-                    parent_idx[idx_trunk_start] = mc.N_ais  # First trunk connects to last AIS
-                    for k in range(idx_trunk_start + 1, idx_fork + 1):
-                        parent_idx[k] = k - 1
-            elif mc.N_trunk > 0:
-                # No AIS, trunk connects directly to soma
-                parent_idx[1] = 0
-                for k in range(2, 1 + mc.N_trunk):
-                    parent_idx[k] = k - 1
-            
-            # Branches connect to fork (last trunk compartment)
-            if mc.N_b1 > 0:
-                parent_idx[idx_b1_start] = idx_fork
-                for k in range(idx_b1_start + 1, idx_b1_start + mc.N_b1):
-                    parent_idx[k] = k - 1
-            
-            if mc.N_b2 > 0:
-                parent_idx[idx_b2_start] = idx_fork
-                for k in range(idx_b2_start + 1, idx_b2_start + mc.N_b2):
-                    parent_idx[k] = k - 1
-            
-            # Build hines_order: leaves-to-root (reverse topological order)
-            # For Hines algorithm, we need to eliminate from leaves to root
-            # Simple approach: use reverse BFS order
-            hines_order = _build_hines_order(parent_idx, N_comp)
-
-        # Build axial conductance arrays for Hines solver
-        g_axial_to_parent = np.zeros(N_comp, dtype=np.float64)
-        g_axial_parent_to_child = np.zeros(N_comp, dtype=np.float64)
-        
-        if not mc.single_comp:
-            for i in range(N_comp):
-                p = parent_idx[i]
-                if p >= 0:
-                    # Get conductance from L matrix (already normalized by area)
-                    g_val = L_matrix[i, p] if L_matrix[i, p] != 0 else L_matrix[p, i]
-                    if g_val == 0:
-                        # Fallback: compute from diameters
-                        d_child = diameters[i]
-                        d_parent = diameters[p]
-                        g_val = gax_pair(d_child, d_parent, mc.Ra, mc.dx)
-                    g_axial_to_parent[i] = abs(g_val)
-            
-            # Sum conductances from parent to all children
-            for i in range(N_comp):
-                for j in range(N_comp):
-                    if parent_idx[j] == i:
-                        g_axial_parent_to_child[i] += g_axial_to_parent[j]
 
         return {
             'N_comp': N_comp,

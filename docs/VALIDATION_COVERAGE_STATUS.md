@@ -2,6 +2,22 @@
 
 Current status snapshot after latest branch-contour runs.
 
+## v10.2 Critique Intake (newly confirmed priority)
+
+Based on current code audit versus v10.2 critique, these items are explicitly treated as open and priority-ordered:
+
+- `P0` RHS hot-path allocation removal in `core/rhs.py` + solver/jacobian contract synchronization.
+- `P0` GUI analytics update-cycle memory hardening (remove repeated clear/cla in hot paths, shift to persistent artists).
+- `P0` Preset F (MS) demyelination severity recalibration until conduction ratio reflects pathological attenuation.
+- `P1` RHS argument explosion refactor (reduce positional-argument fragility).
+- `P1` Calcium upper-bound safety clamp for long pathological runs.
+- Addendum (2026-04-05) confirmed by post-implementation review:
+  - keep `P0` on GUI update-cycle memory discipline (no hot-path artist/axes recreation),
+  - keep `P0` on Preset F demyelination severity until ratio target is reproducibly met,
+  - defer `P1` items (RHS scalar packing, GUI SSoT absolute-current cleanup, lazy heavy analytics tabs) until P0 gates are closed.
+
+Execution source of truth for this queue is now `CurrentTasks10.2.md` + `AIDER_PLAN.md` (v10.2 section).
+
 ## Closed in validation contour
 
 - `1` Calcium/Nernst calibration checks (core acceptance layer): active branch tests + extended deterministic report artifacts.
@@ -26,6 +42,10 @@ Current status snapshot after latest branch-contour runs.
   - setup/dual-stim/analysis tab order and setup grouping were reworked for clearer workflow,
   - post-run tab focusing now uses explicit widget targets (no stale index jumps after tab reordering).
 - `5` Error handling/logging/warnings: core layer implemented and tested; can be expanded with richer user-facing diagnostics.
+- Validation orchestration hardening:
+  - active suite now includes strict impedance utility gate as a utility-check phase,
+  - environment-limited missing-dependency path is explicitly classified as warning (not false hard-fail),
+  - utility check status mapping is unit-tested.
 - K/N/O pathology UX/documentation guidance: mode switches + guide + preflight/status-mode warnings integrated; final bilingual polish still needed.
 
 ## Not closed yet (planned follow-up)

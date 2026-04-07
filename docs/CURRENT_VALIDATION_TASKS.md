@@ -499,3 +499,56 @@ If Jacobian mode is validated as both stable and significantly faster, expose it
    - current-balance diagnostic and energy overlays,
    - Remak law annotation + richer topology labels,
    - these are mapped to follow-up Python analytics/topology enhancements.
+87. Impedance strict-gate diagnostics hardened (utility lane):
+   - `run_impedance_zap_report.py` now emits per-row `guard_reasons`,
+   - artifact now includes `failed_case_ids`,
+   - CLI now supports `--output` and `--print-failures` for CI/local triage workflows.
+88. Regression coverage expanded for impedance utility:
+   - `tests/utils/test_run_impedance_zap_report.py` now validates:
+     - analysis-band vs case-range intersection behavior,
+     - empty expected-range detection,
+     - strict pass/fail artifact invariants (`strict_mode`, `failed_case_ids`),
+     - custom output path and failure-print behavior.
+89. Active suite orchestration expanded with utility-check layer:
+   - `run_active_branch_suite.py` now executes strict impedance gate as utility check in addition to branch scripts,
+   - utility status model added: `pass / warn / fail`,
+   - missing dependency path (`[WARN] missing dependency`, `rc=2`) is treated as environment warning, not hard fail.
+90. Added targeted tests for utility-check orchestration:
+   - `tests/utils/test_run_active_branch_suite.py` validates warning/failure classification and report schema (`utility_checks` section),
+   - branch utility infrastructure now has deterministic unit coverage for status mapping logic.
+91. RHS/Jacobian positional-contract fail-fast hardening:
+   - `core/rhs_contract.py` now exposes `RHS_ARG_COUNT` and strict `unpack_rhs_args(...)`,
+   - legacy `analytic_sparse_jacobian(...)` now validates exact RHS arg length before computation,
+   - incomplete positional calls now fail explicitly (`ValueError`) instead of risking silent misalignment.
+92. Solver-side structural guard for RHS payload added:
+   - `validate_rhs_args_values(...)` now enforces critical shape invariants (`n_comp`, conductance/phi/Cm/B_Ca vector sizes, Laplacian sparse structure sizes),
+   - `NeuronSolver.run_single()` validates RHS mapping before positional packing,
+   - mismatch now fails fast with explicit `ValueError` instead of silently entering Numba kernel with inconsistent tensors.
+93. RHS stimulation distribution refactor (high-risk perf lane):
+   - `rhs_multicompartment(...)` no longer allocates per-step `i_stim` / `i_stim_2` compartment arrays,
+   - per-compartment stimulus contribution is now computed on-demand via `distributed_stimulus_current_for_comp(...)`,
+   - dendritic-filter derivative update is computed scalar-wise before main loop, reducing temporary allocations and matching Stage-2 Numba constraints.
+94. Legacy analytic Jacobian fallback caching added:
+   - `analytic_sparse_jacobian(...)` now caches the compiled callable by structural key (flags + sparse-structure identities),
+   - avoids rebuilding sparsity/callback on identical repeated legacy calls,
+   - explicit `clear_legacy_jacobian_cache()` helper added for deterministic tests/debug.
+95. RHS stimulus/event preflight guards expanded:
+   - `validate_rhs_args_values(...)` now validates event queue consistency (`n_events <= len(event_times_arr)`),
+   - validates stimulation routing fields (`stim_mode{,_2}`, `stim_comp{,_2}` bounds) and dendritic tau non-negativity,
+   - turns malformed stimulation payloads into explicit early `ValueError` instead of deep RHS-runtime ambiguity.
+96. Laplacian structure guards added to RHS preflight:
+   - `validate_rhs_args_values(...)` now checks CSR indptr invariants (`head=0`, `tail=len(indices)`, non-decreasing),
+   - validates each `l_indices` entry is in compartment bounds `[0, n_comp)`,
+   - prevents malformed morphology-sparse topology from entering RHS/Jacobian compute path.
+97. Added prioritized physiology cluster orchestrator:
+   - new `tests/utils/run_priority_physiology_cluster.py` runs high-priority utilities (unified protocol, pathology focus, F-conduction),
+   - emits one consolidated artifact with `pass/warn/fail` counters and strict policy switch (`--fail-on-warn`),
+   - explicitly classifies missing dependency (`pydantic`) as warning-path to keep diagnosis actionable in constrained environments.
+98. Legacy Jacobian cache-key correctness hardened:
+   - cache key now uses sparse-topology content signature (`l_indices`, `l_indptr`) instead of object id references,
+   - prevents stale cache reuse across different sparse structures that could otherwise share lifecycle-dependent ids,
+   - regression test added to ensure topology change triggers cache rebuild.
+99. Priority physiology cluster policy layer expanded:
+   - `run_priority_physiology_cluster.py` now supports `--strict-critical` for explicit critical-lane gating,
+   - artifact now exports `critical_ok` and `next_actions` to drive branch-level execution priorities,
+   - tests validate warning-path, strict-warning, and strict-critical outcomes.
