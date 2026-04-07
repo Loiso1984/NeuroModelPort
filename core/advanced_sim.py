@@ -10,7 +10,7 @@ import copy
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
-from core.rhs import get_stim_current, nernst_ca_ion
+from core.rhs import compute_ionic_currents_scalar, get_stim_current
 from core.solver import NeuronSolver, SimulationResult
 from core.analysis import detect_spikes
 
@@ -340,34 +340,29 @@ def run_euler_maruyama(config: FullModelConfig,
         if dyn_ca:
             ca_i = y[cur:cur + n_comp];  cur += n_comp
 
-        # ── ionic currents ──────────────────────────────────────────
-        I_ion = morph['gL_v'] * (V - ch.EL)
-        I_ion += morph['gNa_v'] * (m ** 3) * h * (V - ch.ENa)
-        I_ion += morph['gK_v']  * (nk ** 4) * (V - ch.EK)
+        # ── ionic currents (shared math with deterministic RHS) ────
+        I_ion = np.zeros(n_comp)
         I_ca_total = np.zeros(n_comp)
-
-        if ch.enable_Ih:
-            I_ion += morph['gIh_v'] * r * (V - ch.E_Ih)
-        if ch.enable_ICa:
-            eca = nernst_ca_ion(ca_i[0], cfg.calcium.Ca_ext, t_kelvin) if dyn_ca else 120.0
-            I_ca_c = morph['gCa_v'] * (s ** 2) * u * (V - eca)
-            I_ion += I_ca_c
-            I_ca_total += I_ca_c
-        if ch.enable_IA:
-            I_ion += morph['gA_v'] * a * b * (V - ch.E_A)
-        if ch.enable_ITCa:
-            eca_t = nernst_ca_ion(ca_i[0], cfg.calcium.Ca_ext, t_kelvin) if dyn_ca else 120.0
-            I_ca_t = morph['gTCa_v'] * (p ** 2) * q * (V - eca_t)
-            I_ion += I_ca_t
-            I_ca_total += I_ca_t
-        if ch.enable_IM:
-            I_ion += morph['gIM_v'] * w * (V - ch.EK)
-        if ch.enable_NaP:
-            I_ion += morph['gNaP_v'] * x_nap * (V - ch.ENa)
-        if ch.enable_NaR:
-            I_ion += morph['gNaR_v'] * (y_nr ** 3) * j_nr * (V - ch.ENa)
-        if ch.enable_SK:
-            I_ion += morph['gSK_v'] * z_sk * (V - ch.EK)
+        for i in range(n_comp):
+            sk_gate_i = z_inf_SK(ca_i[i]) if ch.enable_SK else 0.0
+            i_ion_i, i_ca_influx_i = compute_ionic_currents_scalar(
+                V[i], m[i], h[i], nk[i],
+                r[i] if ch.enable_Ih else 0.0,
+                s[i] if ch.enable_ICa else 0.0,
+                u[i] if ch.enable_ICa else 0.0,
+                a[i] if ch.enable_IA else 0.0,
+                b[i] if ch.enable_IA else 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                sk_gate_i,
+                ch.enable_Ih, ch.enable_ICa, ch.enable_IA, ch.enable_SK,
+                False, False, False, False, dyn_ca,
+                morph['gNa_v'][i], morph['gK_v'][i], morph['gL_v'][i], morph['gIh_v'][i],
+                morph['gCa_v'][i], morph['gA_v'][i], morph['gSK_v'][i], 0.0, 0.0, 0.0, 0.0,
+                ch.ENa, ch.EK, ch.EL, ch.E_Ih, ch.E_A,
+                ca_i[i], cfg.calcium.Ca_ext, cfg.calcium.Ca_rest, t_kelvin,
+            )
+            I_ion[i] = i_ion_i
+            I_ca_total[i] = i_ca_influx_i
 
         I_ax    = L.dot(V)
         I_stim  = np.zeros(n_comp)

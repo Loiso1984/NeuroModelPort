@@ -268,6 +268,7 @@
 - ✅ P0/P1 gate runner hardened against hangs: per-step timeout policy added with explicit `TIMEOUT` classification and blocking semantics in consolidated summary.
 - ✅ Windows execution helper synced with timeout-capable gate runner (`RUN_TESTS_FOR_Codex.bat` now passes `--step-timeout-sec`), reducing “stuck test” risk on host runs.
 - ✅ Extended F-conduction acceptance policy aligned with demo objective: utility now supports conduction-block acceptance (`block_or_delay` / `block_only`) so F can pass on strong attenuation even when terminal delay is undefined due to propagation block.
+- ✅ Oscilloscope hot-loop persistence improved: key voltage/gate/current traces now reuse persistent PlotDataItem objects (setData/setVisible) instead of full per-run recreation.
 
 ## Low-Priority GUI Backlog (compiled from AIDER + new recommendations)
 > Ниже — только уникальные, реализуемые пункты (без дублей уже закрытых задач).

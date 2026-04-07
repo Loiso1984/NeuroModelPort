@@ -440,12 +440,8 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         ena, ek, el, eih, ea,
         cm_v, l_data, l_indices, l_indptr,
         phi_mat,
-        t_kelvin, ca_ext, ca_rest, tau_ca, b_ca, mg_ext, tau_sk,
-        stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, event_times_arr, n_events, stim_comp, stim_mode,
-        use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
-        dual_stim_enabled,
-        stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, stim_comp_2, stim_mode_2,
-        use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
+        env_vec, b_ca,
+        stim1_vec, event_times_arr, n_events, stim2_vec,
     ):
         # Zero all entries
         J_csr.data[:] = 0.0
@@ -471,6 +467,16 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         phi_im = phi_mat[6]
         phi_nap = phi_mat[7]
         phi_nar = phi_mat[8]
+
+        t_kelvin = env_vec[0]
+        ca_ext = env_vec[1]
+        tau_ca = env_vec[3]
+        tau_sk = env_vec[5]
+
+        use_dfilter_primary = int(stim1_vec[9])
+        dfilter_tau_ms = stim1_vec[11]
+        use_dfilter_secondary = int(stim2_vec[10])
+        dfilter_tau_ms_2 = stim2_vec[12]
 
         idx, n_state = _cached_state_slices(
             n_comp,
@@ -761,8 +767,10 @@ def analytic_sparse_jacobian(*args, **kwargs):
     en_im = rhs["en_im"]
     en_nap = rhs["en_nap"]
     en_nar = rhs["en_nar"]
-    use_dfp = rhs["use_dfilter_primary"]
-    use_dfs = rhs["use_dfilter_secondary"]
+    stim1_vec = rhs["stim1_vec"]
+    stim2_vec = rhs["stim2_vec"]
+    use_dfp = int(stim1_vec[9])
+    use_dfs = int(stim2_vec[10])
     cache_key = (
         n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
         use_dfp, use_dfs, _sparse_structure_signature(rhs["l_indices"], rhs["l_indptr"]),
