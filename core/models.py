@@ -226,9 +226,12 @@ class SimulationParams(BaseModel):
     """
     t_sim:      float   = Field(default=150.0, gt=0,  description="Simulation duration (ms)")
     dt_eval:    float   = Field(default=0.05,  gt=0,  description="Output time step (ms)")
-    jacobian_mode: Literal['dense_fd', 'sparse_fd', 'analytic_sparse'] = Field(
+    jacobian_mode: Literal['dense_fd', 'sparse_fd', 'analytic_sparse', 'native_hines'] = Field(
         default='dense_fd',
-        description="Jacobian handling for BDF: dense finite-diff, sparse finite-diff, or analytic sparse"
+        description=(
+            "Integration mode. BDF modes: 'dense_fd', 'sparse_fd', 'analytic_sparse'. "
+            "Native Numba mode: 'native_hines' (fixed-step Backward-Euler + O(N) Hines solver)."
+        )
     )
     stim_type:  Literal[
         'const', 'pulse', 'alpha', 'ou_noise',
