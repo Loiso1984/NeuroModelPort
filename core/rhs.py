@@ -76,6 +76,38 @@ def _validate_conductance(g: float64) -> float64:
         return 0.0
     return g
 
+@njit(cache=True)
+def _calculate_syn_tau(stype, atau):
+    """Return (tau_rise, tau_decay) for a conductance-based synapse type.
+
+    Centralises the biological time-constant logic so that get_stim_current
+    and get_event_driven_conductance stay consistent.
+    Reference: Destexhe et al. 1994, J Neurophysiol 72:689-703.
+    """
+    if stype == 4:      # AMPA — fast excitatory
+        tau_r = max(0.1, min(1.0,   atau / TAU_RISE_RATIO))
+        tau_d = max(1.0, min(10.0,  atau))
+    elif stype == 5:    # NMDA — slow excitatory
+        tau_r = max(1.0, min(10.0,  atau / TAU_RISE_RATIO))
+        tau_d = max(10.0, min(200.0, atau))
+    elif stype == 6:    # GABA-A — fast inhibitory
+        tau_r = max(0.2, min(2.0,   atau / TAU_RISE_RATIO))
+        tau_d = max(2.0, min(20.0,  atau))
+    elif stype == 7:    # GABA-B — slow inhibitory
+        tau_r = max(5.0, min(100.0, atau / TAU_RISE_RATIO))
+        tau_d = max(50.0, min(500.0, atau))
+    elif stype == 8:    # Kainate — intermediate excitatory
+        tau_r = max(0.5, min(5.0,   atau / TAU_RISE_RATIO))
+        tau_d = max(5.0, min(50.0,  atau))
+    elif stype == 9:    # Nicotinic ACh — moderate excitatory
+        tau_r = max(1.0, min(10.0,  atau / TAU_RISE_RATIO))
+        tau_d = max(10.0, min(100.0, atau))
+    else:
+        tau_r = 0.0
+        tau_d = 0.0
+    return tau_r, tau_d
+
+
 @njit(float64(float64, int32, float64, float64, float64, float64, float64, float64), cache=True)
 def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     """Return stimulus current at time t for various stimulus types."""
@@ -84,11 +116,11 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     t0 = _validate_time_parameter(t0)
     td = _validate_time_parameter(td)
     iext = _validate_conductance(iext)
-    
+
     # Validate atau to prevent division by zero
     if atau <= 0.0:
         return 0.0
-    
+
     if stype == 1:  # pulse
         return iext if t0 <= t <= t0 + td else 0.0
     elif stype == 2:  # alpha (EPSC) — current-based
@@ -107,35 +139,8 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
             return iext * noise_factor
         else:
             return 0.0
-    elif stype == 4:  # AMPA (conductance-based)
-        # Use user-configured tau with biological bounds
-        tau_r = max(0.1, atau / TAU_RISE_RATIO)  # Fast rise: 0.1-1.0ms
-        tau_d = max(1.0, min(10.0, atau))        # Decay: 1-10ms
-        return abs(iext) * _biexp_waveform(t, t0, tau_r, tau_d)
-    elif stype == 5:  # NMDA (conductance-based, Mg block applied in RHS)
-        # NMDA has slower kinetics
-        tau_r = max(1.0, min(10.0, atau / TAU_RISE_RATIO))  # Rise: 1-10ms  
-        tau_d = max(10.0, min(200.0, atau))                  # Decay: 10-200ms
-        return abs(iext) * _biexp_waveform(t, t0, tau_r, tau_d)
-    elif stype == 6:  # GABA-A (conductance-based)
-        # Fast inhibitory
-        tau_r = max(0.2, min(2.0, atau / TAU_RISE_RATIO))   # Rise: 0.2-2ms
-        tau_d = max(2.0, min(20.0, atau))                   # Decay: 2-20ms
-        return abs(iext) * _biexp_waveform(t, t0, tau_r, tau_d)
-    elif stype == 7:  # GABA-B (conductance-based)
-        # Slow inhibitory
-        tau_r = max(5.0, min(100.0, atau / TAU_RISE_RATIO))  # Rise: 5-100ms
-        tau_d = max(50.0, min(500.0, atau))                   # Decay: 50-500ms
-        return abs(iext) * _biexp_waveform(t, t0, tau_r, tau_d)
-    elif stype == 8:  # Kainate (conductance-based)
-        # Intermediate excitatory
-        tau_r = max(0.5, min(5.0, atau / TAU_RISE_RATIO))    # Rise: 0.5-5ms
-        tau_d = max(5.0, min(50.0, atau))                     # Decay: 5-50ms
-        return abs(iext) * _biexp_waveform(t, t0, tau_r, tau_d)
-    elif stype == 9:  # Nicotinic ACh (conductance-based)
-        # Moderate excitatory
-        tau_r = max(1.0, min(10.0, atau / TAU_RISE_RATIO))   # Rise: 1-10ms
-        tau_d = max(10.0, min(100.0, atau))                  # Decay: 10-100ms
+    elif 4 <= stype <= 9:  # Conductance-based synaptic types (AMPA/NMDA/GABA-A/GABA-B/Kainate/Nicotinic)
+        tau_r, tau_d = _calculate_syn_tau(stype, atau)
         return abs(iext) * _biexp_waveform(t, t0, tau_r, tau_d)
     elif stype == 10:  # ZAP/Chirp current (frequency sweep)
         if td <= 0.0 or t < t0 or t > (t0 + td):
@@ -255,26 +260,9 @@ def get_event_driven_conductance(t: float64, stype: int32, iext: float64,
     if n_events > len(event_times):
         return 0.0
     
-    # Use biologically accurate time constants per receptor type with user flexibility
-    if stype == 4:          # AMPA - fast excitatory
-        tau_r = max(0.1, min(1.0, atau / TAU_RISE_RATIO))   # Rise: 0.1-1.0ms
-        tau_d = max(1.0, min(10.0, atau))                    # Decay: 1-10ms
-    elif stype == 5:        # NMDA - slow excitatory
-        tau_r = max(1.0, min(10.0, atau / TAU_RISE_RATIO))   # Rise: 1-10ms
-        tau_d = max(10.0, min(200.0, atau))                  # Decay: 10-200ms
-    elif stype == 6:        # GABA-A - fast inhibitory
-        tau_r = max(0.2, min(2.0, atau / TAU_RISE_RATIO))   # Rise: 0.2-2ms
-        tau_d = max(2.0, min(20.0, atau))                    # Decay: 2-20ms
-    elif stype == 7:        # GABA-B - slow inhibitory
-        tau_r = max(5.0, min(100.0, atau / TAU_RISE_RATIO)) # Rise: 5-100ms
-        tau_d = max(50.0, min(500.0, atau))                  # Decay: 50-500ms
-    elif stype == 8:        # Kainate - intermediate excitatory
-        tau_r = max(0.5, min(5.0, atau / TAU_RISE_RATIO))   # Rise: 0.5-5ms
-        tau_d = max(5.0, min(50.0, atau))                    # Decay: 5-50ms
-    elif stype == 9:        # Nicotinic - moderate excitatory
-        tau_r = max(1.0, min(10.0, atau / TAU_RISE_RATIO))   # Rise: 1-10ms
-        tau_d = max(10.0, min(100.0, atau))                  # Decay: 10-100ms
-    else:
+    # Use shared tau helper — keeps get_stim_current and event-driven paths consistent
+    tau_r, tau_d = _calculate_syn_tau(stype, atau)
+    if tau_r == 0.0 and tau_d == 0.0:
         return 0.0
     
     g = 0.0
@@ -367,6 +355,8 @@ def rhs_multicompartment(
     atau_2 = physics_params.atau_2
     zap_f0_hz_2 = physics_params.zap_f0_hz_2
     zap_f1_hz_2 = physics_params.zap_f1_hz_2
+    event_times_arr_2 = physics_params.event_times_arr_2
+    n_events_2 = physics_params.n_events_2
     stim_comp_2 = physics_params.stim_comp_2
     stim_mode_2 = physics_params.stim_mode_2
     use_dfilter_secondary = physics_params.use_dfilter_secondary
@@ -474,7 +464,11 @@ def rhs_multicompartment(
         is_cond_2 = (stype_2 >= 4)
         e_syn_2 = _get_syn_reversal(stype_2) if is_cond_2 else 0.0
         is_nmda_2 = (stype_2 == 5)
-        base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2)
+        # Stage 6.3 symmetry: use event-driven conductance for secondary stim if queue is non-empty
+        if n_events_2 > 0 and is_cond_2:
+            base_current_2 = get_event_driven_conductance(t, stype_2, iext_2, event_times_arr_2, n_events_2, atau_2)
+        else:
+            base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2)
         if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 1e-12:
             attenuated_current_2 = dfilter_attenuation_2 * base_current_2
             d_vfiltered_dt_secondary = (attenuated_current_2 - v_filtered_secondary) / dfilter_tau_ms_2
@@ -570,18 +564,21 @@ def rhs_multicompartment(
         if en_ia:
             ai = y[off_a + i]
             bi = y[off_b + i]
-            dydt[off_a + i] = phi_ia[i] * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
-            dydt[off_b + i] = phi_ia[i] * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
+            # A-current is a K channel — scale with phi_k (not phi_ia)
+            dydt[off_a + i] = phi_k[i] * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
+            dydt[off_b + i] = phi_k[i] * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
 
         if en_itca:
             pi = y[off_p + i]
             qi = y[off_q + i]
-            dydt[off_p + i] = phi_tca[i] * (am_TCa(vi) * (1.0 - pi) - bm_TCa(vi) * pi)
-            dydt[off_q + i] = phi_tca[i] * (ah_TCa(vi) * (1.0 - qi) - bh_TCa(vi) * qi)
+            # T-type Ca is a Ca channel — scale with phi_ca (not phi_tca)
+            dydt[off_p + i] = phi_ca[i] * (am_TCa(vi) * (1.0 - pi) - bm_TCa(vi) * pi)
+            dydt[off_q + i] = phi_ca[i] * (ah_TCa(vi) * (1.0 - qi) - bh_TCa(vi) * qi)
 
         if en_im:
             wi = y[off_w + i]
-            dydt[off_w + i] = phi_im[i] * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
+            # M-type K is a K channel — scale with phi_k (not phi_im)
+            dydt[off_w + i] = phi_k[i] * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
 
         if en_nap:
             xi = y[off_x + i]
@@ -593,7 +590,8 @@ def rhs_multicompartment(
             dydt[off_y + i] = phi_nar[i] * (ay_NaR(vi) * (1.0 - yi) - by_NaR(vi) * yi)
             dydt[off_j + i] = phi_nar[i] * (aj_NaR(vi) * (1.0 - ji) - bj_NaR(vi) * ji)
 
-        # SK gate ODE: dz/dt = (z_inf(Ca) - z) / tau_SK
+        # SK gate ODE: dz/dt = phi_k * (z_inf(Ca) - z) / tau_SK
+        # SK is a Ca-activated K channel — temperature scaling via phi_k.
         # Hirschberg et al. 1998, J Gen Physiol 111:565
         if en_sk:
             zi = y[off_zsk + i]
@@ -602,7 +600,7 @@ def rhs_multicompartment(
             else:
                 ca_sk = ca_rest
             z_inf = z_inf_SK(ca_sk)
-            dydt[off_zsk + i] = (z_inf - zi) / tau_sk
+            dydt[off_zsk + i] = phi_k[i] * (z_inf - zi) / tau_sk
 
         # Calcium dynamics
         if dyn_ca:

@@ -269,7 +269,7 @@ def run_euler_maruyama(config: FullModelConfig,
     phi_k_v = cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp)
     phi_ih_v = cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp)
     phi_ca_v = cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp)
-    phi_ia_v = cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp)
+    # phi_ia_v removed: A-current (K channel) now uses phi_k_v (consistent with deterministic RHS)
     t_kelvin = cfg.env.T_celsius + 273.15
 
     # Per-compartment B_Ca (Stage 3.4 — volume-dependent calcium dynamics)
@@ -416,8 +416,9 @@ def run_euler_maruyama(config: FullModelConfig,
         if ch.enable_IA:
             aa_v = aa_IA(V);  ba_v = ba_IA(V)
             ab_v = ab_IA(V);  bb_v = bb_IA(V)
-            dy[cur:cur + n_comp] = phi_ia_v * (aa_v * (1 - a) - ba_v * a);  cur += n_comp
-            dy[cur:cur + n_comp] = phi_ia_v * (ab_v * (1 - b) - bb_v * b);  cur += n_comp
+            # A-current is a K channel — scale with phi_k_v (not phi_ia_v)
+            dy[cur:cur + n_comp] = phi_k_v * (aa_v * (1 - a) - ba_v * a);  cur += n_comp
+            dy[cur:cur + n_comp] = phi_k_v * (ab_v * (1 - b) - bb_v * b);  cur += n_comp
         if dyn_ca:
             dca = (-b_ca_v * I_ca_total
                    - (ca_i - cfg.calcium.Ca_rest) / cfg.calcium.tau_Ca)

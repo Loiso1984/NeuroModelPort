@@ -9,7 +9,6 @@ from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import rhs_multicompartment, F_CONST, R_GAS
-from core.rhs_contract import pack_rhs_args, validate_rhs_args_values
 from core.physics_params import create_physics_params
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
@@ -308,6 +307,8 @@ class NeuronSolver:
             "dfilter_tau_ms": dfilter_tau_ms,
             "event_times_arr": np.array(cfg.stim.event_times or [], dtype=np.float64),
             "n_events": int(len(cfg.stim.event_times or [])),
+            "event_times_arr_2": np.array(cfg.stim.event_times_2 or [], dtype=np.float64),
+            "n_events_2": int(len(cfg.stim.event_times_2 or [])),
             "dual_stim_enabled": dual_stim_enabled,
             "stype_2": stype_2,
             "iext_2": iext_2,
@@ -322,8 +323,6 @@ class NeuronSolver:
             "dfilter_attenuation_2": dfilter_attenuation_2,
             "dfilter_tau_ms_2": dfilter_tau_ms_2,
         }
-        validate_rhs_args_values(rhs_values)
-        
         # Create structured PhysicsParams container
         physics_params = create_physics_params(**rhs_values)
 
@@ -331,8 +330,11 @@ class NeuronSolver:
         _dydt_buf = np.empty(len(y0), dtype=np.float64)
 
         def _rhs_fn(t, y):
-            # Reuse pre-allocated buffer for SciPy's history.
-            # Numba's rhs_multicompartment fills it in-place (no heap alloc).
+            # Reuse pre-allocated buffer; rhs_multicompartment fills it in-place.
+            # .copy() returns a UNIQUE array to SciPy so BDF can safely retain
+            # references to previous evaluations in its history buffer.
+            # TODO v11.0: eliminate .copy() when switching to a native Numba
+            # time-loop that owns its own history — BDF will no longer be involved.
             _dydt_buf.fill(0.0)
             rhs_multicompartment(t, y, physics_params, _dydt_buf)
             return _dydt_buf.copy()

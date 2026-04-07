@@ -260,6 +260,14 @@ class SimulationParams(BaseModel):
             "conductance waveforms are summed for each event (overrides pulse_start)."
         )
     )
+    event_times_2: List[float] = Field(
+        default_factory=list,
+        description=(
+            "Secondary synaptic event queue: spike-arrival timestamps (ms). "
+            "When non-empty with conductance-based secondary stim type (dual stimulation), "
+            "conductance waveforms are summed for each event (overrides secondary pulse_start)."
+        )
+    )
     synaptic_train_type: Literal['none', 'regular', 'poisson'] = Field(
         default='none', 
         description="Auto-generate spike train pattern. Overrides manual event_times."

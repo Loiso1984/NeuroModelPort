@@ -576,12 +576,6 @@ class MainWindow(QMainWindow):
             i_density = float(self.config.stim.Iext)
         return float(density_to_absolute_current(i_density, area))
 
-    def _recompute_absolute_iext(self) -> float:
-        """Backward-compatible shim: returns display value and refreshes hints."""
-        i_abs = self._compute_display_iext_absolute_nA()
-        self._update_params_hint()
-        return i_abs
-
     def _set_stim_form_value(self, field_name: str, value):
         """Set stim-form widget value without emitting change callbacks."""
         w = self.form_stim.widgets_map.get(field_name)
@@ -619,7 +613,7 @@ class MainWindow(QMainWindow):
     def _on_morph_field_changed(self, field_name: str, _value):
         self.oscilloscope.sync_delay_controls_for_config(self.config)
         if field_name == "d_soma":
-            self._recompute_absolute_iext()
+            self._update_params_hint()
         self._refresh_topology_preview()
 
     def _on_stim_field_changed(self, field_name: str, value):
@@ -639,7 +633,7 @@ class MainWindow(QMainWindow):
             self._sync_stim_type_controls()
             self.form_stim.refresh()
         if field_name in {"Iext", "stim_type"}:
-            self._recompute_absolute_iext()
+            self._update_params_hint()
             self.form_stim.refresh()
         self._update_params_hint()
         self._refresh_topology_preview()
@@ -795,7 +789,7 @@ class MainWindow(QMainWindow):
                      self.form_calcium, self.form_stim, self.form_stim_loc,
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
-        self._recompute_absolute_iext()
+        self._update_params_hint()
         self._sync_stim_type_controls()
         self._sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()

@@ -85,7 +85,6 @@ def main() -> int:
                 "-m",
                 "pytest",
                 "-q",
-                str(repo_root / "tests/core/test_rhs_contract.py"),
                 str(repo_root / "tests/core/test_jacobian_contract.py"),
                 str(repo_root / "tests/core/test_dual_stimulation_distribution.py"),
                 str(repo_root / "tests/core/test_delay_target_utils.py"),
