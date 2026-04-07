@@ -16,10 +16,11 @@ from PySide6.QtWidgets import (
     QScrollArea, QMessageBox, QApplication, QFileDialog,
     QGroupBox, QToolBar, QProgressDialog, QLayout, QSizePolicy
 )
-from PySide6.QtCore import Qt, QThread, Signal, QObject, QRunnable, QThreadPool
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QIcon, QAction
 
 from gui.locales import T
+from gui.simulation_controller import SimulationController
 from core.models import FullModelConfig
 from core.solver import NeuronSolver
 from core.errors import SimulationParameterError
@@ -34,41 +35,6 @@ from gui.analytics import AnalyticsWidget
 from gui.topology import TopologyWidget
 from gui.axon_biophysics import AxonBiophysicsWidget
 from gui.dual_stimulation_widget import DualStimulationWidget
-
-
-# ─────────────────────────────────────────────────────────────────────
-#  WORKER (background thread for long-running analyses)
-# ─────────────────────────────────────────────────────────────────────
-class WorkerSignals(QObject):
-    finished = Signal(object)
-    error    = Signal(str)
-    progress = Signal(int, int, str)
-
-
-class Worker(QRunnable):
-    def __init__(self, fn, *args, progress_fn=None, **kwargs):
-        super().__init__()
-        self.fn      = fn
-        self.args    = args
-        self.kwargs  = kwargs
-        self.signals = WorkerSignals()
-        self.progress_fn = progress_fn  # Callback to report progress
-        
-        # If progress callback requested, inject it into kwargs
-        if progress_fn is not None:
-            self.kwargs['progress_cb'] = self._progress_callback
-
-    def _progress_callback(self, i, n, val):
-        """Report progress to UI layer."""
-        if self.progress_fn:
-            self.progress_fn(i, n, val)
-
-    def run(self):
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-            self.signals.finished.emit(result)
-        except Exception as e:
-            self.signals.error.emit(str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -115,7 +81,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(self._STYLE)
         self.config = FullModelConfig()
         self._current_preset_name = ""
-        self._thread_pool = QThreadPool()
+        self.sim_controller = SimulationController()
         self._dual_stim_signal_connected = False
         self._delay_target_name = "Terminal"
         self._delay_custom_index = 1
@@ -874,7 +840,7 @@ class MainWindow(QMainWindow):
             self._cancel_requested = False
 
     def _request_cancel(self):
-        """User clicked Cancel — set flag for running workers to check."""
+        """User clicked Cancel - set flag for running simulations to check."""
         self._cancel_requested = True
         self._status("Cancellation requested…")
         self.btn_cancel.setEnabled(False)
@@ -928,7 +894,7 @@ class MainWindow(QMainWindow):
         # Sync dual stim config from widget to main config.
         self._sync_dual_stim_into_config()
 
-        # Capture config snapshot and flags for the worker thread
+        # Capture config snapshot and flags for the simulation thread
         run_mc = self.config.analysis.run_mc
         run_bif = self.config.analysis.run_bifurcation
         bif_param = self.config.analysis.bif_param
@@ -938,23 +904,20 @@ class MainWindow(QMainWindow):
             self._status(f"Monte-Carlo ({mc_trials} trials)…")
         QApplication.processEvents()
 
-        def _compute():
-            """Run solver in background thread (scipy/numba release GIL)."""
-            solver = NeuronSolver(self.config)
-            result = {}
-            if run_mc:
-                result['mc_results'] = solver.run_monte_carlo()
-            else:
-                result['single'] = solver.run_single()
-            if run_bif:
-                result['bif'] = solver.run_bifurcation()
-                result['bif_param'] = bif_param
-            return result
-
-        w = Worker(_compute)
-        w.signals.finished.connect(self._on_simulation_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run simulation through SimulationController
+        if run_mc:
+            self.sim_controller.run_monte_carlo(
+                self.config,
+                mc_trials,
+                on_success=self._on_simulation_done,
+                on_error=self._on_sim_error
+            )
+        else:
+            self.sim_controller.run_single(
+                self.config,
+                on_success=self._on_simulation_done,
+                on_error=self._on_sim_error
+            )
 
     def _on_simulation_done(self, result: dict):
         """Handle simulation results on the main thread (UI updates)."""
@@ -1020,13 +983,13 @@ class MainWindow(QMainWindow):
 
         self._sync_dual_stim_into_config()
 
-        def _do():
-            return run_euler_maruyama(self.config)
-
-        w = Worker(_do)
-        w.signals.finished.connect(self._on_stoch_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run stochastic simulation through SimulationController
+        self.sim_controller.run_stochastic(
+            self.config,
+            1,  # Single trial for Euler-Maruyama
+            on_success=self._on_stoch_done,
+            on_error=self._on_sim_error
+        )
 
     def _on_stoch_done(self, res):
         self._last_result = res
@@ -1067,15 +1030,14 @@ class MainWindow(QMainWindow):
                      f"{ana.sweep_steps} steps…")
         QApplication.processEvents()
 
-        def _do():
-            return run_sweep(self.config, ana.sweep_param, param_vals)
-
-        w = Worker(_do)
-        w.signals.finished.connect(
-            lambda res: self._on_sweep_done(res, ana.sweep_param)
+        # Run sweep through SimulationController
+        self.sim_controller.run_sweep(
+            self.config,
+            ana.sweep_param,
+            param_vals,
+            on_success=lambda res: self._on_sweep_done(res, ana.sweep_param),
+            on_error=self._on_sim_error
         )
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
 
     def _on_sweep_done(self, results, param_name):
         self.analytics.update_sweep(results, param_name)
@@ -1101,10 +1063,13 @@ class MainWindow(QMainWindow):
         else:
             self._status("Computing Strength-Duration curve (binary search)…")
         QApplication.processEvents()
-        w = Worker(run_sd_curve, cfg_for_sd, progress_fn=self._report_progress)
-        w.signals.finished.connect(self._on_sd_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run S-D curve through SimulationController
+        self.sim_controller.run_sd_curve(
+            cfg_for_sd,
+            on_success=self._on_sd_done,
+            on_error=self._on_sim_error,
+            on_progress=self._report_progress
+        )
 
     def _on_sd_done(self, sd):
         rh = sd['rheobase']
@@ -1140,10 +1105,13 @@ class MainWindow(QMainWindow):
         else:
             self._status(f"Excitability map {ana.excmap_NI}×{ana.excmap_ND} = {total} runs…")
         QApplication.processEvents()
-        w = Worker(run_excitability_map, cfg_for_excmap, progress_fn=self._report_progress)
-        w.signals.finished.connect(self._on_excmap_done)
-        w.signals.error.connect(self._on_sim_error)
-        self._thread_pool.start(w)
+        # Run excitability map through SimulationController
+        self.sim_controller.run_excmap(
+            cfg_for_excmap,
+            on_success=self._on_excmap_done,
+            on_error=self._on_sim_error,
+            on_progress=self._report_progress
+        )
 
     def _on_excmap_done(self, exc):
         self.analytics.update_excmap(exc)

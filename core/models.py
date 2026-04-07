@@ -260,6 +260,18 @@ class SimulationParams(BaseModel):
             "conductance waveforms are summed for each event (overrides pulse_start)."
         )
     )
+    synaptic_train_type: Literal['none', 'regular', 'poisson'] = Field(
+        default='none', 
+        description="Auto-generate spike train pattern. Overrides manual event_times."
+    )
+    synaptic_train_freq_hz: float = Field(
+        default=40.0, ge=0.1, le=500.0, 
+        description="Frequency of the generated spike train (Hz)."
+    )
+    synaptic_train_duration_ms: float = Field(
+        default=200.0, ge=1.0, 
+        description="Duration of the generated spike train (ms)."
+    )
 
     # Stochastic
     stoch_gating: bool  = Field(default=False, description="Langevin gate noise (Euler-Maruyama solver)")

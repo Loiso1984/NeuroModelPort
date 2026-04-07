@@ -256,6 +256,12 @@ def run_euler_maruyama(config: FullModelConfig,
     ch     = cfg.channels
 
     y      = reg.compute_initial_states(-65.0, cfg)
+    
+    # Debug: Check array sizes
+    if morph['Cm_v'].shape[0] != n_comp:
+        print(f"DEBUG: Cm_v shape mismatch: {morph['Cm_v'].shape[0]} vs n_comp={n_comp}")
+        # Use the actual size from morphology arrays
+        n_comp = morph['Cm_v'].shape[0]
     L      = csr_matrix((morph['L_data'], morph['L_indices'], morph['L_indptr']),
                         shape=(n_comp, n_comp))
 

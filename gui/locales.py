@@ -98,6 +98,9 @@ class Translator:
             'zap_f1_hz':   'ZAP end frequency (Hz) for chirp stimulus.',
             'stim_comp':   'Compartment index to inject current into (0 = soma).',
             'event_times': 'Synaptic event queue (ms). Comma-separated timestamps; e.g. "10,25,40". Overrides pulse_start for AMPA/NMDA/GABA types.',
+            'synaptic_train_type': 'Spike Train Generator: none / regular (fixed ISI) / poisson (random).',
+            'synaptic_train_freq_hz': 'Frequency of the generated spike train (Hz).',
+            'synaptic_train_duration_ms': 'Duration of the spike train (ms).',
             'stoch_gating':'Langevin gate noise via Euler-Maruyama (Fox & Lu 1994). Use 🎲 button.',
             'noise_sigma': 'Additive white noise amplitude σ (µA/cm²). Added to dV/dt.',
 
@@ -227,6 +230,9 @@ class Translator:
             'zap_f1_hz':   'Конечная частота ZAP-чирпа (Гц).',
             'stim_comp':   'Компартмент стимуляции (0 = сома).',
             'event_times': 'Очередь синаптических событий (мс). Временные метки через запятую: "10,25,40". Замещает pulse_start для AMPA/NMDA/GABA.',
+            'synaptic_train_type': 'Генератор поездок импульсов: none (отсутствует) / regular (фиксированный ИПВ) / poisson (случайный).',
+            'synaptic_train_freq_hz': 'Частота сгенерированного поезда импульсов (Гц).',
+            'synaptic_train_duration_ms': 'Длительность поезда импульсов (мс).',
             'stoch_gating':'Шум Ланжевена в гейтах (Эйлер-Маруяма). Кнопка 🎲.',
             'noise_sigma': 'Амплитуда белого шума на мембрану σ (мкА/см²).',
 

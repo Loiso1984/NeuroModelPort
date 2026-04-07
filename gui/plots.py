@@ -125,6 +125,7 @@ class OscilloscopeWidget(QWidget):
         self._curves_v:    dict = {}
         self._curves_gate: dict = {}
         self._curves_i:    dict = {}
+        self._curves_ca:   dict = {}
         self._transient_items: list = []
 
     # ─────────────────────────────────────────────────────────────────
@@ -135,6 +136,7 @@ class OscilloscopeWidget(QWidget):
         self._p_v.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_g.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_i.showGrid(x=True, y=True, alpha=self._grid_alpha)
+        self._p_ca.showGrid(x=True, y=True, alpha=self._grid_alpha)
 
     def _set_default_titles(self):
         self._p_v.setTitle(self._title_html("Membrane Potential  V(t)", "#89B4FA"))
@@ -177,11 +179,22 @@ class OscilloscopeWidget(QWidget):
         self._p_i.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_i.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_i.setXLink(self._p_v)
+        self._win.nextRow()
 
-        # Row stretch: V(t) is tallest (3 units), gates and currents share remaining (2 each)
+        # Calcium — row 3
+        self._p_ca = self._win.addPlot(
+            title=self._title_html("Intracellular Calcium [Ca²+]_i", "#F38BA8"))
+        self._p_ca.setLabel('left', '[Ca²+]_i', units='nM', color='#CDD6F4')
+        self._p_ca.setLabel('bottom', 'Time', units='ms', color='#CDD6F4')
+        self._p_ca.showGrid(x=True, y=True, alpha=self._grid_alpha)
+        self._p_ca.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
+        self._p_ca.setXLink(self._p_v)
+
+        # Row stretch: V(t) is tallest (3), gates (2), currents (2), calcium (1)
         self._win.ci.layout.setRowStretchFactor(0, 3)
         self._win.ci.layout.setRowStretchFactor(1, 2)
         self._win.ci.layout.setRowStretchFactor(2, 2)
+        self._win.ci.layout.setRowStretchFactor(3, 1)
 
         root.addWidget(self._win, stretch=10)
 
@@ -241,6 +254,19 @@ class OscilloscopeWidget(QWidget):
             il.addWidget(cb)
             self._cb_i[name] = cb
         cb_layout.addWidget(grp_i)
+
+        # Calcium checkbox
+        grp_ca = QGroupBox("Calcium")
+        grp_ca.setStyleSheet("QGroupBox { color: #F38BA8; font-size:11px; }")
+        cal = QVBoxLayout(grp_ca)
+        self._cb_ca = {}
+        cb_ca = QCheckBox("Show [Ca²+]_i")
+        cb_ca.setChecked(True)
+        cb_ca.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        cb_ca.stateChanged.connect(self._toggle_ca)
+        cal.addWidget(cb_ca)
+        self._cb_ca['calcium'] = cb_ca
+        cb_layout.addWidget(grp_ca)
 
         # View controls
         grp_view = QGroupBox("View")
@@ -391,6 +417,10 @@ class OscilloscopeWidget(QWidget):
         if name in self._curves_i:
             self._curves_i[name].setVisible(self._cb_i[name].isChecked())
 
+    def _toggle_ca(self):
+        if 'calcium' in self._curves_ca:
+            self._curves_ca['calcium'].setVisible(self._cb_ca['calcium'].isChecked())
+
     def _on_view_settings_changed(self, *_):
         self._theme_name = self._combo_theme.currentText()
         line_scale_base = float(self._spin_line_width.value())
@@ -494,15 +524,22 @@ class OscilloscopeWidget(QWidget):
     # ─────────────────────────────────────────────────────────────────
     def clear(self):
         for item in self._transient_items:
-            for plot in (self._p_v, self._p_g, self._p_i):
+            for plot in (self._p_v, self._p_g, self._p_i, self._p_ca):
                 try:
                     plot.removeItem(item)
-                except Exception:
-                    pass
+                except (RuntimeError, AttributeError, ValueError) as e:
+                    # Log specific cleanup errors for debugging
+                    import logging
+                    logging.debug(f"Failed to remove plot item {type(item).__name__}: {e}")
+                    # Continue cleanup even if one item fails
+                except Exception as e:
+                    # Catch-all for unexpected errors but don't crash
+                    logging.warning(f"Unexpected error during plot cleanup: {e}")
         self._transient_items = []
         self._curves_v.clear()
         self._curves_gate.clear()
         self._curves_i.clear()
+        self._curves_ca.clear()
         self._apply_grid_alpha()
         self._set_default_titles()
 
@@ -666,6 +703,20 @@ class OscilloscopeWidget(QWidget):
         # Sync checkbox visibility
         self._sync_checkboxes(result)
 
+        # -- Calcium trace --
+        if result.ca_i is not None:
+            ca_pen = pg.mkPen(color="#F38BA8", width=2.0 * lw)
+            t_ca, ca_nM = _downsample_xy(t, result.ca_i[0, :] * 1e6, max_points=budget_i)
+            c_ca = self._p_ca.plot(t_ca, ca_nM, pen=ca_pen, name="[Ca²+]_i")
+            self._curves_ca['calcium'] = c_ca
+            self._transient_items.append(c_ca)
+            c_ca.setVisible(self._cb_ca['calcium'].isChecked())
+            self._p_ca.autoRange()
+        else:
+            # Hide calcium plot if no calcium data
+            self._p_ca.clear()
+            self._curves_ca.clear()
+
         # ── Currents title with ATP estimate ──────────────────────────
         self._p_i.setTitle(
             self._title_html(
@@ -745,6 +796,7 @@ class OscilloscopeWidget(QWidget):
         self._p_v.setTitle(self._title_html(f"Monte-Carlo: {n} trials — mean ± σ", "#89B4FA"))
         self._p_i.setTitle(self._title_html(f"Monte-Carlo: {n} trials — mean ± σ", "#FAB387"))
         self._p_v.autoRange()
+        self._p_ca.autoRange()
 
     # ─────────────────────────────────────────────────────────────────
     def _sync_checkboxes(self, result):
