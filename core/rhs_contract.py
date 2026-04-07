@@ -25,9 +25,16 @@ RHS_ARG_ORDER: tuple[str, ...] = (
     # Packed per-channel temperature scaling
     "phi_mat",
     # Environment/calcium
-    "env_vec", "b_ca",
-    # Stimulation bundles + event queue
-    "stim1_vec", "event_times_arr", "n_events", "stim2_vec",
+    "t_kelvin", "ca_ext", "ca_rest", "tau_ca", "b_ca", "mg_ext", "tau_sk",
+    # Primary stimulation
+    "stype", "iext", "t0", "td", "atau", "zap_f0_hz", "zap_f1_hz", "event_times_arr", "n_events", "stim_comp", "stim_mode",
+    "use_dfilter_primary", "dfilter_attenuation", "dfilter_tau_ms",
+    # Secondary stimulation (dual)
+    "dual_stim_enabled",
+    "stype_2", "iext_2", "t0_2", "td_2", "atau_2", "zap_f0_hz_2", "zap_f1_hz_2", "stim_comp_2", "stim_mode_2",
+    "use_dfilter_secondary", "dfilter_attenuation_2", "dfilter_tau_ms_2",
+    # Stochastic parameters
+    "stoch_gating", "noise_sigma", "rng_state",
 )
 
 RHS_ARG_INDEX: dict[str, int] = {name: i for i, name in enumerate(RHS_ARG_ORDER)}

@@ -4,6 +4,7 @@ from .kinetics import *
 from .dual_stimulation import (
     distributed_stimulus_current_for_comp,
 )
+from .physics_params import PhysicsParams, unpack_conductances, unpack_temperature_scaling
 
 # Константы | Constants
 F_CONST = 96485.33
@@ -169,51 +170,89 @@ def get_event_driven_conductance(t, stype, iext, event_times, n_events):
 
 @njit(cache=True)
 def rhs_multicompartment(
-    t, y, n_comp,
-    # Флаги включения каналов
-    en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
-    # Packed per-compartment vectors (rows): conductances + thermal phi
-    gbar_mat,  # [gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar]
-    # Потенциалы реверсии
-    ena, ek, el, eih, ea,
-    # Морфология и среда
-    cm_v, l_data, l_indices, l_indptr,
-    phi_mat,   # [phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, phi_im, phi_nap, phi_nar]
-    env_vec, b_ca,
-    # Стимуляция bundles + event queue
-    stim1_vec, event_times_arr, n_events, stim2_vec,
-    # Pre-allocated output buffer (avoids heap allocation per solver step)
-    dydt
+    t, y, physics_params, dydt
 ):
     """
-    Высокопроизводительное ядро ОДУ v10.1 (C-style scalar loop).
+    Высокопроизводительное ядро ОДУ v11.0 (C-style scalar loop).
+    Использует структурированный контейнер PhysicsParams для устранения
+    "аргументного взрыва" и повышения надежности API.
     Все токи рассчитываются как скаляры, без промежуточных аллокаций.
     dydt is a pre-allocated output array passed from the solver; zeroed here
     via a Numba loop (no numpy allocation inside @njit).
     """
-
-    # --- Compute variable offsets in state vector y ---
-    gna_v = gbar_mat[0]
-    gk_v = gbar_mat[1]
-    gl_v = gbar_mat[2]
-    gih_v = gbar_mat[3]
-    gca_v = gbar_mat[4]
-    ga_v = gbar_mat[5]
-    gsk_v = gbar_mat[6]
-    gtca_v = gbar_mat[7]
-    gim_v = gbar_mat[8]
-    gnap_v = gbar_mat[9]
-    gnar_v = gbar_mat[10]
-
-    phi_na = phi_mat[0]
-    phi_k = phi_mat[1]
-    phi_ih = phi_mat[2]
-    phi_ca = phi_mat[3]
-    phi_ia = phi_mat[4]
-    phi_tca = phi_mat[5]
-    phi_im = phi_mat[6]
-    phi_nap = phi_mat[7]
-    phi_nar = phi_mat[8]
+    
+    # --- Unpack physics parameters ---
+    n_comp = physics_params.n_comp
+    en_ih = physics_params.en_ih
+    en_ica = physics_params.en_ica
+    en_ia = physics_params.en_ia
+    en_sk = physics_params.en_sk
+    dyn_ca = physics_params.dyn_ca
+    en_itca = physics_params.en_itca
+    en_im = physics_params.en_im
+    en_nap = physics_params.en_nap
+    en_nar = physics_params.en_nar
+    
+    # Unpack conductance matrix
+    (gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, 
+     gtca_v, gim_v, gnap_v, gnar_v) = unpack_conductances(physics_params.gbar_mat, n_comp)
+    
+    # Reversal potentials
+    ena = physics_params.ena
+    ek = physics_params.ek
+    el = physics_params.el
+    eih = physics_params.eih
+    ea = physics_params.ea
+    
+    # Morphology and axial coupling
+    cm_v = physics_params.cm_v
+    l_data = physics_params.l_data
+    l_indices = physics_params.l_indices
+    l_indptr = physics_params.l_indptr
+    
+    # Unpack temperature scaling
+    (phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, 
+     phi_im, phi_nap, phi_nar) = unpack_temperature_scaling(physics_params.phi_mat, n_comp)
+    
+    # Environment and calcium
+    t_kelvin = physics_params.t_kelvin
+    ca_ext = physics_params.ca_ext
+    ca_rest = physics_params.ca_rest
+    tau_ca = physics_params.tau_ca
+    b_ca = physics_params.b_ca
+    mg_ext = physics_params.mg_ext
+    tau_sk = physics_params.tau_sk
+    
+    # Primary stimulation
+    stype = physics_params.stype
+    iext = physics_params.iext
+    t0 = physics_params.t0
+    td = physics_params.td
+    atau = physics_params.atau
+    zap_f0_hz = physics_params.zap_f0_hz
+    zap_f1_hz = physics_params.zap_f1_hz
+    event_times_arr = physics_params.event_times_arr
+    n_events = physics_params.n_events
+    stim_comp = physics_params.stim_comp
+    stim_mode = physics_params.stim_mode
+    use_dfilter_primary = physics_params.use_dfilter_primary
+    dfilter_attenuation = physics_params.dfilter_attenuation
+    dfilter_tau_ms = physics_params.dfilter_tau_ms
+    
+    # Secondary stimulation
+    dual_stim_enabled = physics_params.dual_stim_enabled
+    stype_2 = physics_params.stype_2
+    iext_2 = physics_params.iext_2
+    t0_2 = physics_params.t0_2
+    td_2 = physics_params.td_2
+    atau_2 = physics_params.atau_2
+    zap_f0_hz_2 = physics_params.zap_f0_hz_2
+    zap_f1_hz_2 = physics_params.zap_f1_hz_2
+    stim_comp_2 = physics_params.stim_comp_2
+    stim_mode_2 = physics_params.stim_mode_2
+    use_dfilter_secondary = physics_params.use_dfilter_secondary
+    dfilter_attenuation_2 = physics_params.dfilter_attenuation_2
+    dfilter_tau_ms_2 = physics_params.dfilter_tau_ms_2
 
 
     t_kelvin = env_vec[0]

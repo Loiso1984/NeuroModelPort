@@ -234,6 +234,8 @@ def run_euler_maruyama(config: FullModelConfig,
     Current noise can also be added via config.stim.noise_sigma.
     Required for stochastic differential equations (SDE) — SciPy
     solve_ivp cannot handle SDEs.
+
+    Uses centralized stochastic RNG for reproducibility.
     """
     from core.kinetics import (am, bm, ah, bh, an, bn,
                                 ar_Ih, br_Ih,
@@ -244,6 +246,7 @@ def run_euler_maruyama(config: FullModelConfig,
                                 aw_IM, bw_IM,
                                 ax_NaP, bx_NaP,
                                 ay_NaR, by_NaR, aj_NaR, bj_NaR)
+    from core.stochastic_rng import get_rng
     from scipy.sparse import csr_matrix
 
     cfg    = config
@@ -271,10 +274,16 @@ def run_euler_maruyama(config: FullModelConfig,
     N_Na = max(50, int(1000 * ch.gNa_max / 120.0))
     N_K  = max(50, int(1000 * ch.gK_max  /  36.0))
 
+    # Get centralized RNG
+    rng = get_rng()
+
     # Integration time grid (fine step for EM)
-    dt     = min(0.01, cfg.stim.dt_eval / 5.0)
-    t_end  = cfg.stim.t_sim
-    t_pts  = np.arange(0.0, t_end + dt, dt)
+    t_end   = cfg.stim.t_sim
+    # Use configured dt_eval as base, but ensure minimum stability step
+    base_dt = getattr(cfg.stim, 'dt_em', None) or cfg.stim.dt_eval
+    dt      = min(base_dt / 5.0, 0.001)  # Default 1ms max, or 1/5 of eval dt
+    dt      = max(dt, 0.0001)  # Minimum 0.1ms for numerical stability
+    t_pts   = np.arange(0.0, t_end + dt, dt)
     n_steps = len(t_pts)
     sqrt_dt = np.sqrt(dt)
 
@@ -282,7 +291,7 @@ def run_euler_maruyama(config: FullModelConfig,
     stype = s_map.get(cfg.stim.stim_type, 0)
 
     # Pre-allocate only what we need for downsampling
-    n_vars   = len(y)
+    n_vars = 4 * n_comp + (n_comp if cfg.calcium.dynamic_Ca else 0)
     sol_buf  = np.zeros((n_vars, n_steps))
     sol_buf[:, 0] = y.copy()
 

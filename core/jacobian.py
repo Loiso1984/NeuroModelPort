@@ -35,6 +35,7 @@ from .kinetics import (
 )
 from .rhs import CA_I_MAX_M_M, CA_I_MIN_M_M, F_CONST, R_GAS
 from .rhs_contract import RHS_ARG_COUNT, unpack_rhs_args
+from .physics_params import PhysicsParams, unpack_conductances, unpack_temperature_scaling
 
 _LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
 
@@ -434,49 +435,83 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             J_csr.data[k] += val
 
     def jac_fn(
-        t, y, n_comp,
-        en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
-        gbar_mat,
-        ena, ek, el, eih, ea,
-        cm_v, l_data, l_indices, l_indptr,
-        phi_mat,
-        env_vec, b_ca,
-        stim1_vec, event_times_arr, n_events, stim2_vec,
+        t, y, physics_params
     ):
+        """Jacobian function using structured PhysicsParams."""
+        # Unpack physics parameters
+        n_comp = physics_params.n_comp
+        en_ih = physics_params.en_ih
+        en_ica = physics_params.en_ica
+        en_ia = physics_params.en_ia
+        en_sk = physics_params.en_sk
+        dyn_ca = physics_params.dyn_ca
+        en_itca = physics_params.en_itca
+        en_im = physics_params.en_im
+        en_nap = physics_params.en_nap
+        en_nar = physics_params.en_nar
+        
+        # Unpack conductance matrix
+        (gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, 
+         gtca_v, gim_v, gnap_v, gnar_v) = unpack_conductances(physics_params.gbar_mat, n_comp)
+        
+        # Reversal potentials
+        ena = physics_params.ena
+        ek = physics_params.ek
+        el = physics_params.el
+        eih = physics_params.eih
+        ea = physics_params.ea
+        
+        # Morphology and axial coupling
+        cm_v = physics_params.cm_v
+        l_data = physics_params.l_data
+        l_indices = physics_params.l_indices
+        l_indptr = physics_params.l_indptr
+        
+        # Unpack temperature scaling
+        (phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, 
+         phi_im, phi_nap, phi_nar) = unpack_temperature_scaling(physics_params.phi_mat, n_comp)
+        
+        # Environment and calcium
+        t_kelvin = physics_params.t_kelvin
+        ca_ext = physics_params.ca_ext
+        ca_rest = physics_params.ca_rest
+        tau_ca = physics_params.tau_ca
+        b_ca = physics_params.b_ca
+        mg_ext = physics_params.mg_ext
+        tau_sk = physics_params.tau_sk
+        
+        # Stimulation parameters (needed for state slice calculation)
+        stype = physics_params.stype
+        iext = physics_params.iext
+        t0 = physics_params.t0
+        td = physics_params.td
+        atau = physics_params.atau
+        zap_f0_hz = physics_params.zap_f0_hz
+        zap_f1_hz = physics_params.zap_f1_hz
+        event_times_arr = physics_params.event_times_arr
+        n_events = physics_params.n_events
+        stim_comp = physics_params.stim_comp
+        stim_mode = physics_params.stim_mode
+        use_dfilter_primary = physics_params.use_dfilter_primary
+        dfilter_attenuation = physics_params.dfilter_attenuation
+        dfilter_tau_ms = physics_params.dfilter_tau_ms
+        
+        # Secondary stimulation
+        dual_stim_enabled = physics_params.dual_stim_enabled
+        stype_2 = physics_params.stype_2
+        iext_2 = physics_params.iext_2
+        t0_2 = physics_params.t0_2
+        td_2 = physics_params.td_2
+        atau_2 = physics_params.atau_2
+        zap_f0_hz_2 = physics_params.zap_f0_hz_2
+        zap_f1_hz_2 = physics_params.zap_f1_hz_2
+        stim_comp_2 = physics_params.stim_comp_2
+        stim_mode_2 = physics_params.stim_mode_2
+        use_dfilter_secondary = physics_params.use_dfilter_secondary
+        dfilter_attenuation_2 = physics_params.dfilter_attenuation_2
+        dfilter_tau_ms_2 = physics_params.dfilter_tau_ms_2
         # Zero all entries
         J_csr.data[:] = 0.0
-
-        gna_v = gbar_mat[0]
-        gk_v = gbar_mat[1]
-        gl_v = gbar_mat[2]
-        gih_v = gbar_mat[3]
-        gca_v = gbar_mat[4]
-        ga_v = gbar_mat[5]
-        gsk_v = gbar_mat[6]
-        gtca_v = gbar_mat[7]
-        gim_v = gbar_mat[8]
-        gnap_v = gbar_mat[9]
-        gnar_v = gbar_mat[10]
-
-        phi_na = phi_mat[0]
-        phi_k = phi_mat[1]
-        phi_ih = phi_mat[2]
-        phi_ca = phi_mat[3]
-        phi_ia = phi_mat[4]
-        phi_tca = phi_mat[5]
-        phi_im = phi_mat[6]
-        phi_nap = phi_mat[7]
-        phi_nar = phi_mat[8]
-
-        t_kelvin = env_vec[0]
-        ca_ext = env_vec[1]
-        tau_ca = env_vec[3]
-        tau_sk = env_vec[5]
-
-        use_dfilter_primary = int(stim1_vec[9])
-        dfilter_tau_ms = stim1_vec[11]
-        use_dfilter_secondary = int(stim2_vec[10])
-        dfilter_tau_ms_2 = stim2_vec[12]
 
         idx, n_state = _cached_state_slices(
             n_comp,

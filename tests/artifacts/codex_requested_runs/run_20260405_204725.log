@@ -1,0 +1,120 @@
+====================================================== 
+Codex requested test run started at 05.04.2026 20:47:25,82 
+Root: C:\NeuroModelPort 
+====================================================== 
+ 
+------------------------------------------------------ 
+[STEP] Core fast suite 
+[CMD ] python -m pytest -q tests/core/test_p0_p1_gate_runner.py tests/core/test_run_f_conduction_extended_cli.py tests/core/test_preset_stress_validation_cli.py tests/core/test_rhs_contract.py tests/core/test_jacobian_contract.py tests/core/test_dual_stimulation_distribution.py tests/core/test_delay_target_utils.py tests/core/test_unit_converter_current.py 
+------------------------------------------------------ 
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\NeuroModelPort
+configfile: pytest.ini
+collected 21 items
+
+tests\core\test_p0_p1_gate_runner.py .                                   [  4%]
+tests\core\test_run_f_conduction_extended_cli.py F..                     [ 19%]
+tests\core\test_preset_stress_validation_cli.py ...                      [ 33%]
+tests\core\test_rhs_contract.py ....                                     [ 52%]
+tests\core\test_jacobian_contract.py .                                   [ 57%]
+tests\core\test_dual_stimulation_distribution.py ....                    [ 76%]
+tests\core\test_delay_target_utils.py ...                                [ 90%]
+tests\core\test_unit_converter_current.py ..                             [100%]
+
+================================== FAILURES ===================================
+________ test_main_returns_diagnostic_when_runtime_dependency_missing _________
+tests\core\test_run_f_conduction_extended_cli.py:24: in test_main_returns_diagnostic_when_runtime_dependency_missing
+    assert out_file.exists()
+E   AssertionError: assert False
+E    +  where False = exists()
+E    +    where exists = WindowsPath('C:/Users/Kapit/AppData/Local/Temp/pytest-of-Kapit/pytest-0/test_main_returns_diagnostic_w0/f_diag.json').exists
+=========================== short test summary info ===========================
+FAILED tests/core/test_run_f_conduction_extended_cli.py::test_main_returns_diagnostic_when_runtime_dependency_missing
+======================== 1 failed, 20 passed in 6.54s =========================
+[FAIL] Core fast suite (exit=1) 
+[PASS] Core fast suite 
+ 
+------------------------------------------------------ 
+[STEP] MS branch attenuation test 
+[CMD ] python -m pytest -q tests/branches/test_ms_conduction_block_branch.py 
+------------------------------------------------------ 
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\NeuroModelPort
+configfile: pytest.ini
+collected 1 item
+
+tests\branches\test_ms_conduction_block_branch.py F                      [100%]
+
+================================== FAILURES ===================================
+_________ test_ms_preset_has_strong_conduction_attenuation_vs_control _________
+tests\branches\test_ms_conduction_block_branch.py:50: in test_ms_preset_has_strong_conduction_attenuation_vs_control
+    d = _run("D: alpha-Motoneuron (Powers 2001)")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\branches\test_ms_conduction_block_branch.py:29: in _run
+    res = NeuronSolver(cfg).run_single()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+core\solver.py:365: in run_single
+    sol = _solve("BDF", rtol=1e-5, atol=1e-7, use_jacobian=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+core\solver.py:351: in _solve
+    return solve_ivp(
+C:\Users\Kapit\AppData\Roaming\Python\Python314\site-packages\scipy\integrate\_ivp\ivp.py:657: in solve_ivp
+    message = solver.step()
+              ^^^^^^^^^^^^^
+C:\Users\Kapit\AppData\Roaming\Python\Python314\site-packages\scipy\integrate\_ivp\base.py:201: in step
+    success, message = self._step_impl()
+                       ^^^^^^^^^^^^^^^^^
+C:\Users\Kapit\AppData\Roaming\Python\Python314\site-packages\scipy\integrate\_ivp\bdf.py:364: in _step_impl
+    LU = self.lu(self.I - c * J)
+         ^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Kapit\AppData\Roaming\Python\Python314\site-packages\scipy\integrate\_ivp\bdf.py:224: in lu
+    return splu(A)
+           ^^^^^^^
+C:\Users\Kapit\AppData\Roaming\Python\Python314\site-packages\scipy\sparse\linalg\_dsolve\linsolve.py:433: in splu
+    return _superlu.gstrf(N, A.nnz, A.data, indices, indptr,
+E   RuntimeError: Factor is exactly singular
+============================== warnings summary ===============================
+tests/branches/test_ms_conduction_block_branch.py::test_ms_preset_has_strong_conduction_attenuation_vs_control
+  C:\Users\Kapit\AppData\Roaming\Python\Python314\site-packages\scipy\integrate\_ivp\common.py:423: RuntimeWarning: invalid value encountered in subtract
+    df = f_new - f[:, None]
+
+tests/branches/test_ms_conduction_block_branch.py::test_ms_preset_has_strong_conduction_attenuation_vs_control
+  C:\Users\Kapit\AppData\Roaming\Python\Python314\site-packages\scipy\integrate\_ivp\common.py:395: RuntimeWarning: invalid value encountered in subtract
+    df = f_new - f[:, None]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/branches/test_ms_conduction_block_branch.py::test_ms_preset_has_strong_conduction_attenuation_vs_control
+======================== 1 failed, 2 warnings in 3.69s ========================
+[FAIL] MS branch attenuation test (exit=1) 
+[PASS] MS branch attenuation test 
+ 
+------------------------------------------------------ 
+[STEP] Consolidated P0/P1 gate 
+[CMD ] python tests/utils/run_p0_p1_gate.py --out-dir tests/artifacts/p0_p1_gate_user --target-ratio 0.3 
+------------------------------------------------------ 
+Traceback (most recent call last):
+  File "C:\NeuroModelPort\tests\utils\run_p0_p1_gate.py", line 129, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\NeuroModelPort\tests\utils\run_p0_p1_gate.py", line 96, in main
+    results = [_run_step(name, cmd) for name, cmd in steps]
+               ~~~~~~~~~^^^^^^^^^^^
+  File "C:\NeuroModelPort\tests\utils\run_p0_p1_gate.py", line 33, in _run_step
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(repo_root))
+  File "C:\Python314\Lib\subprocess.py", line 556, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\subprocess.py", line 1220, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\subprocess.py", line 1661, in _communicate
+    self.stdout_thread.join(self._remaining_time(endtime))
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\threading.py", line 1133, in join
+    self._os_thread_handle.join(timeout)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+KeyboardInterrupt
+^C^C
