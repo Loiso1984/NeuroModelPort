@@ -80,12 +80,6 @@ class ChannelRegistry:
             ]
         ))
 
-        # 9. I_M (M-type K+, KCNQ2/3 — Yamada, Koch & Adams 1989)
-        self.channels.append(Channel(
-            name="IM", color=(0.0, 0.8, 0.4),
-            gates=[GateInfo('w', 1, aw_IM, bw_IM)]   # single activation, non-inactivating
-        ))
-
         # 10. I_NaP (Persistent Na+ — Magistretti & Alonso 1999)
         self.channels.append(Channel(
             name="NaP", color=(1.0, 0.4, 0.4),

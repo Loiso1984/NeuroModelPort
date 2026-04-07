@@ -203,6 +203,23 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setVisible(False)
         self._cancel_requested = False
 
+        # ── Hines solver toggle ──────────────────────────────────────
+        self.btn_hines = QPushButton("⚡ HINES")
+        self.btn_hines.setMinimumHeight(46)
+        self.btn_hines.setCheckable(True)
+        self.btn_hines.setChecked(False)
+        self.btn_hines.setStyleSheet("""
+            QPushButton {
+                background: #313244; color: #89DCEB; border-radius: 6px;
+                border: 1px solid #45475A;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #3E3F5E; }
+            QPushButton:disabled { color: #555568; }
+        """)
+        self.btn_hines.setToolTip("Toggle native Hines solver (O(N) vs SciPy BDF)")
+        self.btn_hines.clicked.connect(self._on_hines_toggled)
+
         # ── Export button ─────────────────────────────────────────────
         self.btn_export = QPushButton("💾 Export CSV")
         self.btn_export_plot = QPushButton("Export Plot")
@@ -258,14 +275,13 @@ class MainWindow(QMainWindow):
 
         bar.addWidget(self.btn_run,    4)
         bar.addWidget(self.btn_cancel, 2)
-        bar.addWidget(self.btn_stoch,  2)
-        bar.addWidget(self.btn_sweep,  2)
+        bar.addWidget(self.btn_hines, 2)
+        bar.addWidget(self.btn_stoch, 2)
+        bar.addWidget(self.btn_sweep, 2)
         bar.addWidget(self.btn_sd,     2)
         bar.addWidget(self.btn_excmap, 2)
         bar.addWidget(self.btn_export_plot, 2)
         bar.addWidget(self.btn_export, 2)
-        bar.addWidget(self.btn_export_nml, 2)
-        bar.addStretch(1)
         bar.addWidget(self.lbl_preset)
         bar.addWidget(self.combo_presets, 3)
         bar.addWidget(self.lbl_lang)
@@ -844,6 +860,35 @@ class MainWindow(QMainWindow):
         self._lock_ui(False)
         QMessageBox.critical(self, "Simulation Error", msg)
         self._status("Error.")
+
+    def _on_hines_toggled(self, checked: bool):
+        """Toggle native Hines solver mode."""
+        if checked:
+            self.config.stim.jacobian_mode = "native_hines"
+            self.btn_hines.setStyleSheet("""
+                QPushButton {
+                    background: #00BCD4; color: #FFFFFF; border-radius: 6px;
+                    border: 2px solid #00BCD4;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background: #00A97F; }
+                QPushButton:disabled { color: #555568; }
+            """)
+            self.btn_hines.setText("⚡ HINES ON")
+            self._sb.showMessage("Hines solver ACTIVE (experimental). Dense-FD BDF suspended.", 4000)
+        else:
+            self.config.stim.jacobian_mode = "dense_fd"
+            self.btn_hines.setStyleSheet("""
+                QPushButton {
+                    background: #313244; color: #89DCEB; border-radius: 6px;
+                    border: 1px solid #45475A;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background: #3E3F5E; }
+                QPushButton:disabled { color: #555568; }
+            """)
+            self.btn_hines.setText("⚡ HINES")
+            self._sb.showMessage("Hines solver OFF. Using dense_fd BDF.", 3000)
 
     def _preflight_validate(self) -> bool:
         """

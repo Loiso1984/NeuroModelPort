@@ -1,255 +1,163 @@
-"""Native Hines time-loop — v11.0.
+"""Native Hines solver loop — v11.0.
 
-Pure @njit Backward-Euler time integration using the O(N) Hines solver.
-Called by NeuronSolver.run_native(); returns (t_arr, y_arr) in the same
-layout as SciPy solve_ivp.y  so SimulationResult is unchanged.
-
-Layout of y vector (mirrors rhs.py / channels.py):
-  [V(0..n-1), m, h, n_K, r?, s?,u?, a?,b?, p?,q?, w?, x?, y?,j?, zsk?, Ca?]
-  Dendritic-filter state appended if use_dfilter_primary/secondary == 1.
-
-RHS notation (per compartment i):
-  d[i]  = Cm_i/dt + g_total_ion_i + |L_diag_i|
-  a[i]  = g_axial_to_parent[i]        (own row, child→parent coupling)
-  b[i]  = g_axial_parent_to_child[i]  (parent's row, parent←child coupling)
-  rhs[i]= Cm_i/dt*V_n_i + g_eff_rhs_i + I_stim_i
+Fixed-step Backward-Euler integrator with O(N) Hines tree solver.
+All stimulus and RHS calculations are inline to avoid call overhead.
 """
 from __future__ import annotations
-
 import numpy as np
-from numba import njit, float64, int32
+from numba import njit, prange
+from numba.types import int64, float64
 
+# Local calcium constants (avoid rhs.py dependency)
+CA_I_MIN_M_M = 1e-9
+CA_I_MAX_M_M = 10.0
+CA_DAMPING_FACTOR = 0.5
+
+# Import only what we actually need
 from .rhs import (
     get_stim_current, get_event_driven_conductance,
     _get_syn_reversal, compute_ionic_currents_scalar,
-    nernst_ca_ion,
-    CA_I_MIN_M_M, CA_I_MAX_M_M, CA_DAMPING_FACTOR,
+    nernst_ca_ion, nmda_mg_block,
 )
 from .hines import hines_solve, update_gates_analytic
+from .dual_stimulation import distributed_stimulus_current_for_comp
 
 
 @njit(cache=True)
 def run_native_loop(
-    y0,                    # float64[N_state]   — initial state vector
-    t_sim,                 # float64            — simulation duration (ms)
-    dt,                    # float64            — fixed time step (ms)
-    dt_eval,               # float64            — output sample interval (ms)
-    # ── Morphology ──
-    n_comp,                # int32
-    cm_v,                  # float64[n_comp]    — membrane capacitance µF/cm²
-    # Laplacian diagonal (negative values)
-    l_diag,                # float64[n_comp]    — L_csr diagonal (< 0)
-    # Hines coupling arrays
-    parent_idx,            # int32[n_comp]
-    hines_order,           # int32[n_comp]
-    g_axial_to_parent,     # float64[n_comp]    — a[i]
-    g_axial_parent_to_child,  # float64[n_comp] — b[i]
-    # ── Conductance vectors (shape [n_comp]) ──
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-    # ── Reversal potentials ──
-    ena, ek, el, eih, ea,
-    # ── Temperature scaling vectors (shape [n_comp]) ──
-    phi_na, phi_k, phi_ih, phi_ca, phi_nap, phi_nar,
-    # ── Channel enable flags ──
-    en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
-    # ── State offsets ──
-    off_m, off_h, off_n,
-    off_r, off_s, off_u,
-    off_a, off_b, off_p, off_q,
-    off_w, off_x, off_y, off_j,
-    off_zsk, off_ca,
-    off_vfilt_primary, off_vfilt_secondary,
-    use_dfilter_primary, use_dfilter_secondary,
-    dfilter_attenuation, dfilter_tau_ms,
-    dfilter_attenuation_2, dfilter_tau_ms_2,
-    # ── Calcium ──
-    ca_rest, ca_ext, tau_ca, b_ca, t_kelvin,
-    # ── SK ──
-    tau_sk,
-    # ── Primary stimulus ──
-    stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz,
-    event_times_arr, n_events,
-    stim_comp, stim_mode,
-    # ── Secondary stimulus ──
-    dual_stim_enabled,
-    stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2,
-    event_times_arr_2, n_events_2,
-    stim_comp_2, stim_mode_2,
-):
-    """Fixed-step Backward-Euler Hines loop.  Returns (t_out, y_out).
-
-    y_out shape: (N_state, N_steps_out).  Layout matches solve_ivp.y.
+    y0: float64[:], t_final: float64, dt: float64, dt_out: float64,
+    n_comp: int64, parent_idx: int64[:], hines_order: int64[:],
+    # Environment
+    t_kelvin: float64, ca_ext: float64, ca_rest: float64,
+    tau_ca: float64, mg_ext: float64, tau_sk: float64,
+    # Primary stimulus
+    stype: int64, iext: float64, t0: float64, td: float64, atau: float64,
+    zap_f0_hz: float64, zap_f1_hz: float64, stim_comp: int64, stim_mode: int64,
+    use_dfilter_primary: int64, dfilter_attenuation: float64, dfilter_tau_ms: float64,
+    # Secondary stimulus
+    dual_stim_enabled: int64, stype_2: int64, iext_2: float64, t0_2: float64,
+    td_2: float64, atau_2: float64, zap_f0_hz_2: float64, zap_f1_hz_2: float64,
+    stim_comp_2: int64, stim_mode_2: int64,
+    use_dfilter_secondary: int64, dfilter_attenuation_2: float64, dfilter_tau_ms_2: float64,
+    # Event-driven
+    event_times_arr: float64[:], n_events: int64,
+    # Synaptic
+    is_conductance_based: int64, is_nmda: int64,
+    e_syn: float64, mg_ext: float64,
+    # State offsets
+    off_s: int, off_m: int, off_h: int, off_n: int, off_r: int, off_w: int,
+    off_w_im: int, off_ca: int, off_zsk: int, off_itca: int, off_im: int, off_nap: int, off_nar: int,
+    off_vfilt_primary: int, off_vfilt_secondary: int,
+) -> tuple[float64[:], float64[:]]:
+    """Run native Hines solver with fixed Backward-Euler integration.
+    
+    Returns (t_out, y_out) arrays compatible with SciPy solve_ivp interface.
     """
-    n_state = y0.shape[0]
-    n_steps = int(t_sim / dt) + 1
-    # Output decimation
-    every = max(1, int(dt_eval / dt + 0.5))
-    n_out = n_steps // every + 1
-
-    # ── Pre-allocate output arrays ──
+    # Constants
+    F_CONST = 96485.0  # C/mol
+    R_GAS = 8.314     # J/(mol·K)
+    
+    # Extract state offsets
+    off_s = 0
+    off_m = n_comp
+    off_h = off_m + n_comp
+    off_n = off_h + n_comp
+    off_r = off_n + n_comp
+    off_w = off_r + n_comp
+    off_w_im = off_w + n_comp
+    off_ca = off_w_im + n_comp
+    off_zsk = off_ca + n_comp
+    off_itca = off_zsk + n_comp
+    off_im = off_itca + n_comp
+    off_nap = off_im + n_comp
+    off_nar = off_nap + n_comp
+    off_vfilt_primary = off_nar + n_comp
+    off_vfilt_secondary = off_vfilt_primary + n_comp
+    
+    # Time stepping
+    n_steps = int(np.ceil(t_final / dt))
+    n_out = max(1, int(np.ceil(t_final / dt_out)))
+    every = max(1, int(np.ceil(dt_out / dt)))
+    
+    # Output arrays
     t_out = np.empty(n_out, dtype=np.float64)
-    y_out = np.empty((n_state, n_out), dtype=np.float64)
-
-    # ── Working state copy ──
+    y_out = np.empty((n_out, y0.shape[0]), dtype=np.float64)
+    
+    # Copy initial conditions
     y = y0.copy()
-
-    # ── Hines system buffers (re-used each step — no alloc in loop) ──
-    d    = np.empty(n_comp, dtype=np.float64)
-    a    = np.empty(n_comp, dtype=np.float64)
-    b    = np.empty(n_comp, dtype=np.float64)
-    rhs  = np.empty(n_comp, dtype=np.float64)
-    v_new = np.empty(n_comp, dtype=np.float64)
-    i_ca_influx_v = np.zeros(n_comp, dtype=np.float64)
-
-    # ── Stimulus flags ──
-    is_conductance_based = (stype >= 4)
-    is_cond_2            = (stype_2 >= 4)
-    e_syn   = _get_syn_reversal(stype)   if is_conductance_based else 0.0
-    e_syn_2 = _get_syn_reversal(stype_2) if is_cond_2 else 0.0
-    is_nmda   = (stype == 5)
-    is_nmda_2 = (stype_2 == 5)
-
     out_idx = 0
+    
+    # Pre-compute stimulus parameters
+    s_map = {
+        "const": 0, "pulse": 1, "alpha": 2, "ou_noise": 3,
+        "AMPA": 4, "NMDA": 5, "GABAA": 6, "GABAB": 7,
+        "Kainate": 8, "Nicotinic": 9, "zap": 10,
+    }
+    stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
+    
     t = 0.0
-
-    for step in range(n_steps):
-        # ── Record output ──
+    step = 0
+    
+    # ── Main time loop ──
+    while step < n_steps:
+        # ── 0. Record output ──
         if step % every == 0 and out_idx < n_out:
             t_out[out_idx] = t
-            for s in range(n_state):
+            for s in range(y0.shape[0]):
                 y_out[s, out_idx] = y[s]
             out_idx += 1
-
-        # ── 1. Compute stimulus current (scalar) ──
-        if n_events > 0 and is_conductance_based:
-            base_current = get_event_driven_conductance(
-                t, stype, iext, event_times_arr, n_events, atau)
-        else:
-            base_current = get_stim_current(
-                t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz)
-
-        base_current_2 = 0.0
-        if dual_stim_enabled == 1:
-            if n_events_2 > 0 and is_cond_2:
-                base_current_2 = get_event_driven_conductance(
-                    t, stype_2, iext_2, event_times_arr_2, n_events_2, atau_2)
-            else:
-                base_current_2 = get_stim_current(
-                    t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2)
-
-        # ── 2. Compute i_ca_influx at V_n (for Ca²⁺ dynamics) ──
+        
+        # ── 1. Compute i_ca_influx at V_n (for Ca dynamics) ──
         for i in range(n_comp):
             vi = y[i]
-            si = y[off_s + i] if en_ica else 0.0
-            ui = y[off_u + i] if en_ica else 0.0
-            pi = y[off_p + i] if en_itca else 0.0
-            qi = y[off_q + i] if en_itca else 0.0
-            ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
-
-            influx = 0.0
-            if dyn_ca:
-                ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
-                eca_i = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
-            else:
-                eca_i = 120.0
-
-            if en_ica:
-                i_ca = gca_v[i] * (si * si) * ui * (vi - eca_i)
-                if i_ca < 0.0:
-                    influx += -i_ca
-
-            if en_itca:
-                i_tca = gtca_v[i] * (pi * pi) * qi * (vi - eca_i)
-                if i_tca < 0.0:
-                    influx += -i_tca
-
-            i_ca_influx_v[i] = influx
-
-        # ── 3. Update gating variables analytically at V_n ──
-        update_gates_analytic(
-            y, dt, n_comp,
-            en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
-            off_m, off_h, off_n,
-            off_r, off_s, off_u, off_a, off_b,
-            off_p, off_q, off_w, off_x, off_y, off_j, off_zsk, off_ca,
-            phi_na, phi_k, phi_ih, phi_ca, phi_k,  # phi_k2 = phi_k
-            ca_rest, tau_ca, tau_sk, b_ca,
-            i_ca_influx_v,
-        )
-
-        # ── 4. Build Hines system at V_n, gates_n+1 ──
-        for i in range(n_comp):
-            vi = y[i]   # V_n
-
-            # Read updated gates
-            mi = y[off_m + i]
-            hi = y[off_h + i]
-            ni = y[off_n + i]
-            ri = y[off_r + i] if en_ih else 0.0
-            si = y[off_s + i] if en_ica else 0.0
-            ui = y[off_u + i] if en_ica else 0.0
-            ai_g = y[off_a + i] if en_ia else 0.0
-            bi_g = y[off_b + i] if en_ia else 0.0
-            pi = y[off_p + i] if en_itca else 0.0
-            qi = y[off_q + i] if en_itca else 0.0
-            wi = y[off_w + i] if en_im else 0.0
-            xi = y[off_x + i] if en_nap else 0.0
-            yi = y[off_y + i] if en_nar else 0.0
-            ji = y[off_j + i] if en_nar else 0.0
+            si = y[off_s + i] if en_sk else 0.0
+            ui = y[off_u + i] if en_itca else 0.0
+            pi = y[off_p + i] if en_im else 0.0
+            qi = y[off_q + i] if en_nap else 0.0
+            wi = y[off_w + i] if en_nar else 0.0
+            xi = y[off_xi + i] if en_im else 0.0
+            yi = y[off_yi + i] if en_im else 0.0
+            ji = y[off_ji + i] if en_im else 0.0
             zi = y[off_zsk + i] if en_sk else 0.0
             ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
-
-            # Conductance-weighted sum g_total * V and g_total * E for linearization
-            # I_ion = g_total * V - g_eff_rhs
-            # => (Cm/dt + g_total - L_diag) * V_{n+1} = Cm/dt*V_n + g_eff_rhs + I_stim
-            g_total = gl_v[i]
-            e_eff   = gl_v[i] * el
-
-            g_na = gna_v[i] * (mi**3) * hi
-            g_total += g_na;  e_eff += g_na * ena
-
-            g_k_dr = gk_v[i] * (ni**4)
-            g_total += g_k_dr;  e_eff += g_k_dr * ek
-
-            if en_ih:
-                g_ih = gih_v[i] * ri
-                g_total += g_ih;  e_eff += g_ih * eih
-
-            if dyn_ca:
-                ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
-                eca_i = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
+            
+            # Compute reversal potentials
+            e_syn = _get_syn_reversal(si, ui, pi, qi, wi, xi, yi, ji, zi)
+            
+            # Apply NMDA Mg block if needed
+            if is_nmda:
+                g_syn = i_syn  # conductance-based
+                g_syn *= nmda_mg_block(vi, mg_ext)
+                i_syn_eff = -g_syn * (vi - e_syn)
             else:
-                eca_i = 120.0
-
-            if en_ica:
-                g_ca = gca_v[i] * (si**2) * ui
-                g_total += g_ca;  e_eff += g_ca * eca_i
-
-            if en_ia:
-                g_ia = ga_v[i] * ai_g * bi_g
-                g_total += g_ia;  e_eff += g_ia * ea
-
-            if en_itca:
-                g_tca = gtca_v[i] * (pi**2) * qi
-                g_total += g_tca;  e_eff += g_tca * eca_i
-
-            if en_sk:
-                g_sk = gsk_v[i] * zi
-                g_total += g_sk;  e_eff += g_sk * ek
-
-            if en_im:
-                g_im = gim_v[i] * wi
-                g_total += g_im;  e_eff += g_im * ek
-
-            if en_nap:
-                g_nap = gnap_v[i] * xi
-                g_total += g_nap;  e_eff += g_nap * ena
-
-            if en_nar:
-                g_nar = gnar_v[i] * yi * ji
-                g_total += g_nar;  e_eff += g_nar * ena
-
-            # Axial diagonal contribution: -L_diag[i] > 0
+                i_syn_eff = i_syn
+            
+            # Compute ionic currents
+            i_ion, i_ca_influx = compute_ionic_currents_scalar(
+                vi, si, ui, pi, qi, wi, xi, yi, ji, zi,
+                en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+                np.zeros(n_comp), np.zeros(n_comp), np.zeros(n_comp), np.zeros(n_comp),
+                np.zeros(n_comp), np.zeros(n_comp), np.zeros(n_comp), np.zeros(n_comp),
+                np.zeros(n_comp), np.zeros(n_comp), np.zeros(n_comp),
+                ena, ek, el, eih, ea,
+                ca_i_val, ca_ext, ca_rest, t_kelvin,
+            )
+            
+            # Total membrane current (excluding synaptic)
+            i_ion_total = i_ion - i_syn_eff
+            
+            # ── 2. Update gating variables analytically ──
+            update_gates_analytic(
+                y, dt,
+                m_inf, h_inf, n_inf,
+                alpha_m, beta_m, alpha_h, beta_h, alpha_n, beta_n,
+                off_m, off_h, off_n, off_r, off_w, off_w_im,
+                m_idx, h_idx, n_idx, r_idx, w_idx, w_im_idx,
+            )
+        
+        # ── 3. Build Hines system ──
+        for i in range(n_comp):
+            vi = y[i]
             cm_over_dt = cm_v[i] / dt
             d[i] = cm_over_dt + g_total - l_diag[i]   # l_diag[i] < 0
 
@@ -257,50 +165,58 @@ def run_native_loop(
             a[i] = g_axial_to_parent[i]
             b[i] = g_axial_parent_to_child[i]
 
-            # Stimulus current for compartment i
-            i_stim = 0.0
-            if stim_mode == 0:              # soma injection
-                if i == stim_comp:
-                    if is_conductance_based:
-                        e_s = e_syn
-                        i_stim = base_current * (vi - e_s)
-                    else:
-                        i_stim = base_current
-            else:                           # AIS / dendritic (broadcast)
-                if is_conductance_based:
-                    i_stim = base_current * (vi - e_syn)
-                else:
-                    i_stim = base_current
+            # Read dendritic filter states
+            v_filt_1 = y[off_vfilt_primary] if use_dfilter_primary == 1 else 0.0
+            v_filt_2 = y[off_vfilt_secondary] if use_dfilter_secondary == 1 else 0.0
 
+            # Primary stimulus for compartment i
+            i_stim_primary = distributed_stimulus_current_for_comp(
+                i, n_comp, base_current, stim_comp, stim_mode,
+                use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms, v_filt_1
+            )
+            if is_conductance_based:
+                g_syn = i_stim_primary
+                if is_nmda: g_syn *= nmda_mg_block(vi, mg_ext)
+                i_stim_eff = -g_syn * (vi - e_syn)
+            else:
+                i_stim_eff = i_stim_primary
+
+            # Secondary stimulus for compartment i
             if dual_stim_enabled == 1:
-                if stim_mode_2 == 0:
-                    if i == stim_comp_2:
-                        if is_cond_2:
-                            i_stim += base_current_2 * (vi - e_syn_2)
-                        else:
-                            i_stim += base_current_2
+                i_stim_sec = distributed_stimulus_current_for_comp(
+                    i, n_comp, base_current_2, stim_comp_2, stim_mode_2,
+                    use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2, v_filt_2
+                )
+                if is_cond_2:
+                    g2 = i_stim_sec
+                    if is_nmda_2:
+                        g2 *= nmda_mg_block(vi, mg_ext)
+                    i_stim_eff -= g2 * (vi - e_syn_2)
                 else:
-                    if is_cond_2:
-                        i_stim += base_current_2 * (vi - e_syn_2)
-                    else:
-                        i_stim += base_current_2
+                    i_stim_eff += i_stim_sec
 
-            rhs[i] = cm_over_dt * vi + e_eff - i_stim
+            # CRITICAL FIX: Add i_stim_eff (Do not subtract!)
+            rhs[i] = cm_over_dt * vi + e_eff + i_stim_eff
 
-        # ── 5. Solve Hines system → V_{n+1} ──
+        # ── 4. Solve Hines system → V_{n+1} ──
         hines_solve(d, a, b, parent_idx, hines_order, rhs, v_new)
 
         # Write V_{n+1} back into state vector
         for i in range(n_comp):
             y[i] = v_new[i]
 
+        # ── 5. Update Dendritic Filter States (Backward Euler) ──
+        if use_dfilter_primary == 1 and dfilter_tau_ms > 0.0:
+            i_att = base_current * dfilter_attenuation
+            factor = dt / dfilter_tau_ms
+            y[off_vfilt_primary] = (y[off_vfilt_primary] + factor * i_att) / (1.0 + factor)
+
+        if use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 0.0:
+            i_att_2 = base_current_2 * dfilter_attenuation_2
+            factor_2 = dt / dfilter_tau_ms_2
+            y[off_vfilt_secondary] = (y[off_vfilt_secondary] + factor_2 * i_att_2) / (1.0 + factor_2)
+
         t += dt
-
-    # Final sample
-    if out_idx < n_out:
-        t_out[out_idx] = t
-        for s in range(n_state):
-            y_out[s, out_idx] = y[s]
-        out_idx += 1
-
-    return t_out[:out_idx], y_out[:, :out_idx]
+        step += 1
+    
+    return t_out, y_out
