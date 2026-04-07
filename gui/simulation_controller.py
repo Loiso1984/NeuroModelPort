@@ -57,7 +57,7 @@ class SimulationController(QObject):
         
         def run_simulation():
             solver = NeuronSolver(config)
-            return solver.run_single()
+            return {'single': solver.run_single()}
             
         worker = Worker(run_simulation)
         
@@ -74,7 +74,7 @@ class SimulationController(QObject):
         """Run stochastic Euler-Maruyama simulation."""
         def run_simulation():
             from core.advanced_sim import run_euler_maruyama
-            return run_euler_maruyama(config)
+            return {'single': run_euler_maruyama(config)}
             
         worker = Worker(run_simulation)
         
@@ -93,7 +93,7 @@ class SimulationController(QObject):
         
         def run_simulation():
             solver = NeuronSolver(config)
-            return solver.run_mc(n_trials)
+            return {'mc_results': solver.run_mc(n_trials)}
             
         worker = Worker(run_simulation)
         

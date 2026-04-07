@@ -199,27 +199,43 @@ def validate_rhs_args_values(values: Mapping[str, Any]) -> None:
             raise ValueError("Invalid event_times_arr: first n_events entries must be non-decreasing")
         prev_evt = evt
 
-    env_vec = values["env_vec"]
-    if len(env_vec) != 6:
-        raise ValueError(f"Invalid env_vec length={len(env_vec)} (expected 6)")
-    t_kelvin, ca_ext, ca_rest, tau_ca, mg_ext, tau_sk = [float(v) for v in env_vec]
-    if not math.isfinite(t_kelvin) or t_kelvin <= 0.0:
-        raise ValueError("Invalid t_kelvin: must be finite and > 0")
-    if not math.isfinite(tau_ca) or tau_ca <= 0.0:
-        raise ValueError("Invalid tau_ca: must be finite and > 0")
-    if not math.isfinite(tau_sk) or tau_sk <= 0.0:
-        raise ValueError("Invalid tau_sk: must be finite and > 0")
-    for key, val in (("ca_ext", ca_ext), ("ca_rest", ca_rest), ("mg_ext", mg_ext)):
-        if (not math.isfinite(val)) or val < 0.0:
-            raise ValueError(f"Invalid {key}: must be finite and >= 0")
+    # Validate individual environment fields
+    t_kelvin = _require_positive(values, "t_kelvin")
+    ca_ext = _require_nonnegative(values, "ca_ext")
+    ca_rest = _require_nonnegative(values, "ca_rest")
+    tau_ca = _require_positive(values, "tau_ca")
+    mg_ext = _require_nonnegative(values, "mg_ext")
+    tau_sk = _require_positive(values, "tau_sk")
 
-    stim1_vec = values["stim1_vec"]
-    if len(stim1_vec) != 12:
-        raise ValueError(f"Invalid stim1_vec length={len(stim1_vec)} (expected 12)")
-    (
-        stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz,
-        stim_comp, stim_mode, use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
-    ) = [float(v) for v in stim1_vec]
+    # Validate individual stimulus fields
+    stype = _require_finite(values, "stype")
+    iext = _require_finite(values, "iext")
+    t0 = _require_nonnegative(values, "t0")
+    td = _require_nonnegative(values, "td")
+    atau = _require_positive(values, "atau")
+    zap_f0_hz = _require_nonnegative(values, "zap_f0_hz")
+    zap_f1_hz = _require_nonnegative(values, "zap_f1_hz")
+    stim_comp = _require_finite(values, "stim_comp")
+    stim_mode = _require_finite(values, "stim_mode")
+    use_dfilter_primary = _require_finite(values, "use_dfilter_primary")
+    dfilter_attenuation = _require_finite(values, "dfilter_attenuation")
+    dfilter_tau_ms = _require_nonnegative(values, "dfilter_tau_ms")
+
+    # Validate secondary stimulus fields
+    dual_stim_enabled = _require_finite(values, "dual_stim_enabled")
+    stype_2 = _require_finite(values, "stype_2")
+    iext_2 = _require_finite(values, "iext_2")
+    t0_2 = _require_nonnegative(values, "t0_2")
+    td_2 = _require_nonnegative(values, "td_2")
+    atau_2 = _require_positive(values, "atau_2")
+    zap_f0_hz_2 = _require_nonnegative(values, "zap_f0_hz_2")
+    zap_f1_hz_2 = _require_nonnegative(values, "zap_f1_hz_2")
+    stim_comp_2 = _require_finite(values, "stim_comp_2")
+    stim_mode_2 = _require_finite(values, "stim_mode_2")
+    use_dfilter_secondary = _require_finite(values, "use_dfilter_secondary")
+    dfilter_attenuation_2 = _require_finite(values, "dfilter_attenuation_2")
+    dfilter_tau_ms_2 = _require_nonnegative(values, "dfilter_tau_ms_2")
+
     stim_mode_i = int(stim_mode)
     if stim_mode_i not in (0, 1, 2):
         raise ValueError(f"Invalid stim_mode={stim_mode_i}: expected 0|1|2")
@@ -241,24 +257,7 @@ def validate_rhs_args_values(values: Mapping[str, Any]) -> None:
     if (not math.isfinite(dfilter_tau_ms)) or dfilter_tau_ms < 0.0:
         raise ValueError("Invalid dfilter_tau_ms: must be finite and >= 0")
 
-    if (not math.isfinite(atau)) or atau <= 0.0:
-        raise ValueError("Invalid atau: must be finite and > 0")
-    for key, val in (("iext", iext), ("t0", t0), ("td", td), ("zap_f0_hz", zap_f0_hz), ("zap_f1_hz", zap_f1_hz)):
-        if not math.isfinite(val):
-            raise ValueError(f"Invalid {key}: must be finite")
-    for key, val in (("td", td), ("zap_f0_hz", zap_f0_hz), ("zap_f1_hz", zap_f1_hz)):
-        if val < 0.0:
-            raise ValueError(f"Invalid {key}: must be >= 0")
-
-    stim2_vec = values["stim2_vec"]
-    if len(stim2_vec) != 13:
-        raise ValueError(f"Invalid stim2_vec length={len(stim2_vec)} (expected 13)")
-    (
-        dual_stim_enabled,
-        stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2,
-        stim_comp_2, stim_mode_2, use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
-    ) = [float(v) for v in stim2_vec]
-
+    # Validate secondary stimulus parameters if dual stimulation is enabled
     dual_stim_enabled_i = int(dual_stim_enabled)
     if dual_stim_enabled_i not in (0, 1):
         raise ValueError("Invalid dual_stim_enabled: expected 0|1")
@@ -287,7 +286,6 @@ def validate_rhs_args_values(values: Mapping[str, Any]) -> None:
 
         if (not math.isfinite(atau_2)) or atau_2 <= 0.0:
             raise ValueError("Invalid atau_2: must be finite and > 0")
-
         for key, val in (("iext_2", iext_2), ("t0_2", t0_2), ("td_2", td_2), ("zap_f0_hz_2", zap_f0_hz_2), ("zap_f1_hz_2", zap_f1_hz_2)):
             if not math.isfinite(val):
                 raise ValueError(f"Invalid {key}: must be finite")

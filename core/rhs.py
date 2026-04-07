@@ -12,6 +12,11 @@ R_GAS = 8.314
 TEMP_ZERO = 273.15
 CA_I_MIN_M_M = 1e-9
 CA_I_MAX_M_M = 10.0
+CA_DAMPING_FACTOR = 0.5  # Damped reflection factor for calcium bounds (prevents oscillation)
+# When calcium hits its physiological bounds, instead of zeroing the derivative (which creates
+# an artificial equilibrium), we reflect it with damping. A value of 0.5 provides sufficient
+# energy dissipation to prevent sustained oscillations at the boundary while maintaining
+# numerical stability. This is analogous to a "soft bounce" in physical systems.
 
 # Noise parameters
 OU_NOISE_AMPLITUDE = 0.1  # 10% noise amplitude
@@ -369,40 +374,7 @@ def rhs_multicompartment(
     dfilter_tau_ms_2 = physics_params.dfilter_tau_ms_2
 
 
-    t_kelvin = env_vec[0]
-    ca_ext = env_vec[1]
-    ca_rest = env_vec[2]
-    tau_ca = env_vec[3]
-    mg_ext = env_vec[4]
-    tau_sk = env_vec[5]
-
-    stype = int(stim1_vec[0])
-    iext = stim1_vec[1]
-    t0 = stim1_vec[2]
-    td = stim1_vec[3]
-    atau = stim1_vec[4]
-    zap_f0_hz = stim1_vec[5]
-    zap_f1_hz = stim1_vec[6]
-    stim_comp = int(stim1_vec[7])
-    stim_mode = int(stim1_vec[8])
-    use_dfilter_primary = int(stim1_vec[9])
-    dfilter_attenuation = stim1_vec[10]
-    dfilter_tau_ms = stim1_vec[11]
-
-    dual_stim_enabled = int(stim2_vec[0])
-    stype_2 = int(stim2_vec[1])
-    iext_2 = stim2_vec[2]
-    t0_2 = stim2_vec[3]
-    td_2 = stim2_vec[4]
-    atau_2 = stim2_vec[5]
-    zap_f0_hz_2 = stim2_vec[6]
-    zap_f1_hz_2 = stim2_vec[7]
-    stim_comp_2 = int(stim2_vec[8])
-    stim_mode_2 = int(stim2_vec[9])
-    use_dfilter_secondary = int(stim2_vec[10])
-    dfilter_attenuation_2 = stim2_vec[11]
-    dfilter_tau_ms_2 = stim2_vec[12]
-
+    
     off_v = 0
     off_m = n_comp
     off_h = 2 * n_comp
@@ -486,12 +458,12 @@ def rhs_multicompartment(
         v_filtered_secondary = y[off_vfilt_secondary]
 
     d_vfiltered_dt_primary = 0.0
-    if stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 0.0:
+    # Validate filter parameters before use
+    if stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 1e-12:
         attenuated_current = dfilter_attenuation * base_current
         d_vfiltered_dt_primary = (attenuated_current - v_filtered_primary) / dfilter_tau_ms
-    use_dfilter_primary_eff = use_dfilter_primary
-    if dfilter_tau_ms <= 0.0:
-        use_dfilter_primary_eff = 0
+    # Disable filter if tau is invalid (below epsilon threshold)
+    use_dfilter_primary_eff = 1 if (stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 1e-12) else 0
 
     is_cond_2 = False
     e_syn_2 = 0.0
@@ -503,12 +475,11 @@ def rhs_multicompartment(
         e_syn_2 = _get_syn_reversal(stype_2) if is_cond_2 else 0.0
         is_nmda_2 = (stype_2 == 5)
         base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2)
-        if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 0.0:
+        if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 1e-12:
             attenuated_current_2 = dfilter_attenuation_2 * base_current_2
             d_vfiltered_dt_secondary = (attenuated_current_2 - v_filtered_secondary) / dfilter_tau_ms_2
-    use_dfilter_secondary_eff = use_dfilter_secondary
-    if dfilter_tau_ms_2 <= 0.0:
-        use_dfilter_secondary_eff = 0
+    # Disable filter if tau is invalid or stim_mode is not 2 (below epsilon threshold)
+    use_dfilter_secondary_eff = 1 if (dual_stim_enabled == 1 and stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 1e-12) else 0
 
     # --- Zero the pre-allocated output buffer (Numba-native; no heap alloc) ---
     for _k in range(len(dydt)):
@@ -637,13 +608,17 @@ def rhs_multicompartment(
         if dyn_ca:
             ca_i_val = y[off_ca + i]
             dca = b_ca[i] * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
+            
             # Hard clamp: keep calcium in physiologically bounded range.
+            # Only clamp the derivative, not set to zero, to avoid artificial equilibrium
             ca_at_min = (ca_i_val <= CA_I_MIN_M_M and dca < 0.0)
             ca_at_max = (ca_i_val >= CA_I_MAX_M_M and dca > 0.0)
-            if ca_at_min or ca_at_max:
-                # Log warning if bounds are hit (only log once per compartment to avoid spam)
-                # Note: In production, use a proper logging system
-                dca = 0.0
+            if ca_at_min:
+                # Force derivative positive (away from lower bound)
+                dca = abs(dca) * CA_DAMPING_FACTOR
+            elif ca_at_max:
+                # Force derivative negative (away from upper bound)
+                dca = -abs(dca) * CA_DAMPING_FACTOR
             dydt[off_ca + i] = dca
 
     # Dendritic filter ODEs (outside main loop — not per-compartment)
