@@ -142,9 +142,19 @@ def _spike_detect_kwargs_from_stats(stats: dict) -> dict:
 
 
 class _LazyPlaceholder(QWidget):
-    """Empty sentinel widget occupying a tab slot until the user first visits it.
+    """Sentinel widget occupying a tab slot until the user first visits it.
     Detected by isinstance() in _on_tab_changed to trigger lazy construction."""
-    pass
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl = QLabel("Click this tab to load the view")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet(
+            "color:#555; font-size:13px; font-style:italic;"
+        )
+        lay.addWidget(lbl)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -162,6 +172,7 @@ class AnalyticsWidget(QTabWidget):
         self._last_sd = None
         self._last_exc = None
         self._fullscreen_windows = []
+        self._building_lazy_tab = False  # re-entrancy guard for _on_tab_changed
         self._build_tabs()
 
     # ─────────────────────────────────────────────────────────────────
@@ -239,6 +250,8 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     def _on_tab_changed(self, index: int):
         """Build an MPL canvas the first time a lazy tab is visited."""
+        if self._building_lazy_tab:
+            return  # re-entrancy guard: removeTab/insertTab fire currentChanged too
         widget = self.widget(index)
         if not isinstance(widget, _LazyPlaceholder):
             return
@@ -246,13 +259,16 @@ class AnalyticsWidget(QTabWidget):
         if spec is None:
             return
 
-        # Build the real canvas widget
-        new_widget = getattr(self, spec['builder'])()
-        title = spec['title']
-        self.blockSignals(True)
-        self.removeTab(index)
-        self.insertTab(index, new_widget, title)
-        self.blockSignals(False)
+        # Build the real canvas, swap out the placeholder, restore focus
+        self._building_lazy_tab = True
+        try:
+            new_widget = getattr(self, spec['builder'])()
+            title = spec['title']
+            self.removeTab(index)
+            self.insertTab(index, new_widget, title)
+            self.setCurrentIndex(index)   # restore — removeTab may shift focus
+        finally:
+            self._building_lazy_tab = False
         widget.deleteLater()
 
         # Immediately populate with current data if available
