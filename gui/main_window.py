@@ -13,10 +13,12 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QPushButton, QLabel, QComboBox, QStatusBar,
     QScrollArea, QMessageBox, QApplication, QFileDialog,
-    QGroupBox, QToolBar, QProgressDialog, QLayout, QSizePolicy
+    QGroupBox, QToolBar, QProgressDialog, QLayout, QSizePolicy,
+    QFrame, QSplitter, QSlider,
 )
-from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from PySide6.QtGui import QIcon, QAction
+import pyqtgraph as pg
 
 from gui.locales import T
 from gui.simulation_controller import SimulationController
@@ -35,6 +37,37 @@ from gui.analytics import AnalyticsWidget
 from gui.topology import TopologyWidget
 from gui.axon_biophysics import AxonBiophysicsWidget
 from gui.dual_stimulation_widget import DualStimulationWidget
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  LIVE DECK PARAMETER REGISTRY
+# ─────────────────────────────────────────────────────────────────────
+#  (name, lo, hi, setter, getter)
+_LIVE_PARAMS = {
+    'Iext':      (-50.0, 250.0,
+                  lambda cfg, v: setattr(cfg.stim,      'Iext',      v),
+                  lambda cfg:    cfg.stim.Iext),
+    'gNa_max':   (0.0,   360.0,
+                  lambda cfg, v: setattr(cfg.channels,  'gNa_max',   v),
+                  lambda cfg:    cfg.channels.gNa_max),
+    'gK_max':    (0.0,   200.0,
+                  lambda cfg, v: setattr(cfg.channels,  'gK_max',    v),
+                  lambda cfg:    cfg.channels.gK_max),
+    'T_celsius': (6.3,    42.0,
+                  lambda cfg, v: setattr(cfg.env,       'T_celsius', v),
+                  lambda cfg:    cfg.env.T_celsius),
+    'Ra':        (10.0,  500.0,
+                  lambda cfg, v: setattr(cfg.morphology,'Ra',        v),
+                  lambda cfg:    cfg.morphology.Ra),
+    'gL':        (0.0,     2.0,
+                  lambda cfg, v: setattr(cfg.channels,  'gL',        v),
+                  lambda cfg:    cfg.channels.gL),
+    'pulse_dur': (0.1,   100.0,
+                  lambda cfg, v: setattr(cfg.stim,      'pulse_dur', v),
+                  lambda cfg:    cfg.stim.pulse_dur),
+}
+_LIVE_PARAM_NAMES = list(_LIVE_PARAMS.keys())
+_LIVE_SLIDER_STEPS = 1000   # integer slider resolution
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -87,6 +120,15 @@ class MainWindow(QMainWindow):
         self._dual_stim_signal_connected = False
         self._delay_target_name = "Terminal"
         self._delay_custom_index = 1
+        self._sidebar_visible = True
+        # Live deck state
+        self._live_combos: list[QComboBox] = []
+        self._live_sliders: list[QSlider] = []
+        self._live_labels: list[QLabel] = []
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.setInterval(30)
+        self._live_timer.timeout.connect(self._on_live_timer_fired)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -365,20 +407,47 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.combo_presets, 3)
         bar.addWidget(self.lbl_lang)
         bar.addWidget(self.combo_lang)
+
+        # ── Sparkline (mini Vm trace) ──────────────────────────
+        self._sparkline = pg.PlotWidget()
+        self._sparkline.setFixedHeight(42)
+        self._sparkline.setMinimumWidth(100)
+        self._sparkline.hideAxis('left')
+        self._sparkline.hideAxis('bottom')
+        self._sparkline.setBackground('#0D1117')
+        self._sparkline.setToolTip("Latest somatic Vm trace")
+        self._sparkline_curve = self._sparkline.plot([], [], pen=pg.mkPen('#89B4FA', width=1))
+        bar.addWidget(self._sparkline, 3)
+
+        # ── Sidebar toggle button ──────────────────────────────
+        self.btn_toggle_sidebar = QPushButton("◀")
+        self.btn_toggle_sidebar.setFixedWidth(34)
+        self.btn_toggle_sidebar.setFixedHeight(46)
+        self.btn_toggle_sidebar.setToolTip("Show / hide parameters panel")
+        self.btn_toggle_sidebar.setStyleSheet(
+            "QPushButton { background:#313244; color:#89B4FA; border-radius:4px; font-size:16px; }"
+            "QPushButton:hover { background:#45475A; }"
+        )
+        self.btn_toggle_sidebar.clicked.connect(self._toggle_sidebar)
+        bar.addWidget(self.btn_toggle_sidebar)
+
         self._main_layout.addLayout(bar)
 
     # ─────────────────────────────────────────────────────────────────
-    #  TABS
+    #  TABS  +  COLLAPSIBLE SIDEBAR
     # ─────────────────────────────────────────────────────────────────
     def _setup_tabs(self):
         self.tabs = QTabWidget()
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # ── Tab 0: Parameters ─────────────────────────────────────────
-        # Step 1: Setup
-        self.tab_params = QWidget()
-        self._build_params_tab()
-        self.tabs.addTab(self.tab_params,   "1) Setup")
+        # ── Sidebar panel (replaces old "1) Setup" tab) ───────────────
+        self._sidebar_frame = QFrame()
+        self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._sidebar_frame.setMinimumWidth(0)
+        self._sidebar_frame.setMaximumWidth(520)
+        self._build_sidebar_panel()
+        # Dummy tab_params kept for backward-compat references (not in tabs)
+        self.tab_params = self._sidebar_frame
 
         # ── Tab 1: Dual Stimulation ───────────────────────────────────
         # Step 2: Dual Stimulation
@@ -427,17 +496,82 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.guide_browser, "7) Guide")
 
-        self._main_layout.addWidget(self.tabs, stretch=1)
-        
+        # ── Main splitter: sidebar | tabs ────────────────────────────
+        self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._main_splitter.setChildrenCollapsible(True)
+        self._main_splitter.addWidget(self._sidebar_frame)
+        self._main_splitter.addWidget(self.tabs)
+        self._main_splitter.setSizes([420, 980])
+        self._main_splitter.setStretchFactor(0, 0)
+        self._main_splitter.setStretchFactor(1, 1)
+        self._main_layout.addWidget(self._main_splitter, stretch=1)
+
         # Pass form widgets to ConfigManager for sync operations
         self.config_manager.set_dual_stim_widget(self.dual_stim_widget)
         self.config_manager.set_form_widgets(
             self.form_stim, self.form_stim_loc, self.form_preset_modes
         )
 
-    def _build_params_tab(self):
-        layout = QVBoxLayout(self.tab_params)
+    def _build_sidebar_panel(self):
+        """Build the collapsible left parameter panel (replaces old '1) Setup' tab)."""
+        layout = QVBoxLayout(self._sidebar_frame)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
+        # ── Quick Preset shortcut row (Step 5) ────────────────────────
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("⚡ Preset:"))
+        self._sidebar_preset_combo = QComboBox()
+        self._sidebar_preset_combo.addItems(["— Select preset —"] + get_preset_names())
+        self._sidebar_preset_combo.currentTextChanged.connect(self.load_preset)
+        preset_row.addWidget(self._sidebar_preset_combo, 1)
+        layout.addLayout(preset_row)
+
+        # ── Live Control Deck (Step 2) ─────────────────────────────────
+        deck = QGroupBox("🎛️ Live Control Deck")
+        deck_layout = QVBoxLayout(deck)
+        deck_layout.setSpacing(4)
+        deck_layout.setContentsMargins(6, 10, 6, 6)
+        deck.setStyleSheet("QGroupBox { font-weight:bold; color:#89B4FA; }")
+
+        for row_i, default_param in enumerate(('Iext', 'gNa_max', 'T_celsius')):
+            row_w = QWidget()
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            row_h.setSpacing(4)
+
+            combo = QComboBox()
+            combo.addItems(_LIVE_PARAM_NAMES)
+            combo.setCurrentText(default_param)
+            combo.setFixedWidth(90)
+            combo.currentTextChanged.connect(
+                lambda _text, ri=row_i: self._on_live_combo_changed(ri)
+            )
+            self._live_combos.append(combo)
+
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, _LIVE_SLIDER_STEPS)
+            slider.setValue(self._val_to_live_slider(default_param))
+            slider.valueChanged.connect(
+                lambda raw, ri=row_i: self._on_live_slider_moved(ri, raw)
+            )
+            self._live_sliders.append(slider)
+
+            lo, hi, _, getter = _LIVE_PARAMS[default_param]
+            cur_val = getter(self.config_manager.config)
+            lbl = QLabel(f"{cur_val:.2f}")
+            lbl.setFixedWidth(52)
+            lbl.setStyleSheet("color:#CBA6F7; font-size:11px;")
+            self._live_labels.append(lbl)
+
+            row_h.addWidget(combo)
+            row_h.addWidget(slider, 1)
+            row_h.addWidget(lbl)
+            deck_layout.addWidget(row_w)
+
+        layout.addWidget(deck)
+
+        # ── Params hint ───────────────────────────────────────────────
         self.lbl_params_hint = QLabel("")
         self.lbl_params_hint.setWordWrap(True)
         self.lbl_params_hint.setStyleSheet(
@@ -448,6 +582,7 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.lbl_params_hint)
 
+        # ── Scrollable forms ──────────────────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustIgnored)
@@ -499,7 +634,7 @@ class MainWindow(QMainWindow):
             "Analysis / Sweep / Map",
         )
 
-        # Group 1: run setup (user-edited first)
+        # Group 1: run setup
         grp_setup = QGroupBox("Run Setup (Edit First)")
         setup_layout = QHBoxLayout(grp_setup)
         setup_left = QVBoxLayout()
@@ -540,6 +675,82 @@ class MainWindow(QMainWindow):
 
         scroll.setWidget(content)
         layout.addWidget(scroll)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  SIDEBAR TOGGLE
+    # ─────────────────────────────────────────────────────────────────
+    def _toggle_sidebar(self):
+        self._sidebar_visible = not self._sidebar_visible
+        self._sidebar_frame.setVisible(self._sidebar_visible)
+        self.btn_toggle_sidebar.setText("◀" if self._sidebar_visible else "▶")
+        if self._sidebar_visible:
+            self._main_splitter.setSizes([420, max(1, self._main_splitter.width() - 420)])
+
+    # ─────────────────────────────────────────────────────────────────
+    #  LIVE CONTROL DECK HELPERS
+    # ─────────────────────────────────────────────────────────────────
+    def _val_to_live_slider(self, param_name: str) -> int:
+        lo, hi, _, getter = _LIVE_PARAMS[param_name]
+        val = getter(self.config_manager.config)
+        return int(round(max(0.0, min(1.0, (val - lo) / max(hi - lo, 1e-9))) * _LIVE_SLIDER_STEPS))
+
+    def _on_live_combo_changed(self, row_i: int):
+        """Sync slider position to new parameter's current value."""
+        param = self._live_combos[row_i].currentText()
+        if param not in _LIVE_PARAMS:
+            return
+        lo, hi, _, getter = _LIVE_PARAMS[param]
+        val = getter(self.config_manager.config)
+        new_pos = int(round(max(0.0, min(1.0, (val - lo) / max(hi - lo, 1e-9))) * _LIVE_SLIDER_STEPS))
+        self._live_sliders[row_i].blockSignals(True)
+        self._live_sliders[row_i].setValue(new_pos)
+        self._live_sliders[row_i].blockSignals(False)
+        self._live_labels[row_i].setText(f"{val:.2f}")
+
+    def _on_live_slider_moved(self, row_i: int, raw_val: int):
+        param = self._live_combos[row_i].currentText()
+        if param not in _LIVE_PARAMS:
+            return
+        lo, hi, setter, _ = _LIVE_PARAMS[param]
+        val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
+        self._live_labels[row_i].setText(f"{val:.2f}")
+        setter(self.config_manager.config, val)
+        # Sync forms so the change is visible in the detail fields
+        for form in (self.form_stim, self.form_chan, self.form_morph, self.form_env):
+            try:
+                form.refresh()
+            except Exception:
+                pass
+        # Debounced auto-run if HINES mode is active
+        self._live_timer.start()
+
+    def _on_live_timer_fired(self):
+        """Auto-run after debounce if HINES is active."""
+        if not self.btn_hines.isChecked():
+            return
+        try:
+            self.sim_controller.run_single(
+                self.config_manager.config,
+                on_success=self._on_simulation_done,
+                on_error=self._on_sim_error,
+            )
+        except Exception:
+            pass
+
+    # ─────────────────────────────────────────────────────────────────
+    #  SPARKLINE
+    # ─────────────────────────────────────────────────────────────────
+    def _update_sparkline(self, res) -> None:
+        """Update the mini Vm trace in the top bar after each simulation."""
+        try:
+            t = res.t
+            v = res.v_soma
+            # Downsample to ≤512 points for performance
+            step = max(1, len(t) // 512)
+            self._sparkline_curve.setData(t[::step], v[::step])
+            self._sparkline.setYRange(float(v.min()) - 2, float(v.max()) + 2, padding=0)
+        except Exception:
+            pass
 
     # ─────────────────────────────────────────────────────────────────
     #  STATUS BAR
@@ -720,6 +931,12 @@ class MainWindow(QMainWindow):
     def load_preset(self, name: str):
         if "—" in name or "Select" in name:
             return
+        # Keep both preset combos in sync without re-firing
+        for combo in (self.combo_presets, getattr(self, '_sidebar_preset_combo', None)):
+            if combo is not None and combo.currentText() != name:
+                combo.blockSignals(True)
+                combo.setCurrentText(name)
+                combo.blockSignals(False)
         self.config_manager.load_preset(name)
         self.config_manager.auto_select_jacobian_for_preset()
         self._sync_hines_button_state()
@@ -755,6 +972,22 @@ class MainWindow(QMainWindow):
         self._sync_stim_type_controls()
         self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
+        self._sync_live_deck_to_config()
+
+    def _sync_live_deck_to_config(self):
+        """Sync all live deck sliders/labels to reflect the current config values."""
+        for row_i, (combo, slider, lbl) in enumerate(
+                zip(self._live_combos, self._live_sliders, self._live_labels)):
+            param = combo.currentText()
+            if param not in _LIVE_PARAMS:
+                continue
+            lo, hi, _, getter = _LIVE_PARAMS[param]
+            val = getter(self.config_manager.config)
+            pos = int(round(max(0.0, min(1.0, (val - lo) / max(hi - lo, 1e-9))) * _LIVE_SLIDER_STEPS))
+            slider.blockSignals(True)
+            slider.setValue(pos)
+            slider.blockSignals(False)
+            lbl.setText(f"{val:.2f}")
 
     def _on_preset_mode_changed(self, _field_name: str, _value):
         """Reapply active preset when user changes a mode selector."""
@@ -951,8 +1184,10 @@ class MainWindow(QMainWindow):
                     dual_config=dual_cfg,
                     delay_target_name=self._delay_target_name,
                     delay_custom_index=self._delay_custom_index,
+                    result=res,
                 )
                 self.axon_biophysics.plot_axon_data(res, self.config_manager.config)
+                self._update_sparkline(res)
                 self.btn_export_plot.setEnabled(True)
                 self.btn_export.setEnabled(True)
                 self._status(
@@ -1016,8 +1251,10 @@ class MainWindow(QMainWindow):
             dual_config=dual_cfg,
             delay_target_name=self._delay_target_name,
             delay_custom_index=self._delay_custom_index,
+            result=res,
         )
         self.axon_biophysics.plot_axon_data(res, self.config_manager.config)
+        self._update_sparkline(res)
         self.btn_export_plot.setEnabled(True)
         self.btn_export.setEnabled(True)
         self._lock_ui(False)

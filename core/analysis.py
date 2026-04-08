@@ -1330,6 +1330,8 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         "lle_per_s": np.nan,
         "lyapunov_class": "disabled",
         "lyapunov_valid_pairs": 0,
+        "ftle_time_ms": np.array([]),
+        "ftle_log_divergence": np.array([]),
     }
     should_compute_lyapunov = bool(compute_lyapunov) if compute_lyapunov is not None else False
     if should_compute_lyapunov:
@@ -1347,6 +1349,8 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
             "lle_per_s": float(lyap_raw["lle_per_s"]) if np.isfinite(lyap_raw["lle_per_s"]) else np.nan,
             "lyapunov_class": classify_lyapunov(lyap_raw["lle_per_ms"]),
             "lyapunov_valid_pairs": int(lyap_raw["valid_pairs"]),
+            "ftle_time_ms": lyap_raw.get("ftle_time_ms", np.array([])),
+            "ftle_log_divergence": lyap_raw.get("ftle_log_divergence", np.array([])),
         }
 
     # Optional non-FFT modulation decomposition (default OFF).
@@ -1423,10 +1427,12 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         'first_spike_latency_ms': first_spike_lat,
         'refractory_period_ms':   refr_period,
         'firing_reliability':  firing_reliability,
-        'lle_per_ms':          lyap["lle_per_ms"],
-        'lle_per_s':           lyap["lle_per_s"],
-        'lyapunov_class':      lyap["lyapunov_class"],
+        'lle_per_ms':           lyap["lle_per_ms"],
+        'lle_per_s':            lyap["lle_per_s"],
+        'lyapunov_class':       lyap["lyapunov_class"],
         'lyapunov_valid_pairs': lyap["lyapunov_valid_pairs"],
+        'ftle_time_ms':         lyap["ftle_time_ms"],
+        'ftle_log_divergence':  lyap["ftle_log_divergence"],
         'modulation_valid':    modulation["valid"],
         'modulation_source':   modulation["source"],
         'modulation_plv':      modulation["plv"],
