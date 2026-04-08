@@ -5,7 +5,6 @@ Tabs: Parameters | Oscilloscope | Analytics | Topology | Guide
 Run modes: Standard | Monte-Carlo | Sweep | S-D Curve | Excit. Map | Stochastic
 """
 import csv
-import copy
 import os
 from pathlib import Path
 import numpy as np
@@ -21,6 +20,7 @@ from PySide6.QtGui import QIcon, QAction
 
 from gui.locales import T
 from gui.simulation_controller import SimulationController
+from gui.config_manager import ConfigManager
 from core.models import FullModelConfig
 from core.solver import NeuronSolver
 from core.errors import SimulationParameterError
@@ -79,9 +79,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.resize(1400, 900)
         self.setStyleSheet(self._STYLE)
-        self.config = FullModelConfig()
-        self._current_preset_name = ""
+        
+        # Initialize services
+        self.config_manager = ConfigManager()
         self.sim_controller = SimulationController()
+        
         self._dual_stim_signal_connected = False
         self._delay_target_name = "Terminal"
         self._delay_custom_index = 1
@@ -98,8 +100,36 @@ class MainWindow(QMainWindow):
         self._setup_top_bar()
         self._setup_tabs()
         self._setup_status_bar()
+        self._wire_service_signals()
         self.retranslate_ui()
         self.load_preset("A: Squid Giant Axon (HH 1952)")
+
+    def _wire_service_signals(self):
+        """Connect ConfigManager and SimulationController signals to MainWindow slots."""
+        # ConfigManager signals
+        self.config_manager.config_changed.connect(self._on_config_changed)
+        
+        # SimulationController signals
+        self.sim_controller.simulation_started.connect(self._on_simulation_started)
+        self.sim_controller.simulation_finished.connect(self._on_simulation_done)
+        self.sim_controller.progress_updated.connect(self._on_progress_updated)
+        self.sim_controller.error_occurred.connect(self._on_sim_error)
+    
+    def _on_config_changed(self):
+        """Handle config change signal from ConfigManager."""
+        self._refresh_all_forms()
+    
+    def _on_simulation_started(self):
+        """Handle simulation started signal from SimulationController."""
+        self._lock_ui(True)
+        self._status(T.tr('status_computing'))
+        QApplication.processEvents()
+    
+    def _on_progress_updated(self, current: int, total: int, value: float):
+        """Handle progress update signal from SimulationController."""
+        pct = int(100 * current / max(1, total))
+        self._status(f"Progress: {pct}% ({current}/{total}) — Value: {value:.3g}")
+        QApplication.processEvents()
 
     # ─────────────────────────────────────────────────────────────────
     #  TOP BAR
@@ -121,7 +151,7 @@ class MainWindow(QMainWindow):
             QPushButton:hover { background: #4CAF70; }
             QPushButton:disabled { background: #555568; color: #888; }
         """)
-        self.btn_run.clicked.connect(self.run_simulation)
+        self.btn_run.clicked.connect(lambda: self.sim_controller.run_single(self.config_manager.config, on_success=self._on_simulation_done, on_error=self._on_sim_error))
 
         # ── Stochastic button ────────────────────────────────────────
         self.btn_stoch = QPushButton("🎲 STOCHASTIC")
@@ -137,7 +167,7 @@ class MainWindow(QMainWindow):
             QPushButton:disabled { background: #555568; color: #888; }
         """)
         self.btn_stoch.setToolTip("Run Euler-Maruyama stochastic simulation (Langevin gate noise)")
-        self.btn_stoch.clicked.connect(self.run_stochastic)
+        self.btn_stoch.clicked.connect(lambda: self.sim_controller.run_stochastic(self.config_manager.config, 1, on_success=self._on_stoch_done, on_error=self._on_sim_error))
 
         # ── Sweep button ─────────────────────────────────────────────
         self.btn_sweep = QPushButton("↔ SWEEP")
@@ -220,7 +250,7 @@ class MainWindow(QMainWindow):
         self.btn_hines.setToolTip("Toggle native Hines solver (O(N) vs SciPy BDF)")
         self.btn_hines.clicked.connect(self._on_hines_toggled)
 
-        # ── Export button ─────────────────────────────────────────────
+        # ── Export button ─────────────────────────────────────
         self.btn_export = QPushButton("💾 Export CSV")
         self.btn_export_plot = QPushButton("Export Plot")
         self.btn_export_plot.setMinimumHeight(46)
@@ -259,6 +289,37 @@ class MainWindow(QMainWindow):
         """)
         self.btn_export_nml.clicked.connect(self.export_neuroml)
 
+        # ── Save/Load Config buttons ─────────────────────────────
+        self.btn_save_config = QPushButton("💾 Save Config")
+        self.btn_save_config.setMinimumHeight(46)
+        self.btn_save_config.setStyleSheet("""
+            QPushButton {
+                font-weight: bold; font-size: 13px;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #28A745, stop:1 #20893D);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #36A349; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_save_config.setToolTip("Save current configuration to JSON file")
+        self.btn_save_config.clicked.connect(self.save_config_as)
+
+        self.btn_load_config = QPushButton("📂 Open Config")
+        self.btn_load_config.setMinimumHeight(46)
+        self.btn_load_config.setStyleSheet("""
+            QPushButton {
+                font-weight: bold; font-size: 13px;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #6F42C1, stop:1 #4A1E61);
+                color: white; border-radius: 6px;
+            }
+            QPushButton:hover { background: #8B5CF6; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_load_config.setToolTip("Load configuration from JSON file")
+        self.btn_load_config.clicked.connect(self.load_config_from)
+
         # ── Preset selector ───────────────────────────────────────────
         self.lbl_preset = QLabel("Preset:")
         self.combo_presets = QComboBox()
@@ -282,6 +343,11 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.btn_excmap, 2)
         bar.addWidget(self.btn_export_plot, 2)
         bar.addWidget(self.btn_export, 2)
+        bar.addWidget(self.btn_export_nml, 2)
+        # ── Save/Load Config buttons ─────────────────────────────
+        bar.addWidget(self.btn_save_config, 2)
+        bar.addWidget(self.btn_load_config, 2)
+        # ── Preset selector ───────────────────────────────────
         bar.addWidget(self.lbl_preset)
         bar.addWidget(self.combo_presets, 3)
         bar.addWidget(self.lbl_lang)
@@ -316,7 +382,7 @@ class MainWindow(QMainWindow):
         self._delay_target_name, self._delay_custom_index = (
             self.oscilloscope.get_delay_target_selection()
         )
-        self.oscilloscope.sync_delay_controls_for_config(self.config)
+        self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         self.tabs.addTab(self.oscilloscope, "3) Oscilloscope")
 
         # ── Tab 3: Analytics ──────────────────────────────────────────
@@ -349,6 +415,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.guide_browser, "7) Guide")
 
         self._main_layout.addWidget(self.tabs, stretch=1)
+        
+        # Pass form widgets to ConfigManager for sync operations
+        self.config_manager.set_dual_stim_widget(self.dual_stim_widget)
+        self.config_manager.set_form_widgets(
+            self.form_stim, self.form_stim_loc, self.form_preset_modes
+        )
 
     def _build_params_tab(self):
         layout = QVBoxLayout(self.tab_params)
@@ -377,40 +449,40 @@ class MainWindow(QMainWindow):
 
         # Forms
         self.form_stim = PydanticFormWidget(
-            self.config.stim,
+            self.config_manager.config.stim,
             "Stimulation",
             on_change=self._on_stim_field_changed,
             hidden_fields={"Iext_absolute_nA"},
         )
         self.form_stim_loc = PydanticFormWidget(
-            self.config.stim_location,
+            self.config_manager.config.stim_location,
             "Stimulus Location",
             on_change=self._on_stim_loc_field_changed,
         )
         self.form_dfilter = PydanticFormWidget(
-            self.config.dendritic_filter,
+            self.config_manager.config.dendritic_filter,
             "Dendritic Filter",
             on_change=self._on_dfilter_field_changed,
         )
         self.form_preset_modes = PydanticFormWidget(
-            self.config.preset_modes,
+            self.config_manager.config.preset_modes,
             "Preset Modes (K/N/O)",
             on_change=self._on_preset_mode_changed
         )
         self.form_chan = PydanticFormWidget(
-            self.config.channels,
+            self.config_manager.config.channels,
             "Ion Channels",
             on_change=self._on_channel_field_changed,
         )
-        self.form_calcium = PydanticFormWidget(self.config.calcium, "Calcium Dynamics")
+        self.form_calcium = PydanticFormWidget(self.config_manager.config.calcium, "Calcium Dynamics")
         self.form_morph = PydanticFormWidget(
-            self.config.morphology,
+            self.config_manager.config.morphology,
             "Morphology",
             on_change=self._on_morph_field_changed,
         )
-        self.form_env = PydanticFormWidget(self.config.env, "Environment")
+        self.form_env = PydanticFormWidget(self.config_manager.config.env, "Environment")
         self.form_ana = PydanticFormWidget(
-            self.config.analysis,
+            self.config_manager.config.analysis,
             "Analysis / Sweep / Map",
         )
 
@@ -466,89 +538,6 @@ class MainWindow(QMainWindow):
     def _status(self, msg: str):
         self._sb.showMessage(msg)
 
-    def _update_params_hint(self):
-        """Refresh setup hint text so parameter priority is always explicit."""
-        dual_enabled = bool(getattr(self.dual_stim_widget, "config", None) and self.dual_stim_widget.config.enabled)
-        p = (self._current_preset_name or "").lower()
-        pm = self.config.preset_modes
-
-        mode_note = "Mode flags: none for this preset."
-        if "thalamic" in p:
-            mode_note = f"Mode flags: K mode={pm.k_mode}."
-        elif "alzheimer" in p:
-            mode_note = f"Mode flags: N mode={pm.alzheimer_mode}."
-        elif "hypoxia" in p:
-            mode_note = f"Mode flags: O mode={pm.hypoxia_mode}."
-        elif "multiple sclerosis" in p:
-            mode_note = "Mode flags: F is single-stage (no progressive/terminal switch)."
-
-        if dual_enabled:
-            priority_note = (
-                "Priority: Dual Stim is ON, so primary stimulation values from the Dual Stim tab "
-                "override main Stimulation/Stimulus Location fields."
-            )
-        else:
-            priority_note = (
-                "Priority: Dual Stim is OFF, so main Stimulation/Stimulus Location fields are active."
-            )
-
-        stim_note = ""
-        if self.config.stim.stim_type == "const" and (
-            "interneuron" in p or "hippocampal ca1" in p or "purkinje" in p
-        ):
-            stim_note = (
-                " Const here represents tonic drive proxy (current-clamp style), "
-                "not a single synaptic event; switch stim_type to alpha/AMPA/NMDA for event-like input."
-            )
-
-        jac = str(getattr(self.config.stim, "jacobian_mode", "dense_fd"))
-        is_multi = not bool(self.config.morphology.single_comp)
-        heavy_family = any(k in p for k in ("thalamic", "alzheimer", "hypoxia", "multiple sclerosis"))
-        if is_multi and heavy_family:
-            jac_note = (
-                f" Jacobian: {jac}. Recommended for heavy presets: sparse_fd/analytic_sparse "
-                "(faster than dense_fd)."
-            )
-        else:
-            jac_note = f" Jacobian: {jac}."
-
-        i_abs_nA = self._compute_display_iext_absolute_nA()
-        iext_note = f" | Iext(abs): {i_abs_nA:.3f} nA (read-only)"
-
-        if hasattr(self, "lbl_params_hint"):
-            self.lbl_params_hint.setText(
-                f"{priority_note}  {mode_note}{stim_note}{jac_note}{iext_note}"
-            )
-        if hasattr(self, "lbl_dual_priority"):
-            self.lbl_dual_priority.setText(priority_note)
-
-    def _auto_select_jacobian_for_preset(self):
-        """
-        Prefer sparse_fd for computationally heavy multi-compartment presets
-        unless user explicitly selected another non-dense mode or native_hines.
-        """
-        p = (self._current_preset_name or "").lower()
-        heavy_family = any(k in p for k in ("thalamic", "alzheimer", "hypoxia", "multiple sclerosis"))
-        if not heavy_family or bool(self.config.morphology.single_comp):
-            return
-        current_mode = str(getattr(self.config.stim, "jacobian_mode", "dense_fd"))
-        # Don't override user's Hines selection or other non-dense modes
-        if current_mode == "dense_fd":
-            self.config.stim.jacobian_mode = "sparse_fd"
-            # Update Hines button state to reflect change
-            if hasattr(self, 'btn_hines'):
-                self.btn_hines.setChecked(False)
-                self.btn_hines.setText("⚡ HINES")
-                self.btn_hines.setStyleSheet("""
-                    QPushButton {
-                        background: #313244; color: #89DCEB; border-radius: 6px;
-                        border: 1px solid #45475A;
-                        font-weight: bold;
-                    }
-                    QPushButton:hover { background: #3E3F5E; }
-                    QPushButton:disabled { color: #555568; }
-                """)
-
     def _sync_stim_type_controls(self):
         """Show only stimulation parameters relevant for current stim_type."""
         dual_enabled = bool(
@@ -558,7 +547,7 @@ class MainWindow(QMainWindow):
         stype = (
             str(getattr(self.dual_stim_widget.config, "primary_stim_type", "const"))
             if dual_enabled
-            else str(getattr(self.config.stim, "stim_type", "const"))
+            else str(getattr(self.config_manager.config.stim, "stim_type", "const"))
         )
         stim_fields = self.form_stim.widgets_map
         labels = self.form_stim.labels_map
@@ -589,24 +578,6 @@ class MainWindow(QMainWindow):
             if l is not None:
                 l.setVisible(is_visible)
 
-    def _compute_display_iext_absolute_nA(self) -> float:
-        """
-        Compute display-only absolute current from the active source of truth.
-
-        - Dual Stim ON  -> dual primary Iext is effective input.
-        - Dual Stim OFF -> canonical config.stim.Iext is effective input.
-        """
-        from core.unit_converter import density_to_absolute_current
-
-        d = float(self.config.morphology.d_soma)
-        area = np.pi * d * d
-        dual_cfg = getattr(self, "dual_stim_widget", None)
-        if dual_cfg is not None and bool(self.dual_stim_widget.config.enabled):
-            i_density = float(self.dual_stim_widget.config.primary_Iext)
-        else:
-            i_density = float(self.config.stim.Iext)
-        return float(density_to_absolute_current(i_density, area))
-
     def _set_stim_form_value(self, field_name: str, value):
         """Set stim-form widget value without emitting change callbacks."""
         w = self.form_stim.widgets_map.get(field_name)
@@ -621,30 +592,10 @@ class MainWindow(QMainWindow):
         finally:
             w.blockSignals(False)
 
-    def _sync_primary_stim_preview_from_dual(self):
-        """
-        Mirror active dual-primary stimulus into disabled main stim controls.
-        This removes ambiguity about which parameters actually drive the solver.
-        """
-        if not hasattr(self, "dual_stim_widget"):
-            return
-        dc = self.dual_stim_widget.config
-        if not bool(getattr(dc, "enabled", False)):
-            return
-
-        self._set_stim_form_value("stim_type", dc.primary_stim_type)
-        self._set_stim_form_value("Iext", float(dc.primary_Iext))
-        self._set_stim_form_value("pulse_start", float(dc.primary_start))
-        self._set_stim_form_value("pulse_dur", float(dc.primary_duration))
-        self._set_stim_form_value("alpha_tau", float(dc.primary_alpha_tau))
-
-        # Absolute current is displayed only in read-only hint text (SSoT).
-        self._update_params_hint()
-
     def _on_morph_field_changed(self, field_name: str, _value):
-        self.oscilloscope.sync_delay_controls_for_config(self.config)
+        self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         if field_name == "d_soma":
-            self._update_params_hint()
+            self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._refresh_topology_preview()
 
     def _on_stim_field_changed(self, field_name: str, value):
@@ -660,17 +611,17 @@ class MainWindow(QMainWindow):
             }
             syn_name = syn_map.get(stype)
             if syn_name is not None:
-                apply_synaptic_stimulus(self.config, syn_name)
+                apply_synaptic_stimulus(self.config_manager.config, syn_name)
             self._sync_stim_type_controls()
             self.form_stim.refresh()
         if field_name in {"Iext", "stim_type"}:
-            self._update_params_hint()
+            self.lbl_params_hint.setText(self.config_manager.get_hint_text())
             self.form_stim.refresh()
-        self._update_params_hint()
+        self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._refresh_topology_preview()
 
     def _on_stim_loc_field_changed(self, _field_name: str, _value):
-        self._update_params_hint()
+        self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._refresh_topology_preview()
 
     def _on_dfilter_field_changed(self, _field_name: str, _value):
@@ -706,55 +657,26 @@ class MainWindow(QMainWindow):
     def _sync_dual_stim_into_config(self) -> bool:
         """
         Sync dual-stimulation GUI config into main model config.
+        Delegated to ConfigManager.
 
         Returns
         -------
         bool
             True if dual stimulation is enabled.
         """
-        dual_enabled = bool(self.dual_stim_widget.config.enabled)
-        if dual_enabled:
-            self.config.dual_stimulation = self.dual_stim_widget.get_config()
-        else:
-            self.config.dual_stimulation = None
-        return dual_enabled
+        return self.config_manager.sync_dual_stim_into_config()
 
     def _sync_stim_controls_with_dual_mode(self):
-        """Disable conflicting primary-stim controls when dual stimulation is enabled."""
-        dual_enabled = bool(self.dual_stim_widget.config.enabled)
-        if dual_enabled:
-            self._sync_primary_stim_preview_from_dual()
-        else:
-            # Restore canonical values from config when dual mode is off.
-            self.form_stim.refresh()
-        overridden_stim_fields = (
-            "stim_type",
-            "Iext",
-            "pulse_start",
-            "pulse_dur",
-            "alpha_tau",
-            "stim_comp",
-        )
-        for field_name in overridden_stim_fields:
-            w = self.form_stim.widgets_map.get(field_name)
-            if w is not None:
-                w.setEnabled(not dual_enabled)
-        w_loc = self.form_stim_loc.widgets_map.get("location")
-        if w_loc is not None:
-            w_loc.setEnabled(not dual_enabled)
-
-        if dual_enabled:
-            self.form_stim.group_box.setTitle("Stimulation (Primary Overridden by Dual Stim)")
-            self.form_stim_loc.group_box.setTitle("Stimulus Location (Overridden by Dual Stim)")
-        else:
-            self.form_stim.group_box.setTitle("Stimulation")
-            self.form_stim_loc.group_box.setTitle("Stimulus Location")
+        """Disable conflicting primary-stim controls when dual stimulation is enabled.
+        Delegated to ConfigManager."""
+        self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_stim_type_controls()
-        self._update_params_hint()
+        self.lbl_params_hint.setText(self.config_manager.get_hint_text())
+        self.lbl_dual_priority.setText(self.config_manager.get_dual_priority_text())
 
     def _sync_preset_mode_controls(self):
         """Show only the mode selector that applies to the active preset."""
-        p = (self._current_preset_name or "").lower()
+        p = (self.config_manager.current_preset_name or "").lower()
         active = {
             "k_mode": "thalamic" in p,
             "alzheimer_mode": "alzheimer" in p,
@@ -777,21 +699,7 @@ class MainWindow(QMainWindow):
             self.form_preset_modes.group_box.setTitle("Preset Modes (K/N/O)")
         else:
             self.form_preset_modes.group_box.setTitle("Preset Modes (not used for current preset)")
-        self._update_params_hint()
-
-    def _active_mode_suffix(self) -> str:
-        """Compact status suffix for active preset mode selector state."""
-        if not self._current_preset_name:
-            return ""
-        name = self._current_preset_name
-        pm = self.config.preset_modes
-        if "Thalamic" in name:
-            return f" | K mode={pm.k_mode}"
-        if "Alzheimer" in name:
-            return f" | N mode={pm.alzheimer_mode}"
-        if "Hypoxia" in name:
-            return f" | O mode={pm.hypoxia_mode}"
-        return ""
+        self.lbl_params_hint.setText(self.config_manager.get_hint_text())
 
     # ─────────────────────────────────────────────────────────────────
     #  PRESET & LANGUAGE
@@ -799,47 +707,47 @@ class MainWindow(QMainWindow):
     def load_preset(self, name: str):
         if "—" in name or "Select" in name:
             return
-        self._current_preset_name = name
-        apply_preset(self.config, name)
-        self._auto_select_jacobian_for_preset()
+        self.config_manager.load_preset(name)
+        self.config_manager.auto_select_jacobian_for_preset()
         self._sync_hines_button_state()
         self._refresh_all_forms()
-        self.oscilloscope.sync_delay_controls_for_config(self.config)
+        self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         # Reset dual stim when loading new preset
         self.dual_stim_widget.load_default_preset()
-        self._sync_stim_controls_with_dual_mode()
+        self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
         self.topology.draw_neuron(
-            self.config,
+            self.config_manager.config,
             delay_target_name=self._delay_target_name,
             delay_custom_index=self._delay_custom_index,
         )
-        self._status(f"Preset applied: {name}{self._active_mode_suffix()}")
+        self._status(f"Preset applied: {name}{self.config_manager.active_mode_suffix()}")
 
     def _refresh_all_forms(self):
         for form in (self.form_morph, self.form_env, self.form_chan,
                      self.form_calcium, self.form_stim, self.form_stim_loc,
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
-        self._update_params_hint()
+        self.lbl_params_hint.setText(self.config_manager.get_hint_text())
+        self.lbl_dual_priority.setText(self.config_manager.get_dual_priority_text())
         self._sync_stim_type_controls()
-        self._sync_stim_controls_with_dual_mode()
+        self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
 
     def _on_preset_mode_changed(self, _field_name: str, _value):
         """Reapply active preset when user changes a mode selector."""
-        if not self._current_preset_name:
+        if not self.config_manager.current_preset_name:
             return
-        apply_preset(self.config, self._current_preset_name)
+        apply_preset(self.config_manager.config, self.config_manager.current_preset_name)
         self._refresh_all_forms()
-        self.oscilloscope.sync_delay_controls_for_config(self.config)
+        self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         self.topology.draw_neuron(
-            self.config,
+            self.config_manager.config,
             delay_target_name=self._delay_target_name,
             delay_custom_index=self._delay_custom_index,
         )
         self._status(
-            f"Preset mode updated: {self._current_preset_name}{self._active_mode_suffix()}"
+            f"Preset mode updated: {self.config_manager.current_preset_name}{self.config_manager.active_mode_suffix()}"
         )
 
     def change_language(self, lang: str):
@@ -881,7 +789,7 @@ class MainWindow(QMainWindow):
         """Sync Hines button state with current jacobian_mode in config."""
         if not hasattr(self, 'btn_hines'):
             return
-        is_hines = str(getattr(self.config.stim, "jacobian_mode", "dense_fd")) == "native_hines"
+        is_hines = str(getattr(self.config_manager.config.stim, "jacobian_mode", "dense_fd")) == "native_hines"
         self.btn_hines.setChecked(is_hines)
         if is_hines:
             self.btn_hines.setText("⚡ HINES ON")
@@ -909,7 +817,7 @@ class MainWindow(QMainWindow):
     def _on_hines_toggled(self, checked: bool):
         """Toggle native Hines solver mode."""
         if checked:
-            self.config.stim.jacobian_mode = "native_hines"
+            self.config_manager.config.stim.jacobian_mode = "native_hines"
             self.btn_hines.setStyleSheet("""
                 QPushButton {
                     background: #00BCD4; color: #FFFFFF; border-radius: 6px;
@@ -922,7 +830,7 @@ class MainWindow(QMainWindow):
             self.btn_hines.setText("⚡ HINES ON")
             self._sb.showMessage("Hines solver ACTIVE (experimental). Dense-FD BDF suspended.", 4000)
         else:
-            self.config.stim.jacobian_mode = "dense_fd"
+            self.config_manager.config.stim.jacobian_mode = "dense_fd"
             self.btn_hines.setStyleSheet("""
                 QPushButton {
                     background: #313244; color: #89DCEB; border-radius: 6px;
@@ -942,9 +850,9 @@ class MainWindow(QMainWindow):
         Hard errors stop execution, non-fatal warnings are surfaced in status bar.
         """
         try:
-            warnings = validate_simulation_config(self.config)
+            warnings = validate_simulation_config(self.config_manager.config)
             warnings.extend(
-                build_preset_mode_warnings(self.config, self._current_preset_name)
+                build_preset_mode_warnings(self.config_manager.config, self.config_manager.current_preset_name)
             )
         except SimulationParameterError as exc:
             QMessageBox.critical(self, "Parameter Validation Error", str(exc))
@@ -980,10 +888,10 @@ class MainWindow(QMainWindow):
         self._sync_dual_stim_into_config()
 
         # Capture config snapshot and flags for the simulation thread
-        run_mc = self.config.analysis.run_mc
-        run_bif = self.config.analysis.run_bifurcation
-        bif_param = self.config.analysis.bif_param
-        mc_trials = self.config.analysis.mc_trials
+        run_mc = self.config_manager.config.analysis.run_mc
+        run_bif = self.config_manager.config.analysis.run_bifurcation
+        bif_param = self.config_manager.config.analysis.bif_param
+        mc_trials = self.config_manager.config.analysis.mc_trials
 
         if run_mc:
             self._status(f"Monte-Carlo ({mc_trials} trials)…")
@@ -992,14 +900,14 @@ class MainWindow(QMainWindow):
         # Run simulation through SimulationController
         if run_mc:
             self.sim_controller.run_monte_carlo(
-                self.config,
+                self.config_manager.config,
                 mc_trials,
                 on_success=self._on_simulation_done,
                 on_error=self._on_sim_error
             )
         else:
             self.sim_controller.run_single(
-                self.config,
+                self.config_manager.config,
                 on_success=self._on_simulation_done,
                 on_error=self._on_sim_error
             )
@@ -1017,12 +925,12 @@ class MainWindow(QMainWindow):
                 self.analytics.update_analytics(res)
                 dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
                 self.topology.draw_neuron(
-                    self.config,
+                    self.config_manager.config,
                     dual_config=dual_cfg,
                     delay_target_name=self._delay_target_name,
                     delay_custom_index=self._delay_custom_index,
                 )
-                self.axon_biophysics.plot_axon_data(res, self.config)
+                self.axon_biophysics.plot_axon_data(res, self.config_manager.config)
                 self.btn_export_plot.setEnabled(True)
                 self.btn_export.setEnabled(True)
                 self._status(
@@ -1070,7 +978,7 @@ class MainWindow(QMainWindow):
 
         # Run stochastic simulation through SimulationController
         self.sim_controller.run_stochastic(
-            self.config,
+            self.config_manager.config,
             1,  # Single trial for Euler-Maruyama
             on_success=self._on_stoch_done,
             on_error=self._on_sim_error
@@ -1082,12 +990,12 @@ class MainWindow(QMainWindow):
         self.analytics.update_analytics(res)
         dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
         self.topology.draw_neuron(
-            self.config,
+            self.config_manager.config,
             dual_config=dual_cfg,
             delay_target_name=self._delay_target_name,
             delay_custom_index=self._delay_custom_index,
         )
-        self.axon_biophysics.plot_axon_data(res, self.config)
+        self.axon_biophysics.plot_axon_data(res, self.config_manager.config)
         self.btn_export_plot.setEnabled(True)
         self.btn_export.setEnabled(True)
         self._lock_ui(False)
@@ -1098,7 +1006,7 @@ class MainWindow(QMainWindow):
     #  3. SWEEP
     # ─────────────────────────────────────────────────────────────────
     def run_sweep(self):
-        ana = self.config.analysis
+        ana = self.config_manager.config.analysis
         if not hasattr(ana, 'sweep_param') or not ana.sweep_param:
             QMessageBox.warning(self, "Sweep",
                                 "Set sweep_param in the Analysis section first.")
@@ -1117,7 +1025,7 @@ class MainWindow(QMainWindow):
 
         # Run sweep through SimulationController
         self.sim_controller.run_sweep(
-            self.config,
+            self.config_manager.config,
             ana.sweep_param,
             param_vals,
             on_success=lambda res: self._on_sweep_done(res, ana.sweep_param),
@@ -1137,9 +1045,9 @@ class MainWindow(QMainWindow):
         if not self._preflight_validate():
             return
         dual_enabled = self._sync_dual_stim_into_config()
-        cfg_for_sd = self.config
+        cfg_for_sd = self.config_manager.config
         if dual_enabled:
-            cfg_for_sd = copy.deepcopy(self.config)
+            cfg_for_sd = copy.deepcopy(self.config_manager.config)
             cfg_for_sd.dual_stimulation = None
 
         self._lock_ui(True)
@@ -1174,12 +1082,12 @@ class MainWindow(QMainWindow):
         if not self._preflight_validate():
             return
         dual_enabled = self._sync_dual_stim_into_config()
-        cfg_for_excmap = self.config
+        cfg_for_excmap = self.config_manager.config
         if dual_enabled:
-            cfg_for_excmap = copy.deepcopy(self.config)
+            cfg_for_excmap = copy.deepcopy(self.config_manager.config)
             cfg_for_excmap.dual_stimulation = None
 
-        ana = self.config.analysis
+        ana = self.config_manager.config.analysis
         total = ana.excmap_NI * ana.excmap_ND
         self._lock_ui(True)
         if dual_enabled:
@@ -1290,12 +1198,63 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            _export(self.config, path=path)
+            _export(self.config_manager.config, path=path)
             self._status(f"NeuroML exported: {path}")
             QMessageBox.information(self, "NeuroML Export",
                                     f"Model exported to NeuroML 2.2:\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "NeuroML Export Error", str(e))
+
+    def save_config_as(self):
+        """Save current configuration to JSON file."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Configuration", "neuro_config.json",
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            self.config_manager.save_config_as(path)
+            self._status(f"Configuration saved to {path}")
+            QMessageBox.information(self, "Save Configuration", 
+                                    f"Configuration saved to:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", str(e))
+
+    def load_config_from(self):
+        """Load configuration from JSON file."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Configuration", "",
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if not path:
+            return
+        if self.config_manager.load_config_from(path):
+            self._refresh_all_forms()
+            self._status(f"Configuration loaded from {path}")
+            QMessageBox.information(self, "Load Configuration", 
+                                    f"Configuration loaded from:\n{path}")
+
+    def _refresh_all_forms(self):
+        """Refresh all form widgets to match current config."""
+        if hasattr(self, 'form_stim'):
+            self.form_stim.refresh()
+        if hasattr(self, 'form_stim_loc'):
+            self.form_stim_loc.refresh()
+        if hasattr(self, 'form_dfilter'):
+            self.form_dfilter.refresh()
+        if hasattr(self, 'form_chan'):
+            self.form_chan.refresh()
+        if hasattr(self, 'form_morph'):
+            self.form_morph.refresh()
+        if hasattr(self, 'form_calcium'):
+            self.form_calcium.refresh()
+        if hasattr(self, 'form_env'):
+            self.form_env.refresh()
+        if hasattr(self, 'form_ana'):
+            self.form_ana.refresh()
+        if hasattr(self, 'form_preset_modes'):
+            self.form_preset_modes.refresh()
 
 
 # ─────────────────────────────────────────────────────────────────────
