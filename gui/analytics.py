@@ -249,9 +249,10 @@ class AnalyticsWidget(QTabWidget):
         # Build the real canvas widget
         new_widget = getattr(self, spec['builder'])()
         title = spec['title']
+        self.blockSignals(True)
         self.removeTab(index)
         self.insertTab(index, new_widget, title)
-        self.setCurrentIndex(index)
+        self.blockSignals(False)
         widget.deleteLater()
 
         # Immediately populate with current data if available
