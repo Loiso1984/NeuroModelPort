@@ -395,6 +395,18 @@ class FullModelConfig(BaseModel):
     analysis:   AnalysisParams    = AnalysisParams()
     preset_modes: PresetModeParams = PresetModeParams()
 
+    def save_to_file(self, file_path: str):
+        """Serialize configuration to a JSON file."""
+        with open(file_path, 'w', encoding='utf-8') as f:
+            # Use Pydantic v2 model_dump_json
+            f.write(self.model_dump_json(indent=2))
+
+    @classmethod
+    def load_from_file(cls, file_path: str) -> "FullModelConfig":
+        """Create a FullModelConfig instance from a JSON file."""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return cls.model_validate_json(f.read())
+
     @property
     def Iext_absolute_nA(self) -> float:
         """Derived absolute stimulus current (nA) from canonical density source `stim.Iext`."""

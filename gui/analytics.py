@@ -141,6 +141,22 @@ def _spike_detect_kwargs_from_stats(stats: dict) -> dict:
     }
 
 
+class _LazyPlaceholder(QWidget):
+    """Sentinel widget occupying a tab slot until the user first visits it.
+    Detected by isinstance() in _on_tab_changed to trigger lazy construction."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl = QLabel("Click this tab to load the view")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet(
+            "color:#555; font-size:13px; font-style:italic;"
+        )
+        lay.addWidget(lbl)
+
+
 # ════════════════════════════════════════════════════════════════════
 class AnalyticsWidget(QTabWidget):
     """Main analytics widget — updated by MainWindow after each run."""
@@ -156,6 +172,7 @@ class AnalyticsWidget(QTabWidget):
         self._last_sd = None
         self._last_exc = None
         self._fullscreen_windows = []
+        self._building_lazy_tab = False  # re-entrancy guard for _on_tab_changed
         self._build_tabs()
 
     # ─────────────────────────────────────────────────────────────────
@@ -180,7 +197,7 @@ class AnalyticsWidget(QTabWidget):
 
         self.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
-        # 0 — Passport (text)
+        # ── Tab 0: Passport — always built (pure text, zero MPL cost) ──
         self.passport_view = QTextEdit()
         self.passport_view.setReadOnly(True)
         self.passport_view.setFont(QFont("Consolas", 10))
@@ -189,10 +206,92 @@ class AnalyticsWidget(QTabWidget):
         )
         self.addTab(self.passport_view, "Passport")
 
-        # 2 — Gate Dynamics (fixed pre-created grid; show/hide only in updates)
-        self._gates_max_rows = 10  # Vm + up to 9 gate traces
+        # ── Tabs 1–14: lazy placeholders — MPL canvas built on first visit ──
+        # Each entry: builder (creates attrs + returns QWidget), updater (may be None),
+        # needs_stats (updater takes (result, stats)), needs_morph (skip if no morph).
+        self._tab_specs: dict[int, dict] = {
+            1:  {'builder': '_build_tab_gates',      'updater': '_update_gates',
+                 'title': '⚙ Gates'},
+            2:  {'builder': '_build_tab_currents',   'updater': '_update_currents',
+                 'title': '⚡ Currents'},
+            3:  {'builder': '_build_tab_spike_mech', 'updater': '_update_spike_mechanism',
+                 'title': '🧪 Spike Mechanism',      'needs_stats': True},
+            4:  {'builder': '_build_tab_equil',      'updater': '_update_equil',
+                 'title': '📈 Equilibrium'},
+            5:  {'builder': '_build_tab_phase',      'updater': '_update_phase',
+                 'title': '🔄 Phase Plane',           'needs_stats': True},
+            6:  {'builder': '_build_tab_kymo',       'updater': '_update_kymo',
+                 'title': '🌊 Kymograph'},
+            7:  {'builder': '_build_tab_balance',    'updater': '_update_balance',
+                 'title': '⚖ Balance',               'needs_morph': True},
+            8:  {'builder': '_build_tab_energy',     'updater': '_update_energy',
+                 'title': '⚡ Energy'},
+            9:  {'builder': '_build_tab_bif',        'updater': None,
+                 'title': '🔀 Bifurcation'},
+            10: {'builder': '_build_tab_sweep',      'updater': None,
+                 'title': '↔ Sweep'},
+            11: {'builder': '_build_tab_sd',         'updater': None,
+                 'title': '⏱ S-D Curve'},
+            12: {'builder': '_build_tab_excmap',     'updater': None,
+                 'title': '🗺 Excit. Map'},
+            13: {'builder': '_build_tab_spectro',    'updater': '_update_spectrogram',
+                 'title': '🌈 Spectrogram'},
+            14: {'builder': '_build_tab_impedance',  'updater': '_update_impedance',
+                 'title': '🧲 Impedance'},
+        }
+        for idx in range(1, 15):
+            ph = _LazyPlaceholder()
+            self.addTab(ph, self._tab_specs[idx]['title'])
+
+        self.currentChanged.connect(self._on_tab_changed)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  LAZY TAB ACTIVATION
+    # ─────────────────────────────────────────────────────────────────
+    def _on_tab_changed(self, index: int):
+        """Build an MPL canvas the first time a lazy tab is visited."""
+        if self._building_lazy_tab:
+            return  # re-entrancy guard: removeTab/insertTab fire currentChanged too
+        widget = self.widget(index)
+        if not isinstance(widget, _LazyPlaceholder):
+            return
+        spec = self._tab_specs.get(index)
+        if spec is None:
+            return
+
+        # Build the real canvas, swap out the placeholder, restore focus
+        self._building_lazy_tab = True
+        try:
+            new_widget = getattr(self, spec['builder'])()
+            title = spec['title']
+            self.removeTab(index)
+            self.insertTab(index, new_widget, title)
+            self.setCurrentIndex(index)   # restore — removeTab may shift focus
+        finally:
+            self._building_lazy_tab = False
+        widget.deleteLater()
+
+        # Immediately populate with current data if available
+        if self._last_result is None:
+            return
+        updater_name = spec.get('updater')
+        if updater_name is None:
+            return
+        if spec.get('needs_morph') and not self._last_result.morph:
+            return
+        updater = getattr(self, updater_name)
+        if spec.get('needs_stats'):
+            if self._last_stats is not None:
+                updater(self._last_result, self._last_stats)
+        else:
+            updater(self._last_result)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  PER-TAB BUILDER METHODS  (called once on first visit)
+    # ─────────────────────────────────────────────────────────────────
+    def _build_tab_gates(self) -> QWidget:
+        self._gates_max_rows = 10
         self.fig_gates, cvs = _mpl_fig(self._gates_max_rows, 1)
-        self.addTab(_tab_with_toolbar(cvs), "⚙ Gates")
         self.cvs_gates = cvs
         self._gates_n_rows: int | None = None
         self._gates_axes: list = [
@@ -204,11 +303,11 @@ class AnalyticsWidget(QTabWidget):
         self._gates_line_v = None
         self._gates_lines: dict[str, object] = {}
         self._gates_signature: tuple[str, ...] = ()
+        return _tab_with_toolbar(cvs)
 
-        # 2.5 — Channel Currents (fixed pre-created grid; show/hide only in updates)
-        self._currents_max_rows = 12  # Vm + up to 11 channel traces
+    def _build_tab_currents(self) -> QWidget:
+        self._currents_max_rows = 12
         self.fig_currents, cvs = _mpl_fig(self._currents_max_rows, 1)
-        self.addTab(_tab_with_toolbar(cvs), "⚡ Currents")
         self.cvs_currents = cvs
         self._currents_n_rows: int | None = None
         self._currents_axes: list = [
@@ -221,12 +320,12 @@ class AnalyticsWidget(QTabWidget):
         self._currents_lines: dict[str, object] = {}
         self._currents_zero_lines: dict[str, object] = {}
         self._currents_signature: tuple[str, ...] = ()
+        return _tab_with_toolbar(cvs)
 
-        # 2.6 — Spike Mechanism (why spikes attenuate)
+    def _build_tab_spike_mech(self) -> QWidget:
         self.fig_spike_mech, cvs = _mpl_fig(2, 1)
         self.ax_spike_mech = [self.fig_spike_mech.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_spike_mech.set_tight_layout({'pad': 2.5})
-        self.addTab(_tab_with_toolbar(cvs), "🧪 Spike Mechanism")
         self.cvs_spike_mech = cvs
         self._spike_mech_init_done = False
         self._spike_mech_lines: dict[str, object] = {}
@@ -234,121 +333,130 @@ class AnalyticsWidget(QTabWidget):
         self._spike_mech_norm_lines: dict[str, object] = {}
         self._spike_mech_texts: dict[str, object] = {}
         self._spike_mech_ax2b = None
+        return _tab_with_toolbar(cvs)
 
-        # 3 — Equilibrium Curves
+    def _build_tab_equil(self) -> QWidget:
         self.fig_equil, cvs = _mpl_fig(2, 2)
         self.ax_equil = [self.fig_equil.add_subplot(2, 2, k) for k in range(1, 5)]
         self.fig_equil.set_tight_layout({'pad': 3.0})
-        self.addTab(_tab_with_toolbar(cvs), "📈 Equilibrium")
         self.cvs_equil = cvs
         self._equil_init_done = False
         self._equil_lines: dict[str, object] = {}
+        return _tab_with_toolbar(cvs)
 
-        # 4 — Phase Plane + Nullclines
+    def _build_tab_phase(self) -> QWidget:
         self.fig_phase, cvs = _mpl_fig(1, 1)
         self.ax_phase = self.fig_phase.add_subplot(1, 1, 1)
-        self.addTab(_tab_with_toolbar(cvs), "🔄 Phase Plane")
         self.cvs_phase = cvs
         self._phase_lines: dict[str, object] = {}
         self._phase_warning_text = None
+        return _tab_with_toolbar(cvs)
 
-        # 5 — Kymograph (pre-created 2-row layout; second row hidden for single-comp)
+    def _build_tab_kymo(self) -> QWidget:
         self.fig_kymo, cvs = _mpl_fig(2, 1)
         self._kymo_axes = [self.fig_kymo.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_kymo.set_tight_layout({'pad': 2.5})
-        self._kymo_cbar1: object = None   # colorbar handle (safe removal)
-        self._kymo_cbar2: object = None
+        self._kymo_cbar1 = None
+        self._kymo_cbar2 = None
         self._kymo_im1 = None
         self._kymo_im2 = None
         self._kymo_empty_text = None
-        self.addTab(_tab_with_toolbar(cvs), "🌊 Kymograph")
         self.cvs_kymo = cvs
+        return _tab_with_toolbar(cvs)
 
-        # 6 — Current Balance
+    def _build_tab_balance(self) -> QWidget:
         self.fig_balance, cvs = _mpl_fig(2, 1)
         self.ax_balance = [self.fig_balance.add_subplot(2, 1, k) for k in range(1, 3)]
-        self.addTab(_tab_with_toolbar(cvs), "⚖ Balance")
         self.cvs_balance = cvs
         self._balance_lines: dict[str, object] = {}
+        return _tab_with_toolbar(cvs)
 
-        # 7 — Energy
+    def _build_tab_energy(self) -> QWidget:
         self.fig_energy, cvs = _mpl_fig(2, 1)
         self.ax_energy = [self.fig_energy.add_subplot(2, 1, k) for k in range(1, 3)]
-        self.addTab(_tab_with_toolbar(cvs), "⚡ Energy")
         self.cvs_energy = cvs
         self._energy_lines: dict[str, object] = {}
+        return _tab_with_toolbar(cvs)
 
-        # 8 — Bifurcation
+    def _build_tab_bif(self) -> QWidget:
         self.fig_bif, cvs = _mpl_fig(2, 2)
         self.ax_bif = [self.fig_bif.add_subplot(2, 2, k) for k in range(1, 5)]
         self.tab_bif = _tab_with_toolbar(cvs)
-        self.addTab(self.tab_bif, "🔀 Bifurcation")
         self.cvs_bif = cvs
         self._bif_lines: dict[str, object] = {}
         self._bif_peak_scatter = None
+        return self.tab_bif
 
-        # 9 — Sweep
+    def _build_tab_sweep(self) -> QWidget:
         self.fig_sweep, cvs = _mpl_fig(2, 2)
         self.ax_sweep = [self.fig_sweep.add_subplot(2, 2, k) for k in range(1, 5)]
         self.tab_sweep = _tab_with_toolbar(cvs)
-        self.addTab(self.tab_sweep, "↔ Sweep")
         self.cvs_sweep = cvs
         self._sweep_cbar = None
         self._sweep_trace_lines: list = []
         self._sweep_trace_max = 64
         self._sweep_metric_lines: dict[str, object] = {}
+        return self.tab_sweep
 
-        # 10 — S-D Curve
+    def _build_tab_sd(self) -> QWidget:
         self.fig_sd, cvs = _mpl_fig(1, 2)
         self.ax_sd = [self.fig_sd.add_subplot(1, 2, k) for k in range(1, 3)]
         self.tab_sd = _tab_with_toolbar(cvs)
-        self.addTab(self.tab_sd, "⏱ S-D Curve")
         self.cvs_sd = cvs
         self._sd_lines: dict[str, object] = {}
+        return self.tab_sd
 
-        # 11 — Excitability Map
+    def _build_tab_excmap(self) -> QWidget:
         self.fig_excmap, cvs = _mpl_fig(1, 2)
         self.ax_excmap = [self.fig_excmap.add_subplot(1, 2, k) for k in range(1, 3)]
         self.tab_excmap = _tab_with_toolbar(cvs)
-        self.addTab(self.tab_excmap, "🗺 Excit. Map")
         self.cvs_excmap = cvs
         self._excmap_mesh = {"spikes": None, "freq": None}
         self._excmap_cbar = {"spikes": None, "freq": None}
+        return self.tab_excmap
 
-        # 12 — Spectrogram (STFT of soma membrane potential)
+    def _build_tab_spectro(self) -> QWidget:
         self.fig_spectro, cvs = _mpl_fig(2, 1)
         self.ax_spectro = [self.fig_spectro.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_spectro.set_tight_layout({'pad': 2.5})
-        self.addTab(_tab_with_toolbar(cvs), "🌈 Spectrogram")
         self.cvs_spectro = cvs
-        self._spectro_cbar = None  # colorbar handle for safe removal
+        self._spectro_cbar = None
         self._spectro_vm_line = None
         self._spectro_mesh = None
         self._spectro_fail_text = None
+        return _tab_with_toolbar(cvs)
 
-        # 13 — Membrane Impedance Z(f)
+    def _build_tab_impedance(self) -> QWidget:
         self.fig_impedance, cvs = _mpl_fig(2, 1)
         self.ax_impedance = [self.fig_impedance.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_impedance.set_tight_layout({'pad': 2.5})
-        self.addTab(_tab_with_toolbar(cvs), "🧲 Impedance")
         self.cvs_impedance = cvs
         self._impedance_lines: dict[str, object] = {}
         self._impedance_texts: dict[str, object] = {}
+        return _tab_with_toolbar(cvs)
 
     # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
     # ─────────────────────────────────────────────────────────────────
     def update_analytics(self, result):
-        """Update all standard tabs from a SimulationResult."""
+        """Update all already-built tabs from a SimulationResult.
+
+        Lazy tabs that haven't been visited yet are skipped — their guard
+        at the top of each _update_* method returns immediately if the
+        corresponding figure attribute doesn't exist yet.  They will be
+        populated in _on_tab_changed when the user first clicks the tab.
+        """
         self._last_result = result
-        from core.analysis import (full_analysis, compute_equilibrium_curves,
-                                    compute_optional_equilibrium,
-                                    compute_nullclines, compute_current_balance,
-                                    extract_gate_traces)
+        from core.analysis import full_analysis
         stats = full_analysis(result, compute_lyapunov=False)
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
+
+        # Tab 0 — always built
         self._update_passport(result, stats)
+
+        # Tabs 1–14 — each guard-checks hasattr(self, 'fig_*') and returns
+        # early if the canvas hasn't been created yet.
         self._update_gates(result)
         self._update_currents(result)
         self._update_spike_mechanism(result, stats)
@@ -610,6 +718,8 @@ class AnalyticsWidget(QTabWidget):
 
     def _update_impedance(self, result):
         """Update membrane impedance magnitude/phase panels from latest run."""
+        if not hasattr(self, 'fig_impedance'):
+            return  # tab not yet visited
         from core.analysis import reconstruct_stimulus_trace, compute_membrane_impedance
 
         ax_mag, ax_phase = self.ax_impedance
@@ -684,6 +794,8 @@ class AnalyticsWidget(QTabWidget):
     #  2 — GATE DYNAMICS
     # ─────────────────────────────────────────────────────────────────
     def _update_gates(self, result):
+        if not hasattr(self, 'fig_gates'):
+            return  # tab not yet visited
         from core.analysis import extract_gate_traces
         gates = extract_gate_traces(result)
         t = result.t
@@ -743,8 +855,10 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     def _update_currents(self, result):
         """Plot channel currents with membrane potential overlay."""
+        if not hasattr(self, 'fig_currents'):
+            return  # tab not yet visited
         t = result.t
-        
+
         # Safety check for currents dictionary
         if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
             logging.error("SimulationResult missing or invalid currents attribute")
@@ -832,9 +946,9 @@ class AnalyticsWidget(QTabWidget):
         self._spike_mech_init_done = True
 
     def _update_spike_mechanism(self, result, stats: dict):
-        """
-        Explain spike attenuation using per-spike ion/channel dynamics.
-        """
+        """Explain spike attenuation using per-spike ion/channel dynamics."""
+        if not hasattr(self, 'fig_spike_mech'):
+            return  # tab not yet visited
         from core.analysis import detect_spikes
 
         self._init_spike_mechanism_artists()
@@ -953,6 +1067,8 @@ class AnalyticsWidget(QTabWidget):
     #  3 — EQUILIBRIUM CURVES
     # ─────────────────────────────────────────────────────────────────
     def _update_equil(self, result):
+        if not hasattr(self, 'fig_equil'):
+            return  # tab not yet visited
         from core.analysis import (compute_equilibrium_curves,
                                     compute_optional_equilibrium)
         cfg   = result.config
@@ -1048,6 +1164,8 @@ class AnalyticsWidget(QTabWidget):
     #  4 — PHASE PLANE + NULLCLINES
     # ─────────────────────────────────────────────────────────────────
     def _update_phase(self, result, stats: dict):
+        if not hasattr(self, 'fig_phase'):
+            return  # tab not yet visited
         from core.analysis import compute_nullclines
 
         t     = result.t
@@ -1125,6 +1243,8 @@ class AnalyticsWidget(QTabWidget):
     #  5 — KYMOGRAPH
     # ─────────────────────────────────────────────────────────────────
     def _update_kymo(self, result):
+        if not hasattr(self, 'fig_kymo'):
+            return  # tab not yet visited
         n = result.n_comp
         ax1, ax2 = self._kymo_axes
 
@@ -1208,6 +1328,8 @@ class AnalyticsWidget(QTabWidget):
     #  6 — CURRENT BALANCE
     # ─────────────────────────────────────────────────────────────────
     def _update_balance(self, result):
+        if not hasattr(self, 'fig_balance'):
+            return  # tab not yet visited
         from core.analysis import compute_current_balance
         try:
             I_bal = compute_current_balance(result, result.morph)
@@ -1245,6 +1367,8 @@ class AnalyticsWidget(QTabWidget):
     #  7 — ENERGY
     # ─────────────────────────────────────────────────────────────────
     def _update_energy(self, result):
+        if not hasattr(self, 'fig_energy'):
+            return  # tab not yet visited
         t   = result.t
         dt  = float(t[1] - t[0]) if len(t) > 1 else 0.05
 
@@ -1305,6 +1429,8 @@ class AnalyticsWidget(QTabWidget):
     #  12 — SPECTROGRAM  (STFT of soma Vm)
     # ─────────────────────────────────────────────────────────────────
     def _update_spectrogram(self, result):
+        if not hasattr(self, 'fig_spectro'):
+            return  # tab not yet visited
         from scipy.signal import stft
         t  = result.t
         v  = result.v_soma
