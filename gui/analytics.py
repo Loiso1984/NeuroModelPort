@@ -1147,6 +1147,8 @@ class AnalyticsWidget(QTabWidget):
     #  4 — PHASE PLANE + NULLCLINES
     # ─────────────────────────────────────────────────────────────────
     def _update_phase(self, result, stats: dict):
+        if not hasattr(self, 'fig_phase'):
+            return  # tab not yet visited
         from core.analysis import compute_nullclines
 
         t     = result.t
@@ -1224,6 +1226,8 @@ class AnalyticsWidget(QTabWidget):
     #  5 — KYMOGRAPH
     # ─────────────────────────────────────────────────────────────────
     def _update_kymo(self, result):
+        if not hasattr(self, 'fig_kymo'):
+            return  # tab not yet visited
         n = result.n_comp
         ax1, ax2 = self._kymo_axes
 
@@ -1307,6 +1311,8 @@ class AnalyticsWidget(QTabWidget):
     #  6 — CURRENT BALANCE
     # ─────────────────────────────────────────────────────────────────
     def _update_balance(self, result):
+        if not hasattr(self, 'fig_balance'):
+            return  # tab not yet visited
         from core.analysis import compute_current_balance
         try:
             I_bal = compute_current_balance(result, result.morph)
@@ -1344,6 +1350,8 @@ class AnalyticsWidget(QTabWidget):
     #  7 — ENERGY
     # ─────────────────────────────────────────────────────────────────
     def _update_energy(self, result):
+        if not hasattr(self, 'fig_energy'):
+            return  # tab not yet visited
         t   = result.t
         dt  = float(t[1] - t[0]) if len(t) > 1 else 0.05
 
@@ -1404,6 +1412,8 @@ class AnalyticsWidget(QTabWidget):
     #  12 — SPECTROGRAM  (STFT of soma Vm)
     # ─────────────────────────────────────────────────────────────────
     def _update_spectrogram(self, result):
+        if not hasattr(self, 'fig_spectro'):
+            return  # tab not yet visited
         from scipy.signal import stft
         t  = result.t
         v  = result.v_soma
