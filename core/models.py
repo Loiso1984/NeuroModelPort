@@ -288,6 +288,9 @@ class SimulationParams(BaseModel):
     stoch_gating: bool  = Field(default=False, description="Langevin gate noise (Euler-Maruyama solver)")
     noise_sigma:  float = Field(default=0.0,   description="Additive membrane current noise sigma (uA/cm2)")
 
+    # Analysis
+    compute_lyapunov: bool = Field(default=False, description="Compute Lyapunov exponent (LLE) after simulation")
+
 
 class AnalysisParams(BaseModel):
     """Analysis, bifurcation, Monte-Carlo, Sweep, S-D curve, Excitability map."""

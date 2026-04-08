@@ -102,7 +102,20 @@ class MainWindow(QMainWindow):
         self._setup_status_bar()
         self._wire_service_signals()
         self.retranslate_ui()
-        self.load_preset("A: Squid Giant Axon (HH 1952)")
+        
+        # Try to restore last session, otherwise load default preset
+        import os
+        if os.path.exists(".last_session.json"):
+            if self.config_manager.load_config_from(".last_session.json"):
+                self._refresh_all_forms()
+                self._sync_hines_button_state()
+                self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
+                self.topology.draw_neuron(self.config_manager.config)
+                self._status("Restored previous session.")
+            else:
+                self.load_preset("A: Squid Giant Axon (HH 1952)")
+        else:
+            self.load_preset("A: Squid Giant Axon (HH 1952)")
 
     def _wire_service_signals(self):
         """Connect ConfigManager and SimulationController signals to MainWindow slots."""
@@ -722,6 +735,15 @@ class MainWindow(QMainWindow):
             delay_custom_index=self._delay_custom_index,
         )
         self._status(f"Preset applied: {name}{self.config_manager.active_mode_suffix()}")
+
+    def closeEvent(self, event):
+        """Save session state on application exit."""
+        try:
+            import os
+            self.config_manager.save_config_as(".last_session.json")
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _refresh_all_forms(self):
         for form in (self.form_morph, self.form_env, self.form_chan,

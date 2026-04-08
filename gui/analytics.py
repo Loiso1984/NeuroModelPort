@@ -20,11 +20,12 @@ Analytical tabs using matplotlib embedded in Qt:
 Lyapunov computation is explicit via `Compute LLE` action.
 """
 
+import logging
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget,
                                 QLabel, QTextEdit, QHBoxLayout,
-                                QSizePolicy, QScrollArea, QPushButton, QMainWindow)
+                                QSizePolicy, QScrollArea, QPushButton, QMainWindow, QComboBox)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
@@ -173,16 +174,44 @@ class AnalyticsWidget(QTabWidget):
         self._last_exc = None
         self._fullscreen_windows = []
         self._building_lazy_tab = False  # re-entrancy guard for _on_tab_changed
+        self._active_category = 'All'  # Current category filter
+        self._category_mapping = {  # Map tab indices to categories
+            1: 'Single', 2: 'Single', 3: 'Single', 4: 'Single',
+            5: 'Spectral', 6: 'Spectral', 7: 'Spectral',
+            8: 'Sweep', 9: 'Sweep', 10: 'Sweep', 11: 'Sweep',
+            12: 'Physics', 13: 'Physics', 14: 'Physics', 15: 'Physics',
+        }
+        self._all_tab_specs = {}  # Store all tab specs for rebuilding
         self._build_tabs()
 
     # ─────────────────────────────────────────────────────────────────
     #  TAB CONSTRUCTION
     # ─────────────────────────────────────────────────────────────────
     def _build_tabs(self):
+        # Corner widget with category filter buttons and actions
         corner = QWidget()
         corner_l = QHBoxLayout(corner)
         corner_l.setContentsMargins(0, 0, 0, 0)
-        corner_l.setSpacing(6)
+        corner_l.setSpacing(4)
+
+        # Category filter dropdown
+        lbl_cat = QLabel("Filter:")
+        lbl_cat.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        corner_l.addWidget(lbl_cat)
+
+        self._combo_category = QComboBox()
+        self._combo_category.addItems(['All', 'Single', 'Spectral', 'Sweep', 'Physics'])
+        self._combo_category.setCurrentText('All')
+        self._combo_category.setStyleSheet("""
+            QComboBox {
+                background:#313244; color:#CDD6F4; border:1px solid #45475A;
+                padding:2px; font-size:11px; min-width:80px;
+            }
+        """)
+        self._combo_category.currentTextChanged.connect(self._filter_category)
+        corner_l.addWidget(self._combo_category)
+
+        corner_l.addSpacing(10)
 
         self._btn_compute_lle = QPushButton("Compute LLE")
         self._btn_compute_lle.setToolTip("Run Lyapunov/LLE analysis explicitly for the latest simulation")
@@ -206,44 +235,58 @@ class AnalyticsWidget(QTabWidget):
         )
         self.addTab(self.passport_view, "Passport")
 
-        # ── Tabs 1–14: lazy placeholders — MPL canvas built on first visit ──
+        # ── Tabs 1–15: lazy placeholders — MPL canvas built on first visit ──
         # Each entry: builder (creates attrs + returns QWidget), updater (may be None),
         # needs_stats (updater takes (result, stats)), needs_morph (skip if no morph).
-        self._tab_specs: dict[int, dict] = {
-            1:  {'builder': '_build_tab_gates',      'updater': '_update_gates',
-                 'title': '⚙ Gates'},
-            2:  {'builder': '_build_tab_currents',   'updater': '_update_currents',
-                 'title': '⚡ Currents'},
-            3:  {'builder': '_build_tab_spike_mech', 'updater': '_update_spike_mechanism',
-                 'title': '🧪 Spike Mechanism',      'needs_stats': True},
-            4:  {'builder': '_build_tab_equil',      'updater': '_update_equil',
-                 'title': '📈 Equilibrium'},
-            5:  {'builder': '_build_tab_phase',      'updater': '_update_phase',
-                 'title': '🔄 Phase Plane',           'needs_stats': True},
-            6:  {'builder': '_build_tab_kymo',       'updater': '_update_kymo',
-                 'title': '🌊 Kymograph'},
-            7:  {'builder': '_build_tab_balance',    'updater': '_update_balance',
-                 'title': '⚖ Balance',               'needs_morph': True},
-            8:  {'builder': '_build_tab_energy',     'updater': '_update_energy',
-                 'title': '⚡ Energy'},
-            9:  {'builder': '_build_tab_bif',        'updater': None,
-                 'title': '🔀 Bifurcation'},
-            10: {'builder': '_build_tab_sweep',      'updater': None,
-                 'title': '↔ Sweep'},
-            11: {'builder': '_build_tab_sd',         'updater': None,
-                 'title': '⏱ S-D Curve'},
-            12: {'builder': '_build_tab_excmap',     'updater': None,
-                 'title': '🗺 Excit. Map'},
-            13: {'builder': '_build_tab_spectro',    'updater': '_update_spectrogram',
-                 'title': '🌈 Spectrogram'},
-            14: {'builder': '_build_tab_impedance',  'updater': '_update_impedance',
-                 'title': '🧲 Impedance'},
+        self._all_tab_specs: dict[int, dict] = {
+            1:  {'builder': '_build_tab_spike_mech', 'updater': '_update_spike_mechanism', 'title': '🧪 Spike Mechanism', 'needs_stats': True},
+            2:  {'builder': '_build_tab_phase',      'updater': '_update_phase',           'title': '🔄 Phase Plane', 'needs_stats': True},
+            3:  {'builder': '_build_tab_chaos',      'updater': '_update_chaos',           'title': '🦋 Chaos & LLE', 'needs_stats': True},
+            4:  {'builder': '_build_tab_kymo',       'updater': '_update_kymo',            'title': '🌊 Kymograph'},
+            5:  {'builder': '_build_tab_spectro',    'updater': '_update_spectrogram',     'title': '🌈 Spectrogram'},
+            6:  {'builder': '_build_tab_impedance',  'updater': '_update_impedance',       'title': '🧲 Impedance'},
+            7:  {'builder': '_build_tab_modulation', 'updater': '_update_modulation',      'title': '🎡 Phase-Locking', 'needs_stats': True},
+            8:  {'builder': '_build_tab_sweep',      'updater': None,                      'title': '↔ f-I Curve'},
+            9:  {'builder': '_build_tab_sd',         'updater': None,                      'title': '⏱ S-D Curve'},
+            10: {'builder': '_build_tab_excmap',     'updater': None,                      'title': '🗺 Excit. Map'},
+            11: {'builder': '_build_tab_bif',        'updater': None,                      'title': '🔀 Bifurcation'},
+            12: {'builder': '_build_tab_currents',   'updater': '_update_currents',        'title': '⚡ Currents'},
+            13: {'builder': '_build_tab_gates',      'updater': '_update_gates',           'title': '⚙ Gates'},
+            14: {'builder': '_build_tab_equil',      'updater': '_update_equil',           'title': '📈 Equilibrium'},
+            15: {'builder': '_build_tab_energy_balance', 'updater': '_update_energy_balance', 'title': '🔋 Energy & Balance', 'needs_morph': True},
         }
-        for idx in range(1, 15):
+        self._tab_specs = self._all_tab_specs.copy()  # Current visible tabs
+        for idx, spec in self._tab_specs.items():
             ph = _LazyPlaceholder()
-            self.addTab(ph, self._tab_specs[idx]['title'])
+            self.addTab(ph, spec['title'])
 
         self.currentChanged.connect(self._on_tab_changed)
+
+    def _filter_category(self, category: str):
+        """Filter visible tabs based on selected category using removeTab/insertTab."""
+        self._active_category = category
+
+        # Save current index
+        current_idx = self.currentIndex()
+        current_widget = self.widget(current_idx) if current_idx >= 0 else None
+
+        # Remove all tabs except Passport (index 0)
+        while self.count() > 1:
+            self.removeTab(1)
+
+        # Rebuild tabs based on category
+        for idx, spec in self._all_tab_specs.items():
+            tab_cat = self._category_mapping.get(idx)
+            if category == 'All' or tab_cat == category:
+                ph = _LazyPlaceholder()
+                self.addTab(ph, spec['title'])
+
+        # Restore current widget if it still exists
+        if current_widget is not None and current_widget != self.passport_view:
+            for i in range(self.count()):
+                if self.widget(i) == current_widget:
+                    self.setCurrentIndex(i)
+                    break
 
     # ─────────────────────────────────────────────────────────────────
     #  LAZY TAB ACTIVATION
@@ -364,18 +407,12 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_kymo = cvs
         return _tab_with_toolbar(cvs)
 
-    def _build_tab_balance(self) -> QWidget:
-        self.fig_balance, cvs = _mpl_fig(2, 1)
-        self.ax_balance = [self.fig_balance.add_subplot(2, 1, k) for k in range(1, 3)]
-        self.cvs_balance = cvs
-        self._balance_lines: dict[str, object] = {}
-        return _tab_with_toolbar(cvs)
-
-    def _build_tab_energy(self) -> QWidget:
-        self.fig_energy, cvs = _mpl_fig(2, 1)
-        self.ax_energy = [self.fig_energy.add_subplot(2, 1, k) for k in range(1, 3)]
+    def _build_tab_energy_balance(self) -> QWidget:
+        self.fig_energy, cvs = _mpl_fig(3, 1)
+        self.ax_energy = [self.fig_energy.add_subplot(3, 1, k) for k in range(1, 4)]
         self.cvs_energy = cvs
         self._energy_lines: dict[str, object] = {}
+        self._balance_lines: dict[str, object] = {}
         return _tab_with_toolbar(cvs)
 
     def _build_tab_bif(self) -> QWidget:
@@ -435,6 +472,23 @@ class AnalyticsWidget(QTabWidget):
         self._impedance_texts: dict[str, object] = {}
         return _tab_with_toolbar(cvs)
 
+    def _build_tab_chaos(self) -> QWidget:
+        self.fig_chaos, cvs = _mpl_fig(1, 1)
+        self.ax_chaos = self.fig_chaos.add_subplot(1, 1, 1)
+        self.cvs_chaos = cvs
+        self._chaos_lines = {}
+        self._chaos_texts = {}
+        return _tab_with_toolbar(cvs)
+
+    def _build_tab_modulation(self) -> QWidget:
+        self.fig_mod, cvs = _mpl_fig(1, 1)
+        # Use polar projection for phase-locking
+        self.ax_mod = self.fig_mod.add_subplot(1, 1, 1, polar=True)
+        self.cvs_mod = cvs
+        self._mod_bars = None
+        self._mod_vec = None
+        return _tab_with_toolbar(cvs)
+
     # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
     # ─────────────────────────────────────────────────────────────────
@@ -448,26 +502,28 @@ class AnalyticsWidget(QTabWidget):
         """
         self._last_result = result
         from core.analysis import full_analysis
-        stats = full_analysis(result, compute_lyapunov=False)
+        compute_lyap = result.config.sim.compute_lyapunov
+        stats = full_analysis(result, compute_lyapunov=compute_lyap)
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
 
         # Tab 0 — always built
         self._update_passport(result, stats)
 
-        # Tabs 1–14 — each guard-checks hasattr(self, 'fig_*') and returns
+        # Tabs 1–16 — each guard-checks hasattr(self, 'fig_*') and returns
         # early if the canvas hasn't been created yet.
-        self._update_gates(result)
-        self._update_currents(result)
         self._update_spike_mechanism(result, stats)
-        self._update_equil(result)
         self._update_phase(result, stats)
+        self._update_chaos(result, stats)
         self._update_kymo(result)
-        self._update_energy(result)
         self._update_spectrogram(result)
         self._update_impedance(result)
+        self._update_modulation(result, stats)
+        self._update_currents(result)
+        self._update_gates(result)
+        self._update_equil(result)
         if result.morph:
-            self._update_balance(result)
+            self._update_energy_balance(result)
 
 
     def _compute_lle_now(self):
@@ -479,6 +535,20 @@ class AnalyticsWidget(QTabWidget):
         stats = full_analysis(self._last_result, compute_lyapunov=True)
         self._last_stats = stats
         self._update_passport(self._last_result, stats)
+
+        # Force-build chaos tab if not visited yet
+        if not hasattr(self, 'fig_chaos'):
+            # Find the chaos tab index
+            chaos_idx = None
+            for idx, spec in self._tab_specs.items():
+                if spec['builder'] == '_build_tab_chaos':
+                    chaos_idx = idx
+                    break
+            if chaos_idx is not None:
+                # Trigger lazy build
+                self._on_tab_changed(chaos_idx)
+
+        self._update_chaos(self._last_result, stats)
 
     # ─────────────────────────────────────────────────────────────────
     #  0 — NEURON PASSPORT
@@ -789,6 +859,95 @@ class AnalyticsWidget(QTabWidget):
             show_legend=True,
         )
         self.cvs_impedance.draw_idle()
+
+    def _update_chaos(self, result, stats: dict):
+        """Update Lyapunov/Chaos tab with trajectory divergence plot."""
+        if not hasattr(self, 'fig_chaos'):
+            return  # tab not yet visited
+
+        t = stats.get('ftle_time_ms', [])
+        div = stats.get('ftle_log_divergence', [])
+
+        # Handle disabled/empty state
+        if len(t) == 0 or len(div) == 0 or stats.get('lyapunov_class') == 'disabled':
+            if 'div' not in self._chaos_texts:
+                self._chaos_texts['div'] = self.ax_chaos.text(
+                    0.5, 0.5, "LLE not computed. Click 'Compute LLE' button.",
+                    ha='center', va='center', transform=self.ax_chaos.transAxes,
+                    fontsize=12, color='#666666'
+                )
+            self._chaos_texts['div'].set_visible(True)
+            if 'div' in self._chaos_lines:
+                self._chaos_lines['div'].set_data([], [])
+            self.ax_chaos.set_xlim(0, 1)
+            self.ax_chaos.set_ylim(0, 1)
+            _configure_ax_interactive(self.ax_chaos, title='Lyapunov Exponent (Trajectory Separation)',
+                                    xlabel='Time (ms)', ylabel='Log Divergence ln(d)', show_legend=False)
+            self.cvs_chaos.draw_idle()
+            return
+
+        # Hide error message if present
+        if 'div' in self._chaos_texts:
+            self._chaos_texts['div'].set_visible(False)
+
+        # Create persistent line if needed
+        if 'div' not in self._chaos_lines:
+            self._chaos_lines['div'] = self.ax_chaos.plot([], [], color='#89B4FA', lw=2.5, label='Trajectory divergence')[0]
+            self._chaos_lines['trend'] = self.ax_chaos.plot([], [], color='#F38BA8', lw=1.5, ls='--', label='Linear trend')[0]
+
+        # Plot trajectory divergence
+        self._chaos_lines['div'].set_data(t, div)
+
+        # Add linear trend line
+        lle_per_ms = stats.get('lle_per_ms', np.nan)
+        if np.isfinite(lle_per_ms) and len(t) > 0:
+            t_trend = np.array([t[0], t[-1]])
+            # Use the first point as intercept and lle_per_ms as slope
+            div_trend = div[0] + lle_per_ms * (t_trend - t[0])
+            self._chaos_lines['trend'].set_data(t_trend, div_trend)
+            self._chaos_lines['trend'].set_visible(True)
+        else:
+            self._chaos_lines['trend'].set_visible(False)
+
+        self.ax_chaos.relim()
+        self.ax_chaos.autoscale_view()
+        _configure_ax_interactive(self.ax_chaos, title='Lyapunov Exponent (Trajectory Separation)',
+                                    xlabel='Time (ms)', ylabel='Log Divergence ln(d)', show_legend=True)
+        self.cvs_chaos.draw_idle()
+
+    def _update_modulation(self, result, stats: dict):
+        """Update Phase-Locking (Modulation) tab with polar plot."""
+        if not hasattr(self, 'fig_mod'):
+            return  # tab not yet visited
+
+        centers = stats.get('modulation_phase_bin_centers_rad', [])
+        rates = stats.get('modulation_phase_rate_hz', [])
+        plv = stats.get('modulation_plv', np.nan)
+
+        # Handle invalid state
+        if not stats.get('modulation_valid', False) or len(centers) == 0 or len(rates) == 0:
+            self.ax_mod.clear()
+            self.ax_mod.text(0.5, 0.5, "Modulation analysis disabled or insufficient spikes.",
+                           ha='center', va='center', transform=self.ax_mod.transAxes,
+                           fontsize=12, color='#666666')
+            self.cvs_mod.draw_idle()
+            return
+
+        # Clear and plot polar bar chart
+        self.ax_mod.clear()
+        width = 2 * np.pi / len(centers) if len(centers) > 0 else 0.1
+        self.ax_mod.bar(centers, rates, width=width, alpha=0.7, color='#89B4FA', edgecolor='#74C7EC')
+
+        # Plot mean vector (PLV)
+        if np.isfinite(plv) and 'modulation_preferred_phase_rad' in stats:
+            preferred_phase = stats['modulation_preferred_phase_rad']
+            max_rate = np.max(rates) if len(rates) > 0 else 1.0
+            self.ax_mod.plot([0, preferred_phase], [0, max_rate * plv], color='#F38BA8', lw=3,
+                           label=f"PLV: {plv:.3f}")
+            self.ax_mod.legend(loc='upper right', fontsize=8, bbox_to_anchor=(1.3, 1.1))
+
+        self.ax_mod.set_title("Spike Phase-Locking (Firing Rate vs LFP Phase)", fontsize=11, fontweight='bold', pad=15)
+        self.cvs_mod.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  2 — GATE DYNAMICS
@@ -1327,62 +1486,45 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     #  6 — CURRENT BALANCE
     # ─────────────────────────────────────────────────────────────────
-    def _update_balance(self, result):
-        if not hasattr(self, 'fig_balance'):
-            return  # tab not yet visited
-        from core.analysis import compute_current_balance
-        try:
-            I_bal = compute_current_balance(result, result.morph)
-        except Exception as e:
-            return
-
-        t  = result.t
-        err = float(np.max(np.abs(I_bal)))
-
-        ax1, ax2 = self.ax_balance
-        if "i_bal" not in self._balance_lines:
-            self._balance_lines["i_bal"] = ax1.plot([], [], color='#DC3232', lw=1)[0]
-            self._balance_lines["zero"] = ax1.axhline(0, color='k', lw=0.8, ls='--')
-            self._balance_lines["abs_err"] = ax2.semilogy([], [], color='#3264DC', lw=1)[0]
-
-        self._balance_lines["i_bal"].set_data(t, I_bal)
-        self._balance_lines["abs_err"].set_data(t, np.abs(I_bal) + 1e-12)
-        ax1.set_ylabel('I_balance (µA/cm²)')
-        ax1.set_title(f'Current Balance (soma) — max|error| = {err:.5f} µA/cm²  '
-                      f'{"✓ Good" if err < 0.05 else "⚠ Check solver settings"}')
-        ax1.grid(alpha=0.3)
-        ax1.relim()
-        ax1.autoscale_view()
-
-        ax2.set_xlabel('Time (ms)');  ax2.set_ylabel('|Error|  log scale')
-        ax2.set_title('Absolute balance error (log)')
-        ax2.grid(alpha=0.3)
-        ax2.relim()
-        ax2.autoscale_view()
-
-        self.fig_balance.tight_layout()
-        self.cvs_balance.draw_idle()
-
-    # ─────────────────────────────────────────────────────────────────
-    #  7 — ENERGY
-    # ─────────────────────────────────────────────────────────────────
-    def _update_energy(self, result):
+    def _update_energy_balance(self, result):
+        """Combined Energy & Balance tab with 3 rows: Balance Error, Cumulative Charge, Power."""
         if not hasattr(self, 'fig_energy'):
             return  # tab not yet visited
         t   = result.t
         dt  = float(t[1] - t[0]) if len(t) > 1 else 0.05
 
-        ax1, ax2 = self.ax_energy
+        ax1, ax2, ax3 = self.ax_energy
 
+        # ── Row 1: Current Balance Error (semilog) ─────────────────────
+        from core.analysis import compute_current_balance
+        try:
+            I_bal = compute_current_balance(result, result.morph)
+            err = float(np.max(np.abs(I_bal)))
+        except Exception as e:
+            I_bal = np.zeros_like(t)
+            err = 0.0
+
+        if "abs_err" not in self._balance_lines:
+            self._balance_lines["abs_err"] = ax1.semilogy([], [], color='#3264DC', lw=1)[0]
+        self._balance_lines["abs_err"].set_data(t, np.abs(I_bal) + 1e-12)
+        ax1.set_ylabel('|Error| (µA/cm²)')
+        ax1.set_title(f'Current Balance Error (log) — max|error| = {err:.5f} µA/cm²  '
+                      f'{"✓ Good" if err < 0.05 else "⚠ Check solver"}')
+        ax1.grid(alpha=0.3)
+        ax1.relim()
+        ax1.autoscale_view()
+        ax1.tick_params(labelbottom=False)
+
+        # ── Row 2: Cumulative Charge Q ─────────────────────────────────
         P_total = np.zeros_like(t)
         active_q = set()
         active_p = set()
-        
+
         # Safety check for currents dictionary
         if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
             logging.error("SimulationResult missing or invalid currents attribute")
             return
-            
+
         for name, curr in result.currents.items():
             color = CHAN_COLORS.get(name, '#888888')
             E_rev = _get_E_rev(name, result.config.channels)
@@ -1392,9 +1534,9 @@ class AnalyticsWidget(QTabWidget):
             active_q.add(q_key)
             active_p.add(p_key)
             if q_key not in self._energy_lines:
-                self._energy_lines[q_key] = ax1.plot([], [], color=color, lw=1.5, label=f'Q_{name}')[0]
+                self._energy_lines[q_key] = ax2.plot([], [], color=color, lw=1.5, label=f'Q_{name}')[0]
             if p_key not in self._energy_lines:
-                self._energy_lines[p_key] = ax2.plot([], [], color=color, lw=1, alpha=0.8, label=f'P_{name}')[0]
+                self._energy_lines[p_key] = ax3.plot([], [], color=color, lw=1, alpha=0.8, label=f'P_{name}')[0]
             self._energy_lines[q_key].set_data(t, Q_cum)
             P = np.abs(curr * (result.v_soma - E_rev))
             self._energy_lines[p_key].set_data(t, P)
@@ -1406,21 +1548,26 @@ class AnalyticsWidget(QTabWidget):
             if key.startswith("P_") and key not in active_p and key != "P_total":
                 line.set_data([], [])
 
-        if "P_total" not in self._energy_lines:
-            self._energy_lines["P_total"] = ax2.plot([], [], 'k-', lw=2, label='Total', zorder=5)[0]
-        self._energy_lines["P_total"].set_data(t, P_total)
-
-        ax1.set_ylabel('Cumulative charge (nC/cm²)')
-        ax1.set_title('Energy — Cumulative ionic charge transfer')
-        ax1.legend(fontsize=8);  ax1.grid(alpha=0.3)
-        ax1.relim()
-        ax1.autoscale_view()
-
-        ax2.set_xlabel('Time (ms)');  ax2.set_ylabel('Power (µW/cm²)')
-        ax2.set_title(f'Instantaneous power   ATP ≈ {result.atp_estimate:.3e} nmol/cm²')
-        ax2.legend(fontsize=8);  ax2.grid(alpha=0.3)
+        ax2.set_ylabel('Cumulative charge (nC/cm²)')
+        ax2.set_title('Energy — Cumulative ionic charge transfer')
+        ax2.legend(fontsize=8)
+        ax2.grid(alpha=0.3)
         ax2.relim()
         ax2.autoscale_view()
+        ax2.tick_params(labelbottom=False)
+
+        # ── Row 3: Instantaneous Power P ────────────────────────────────
+        if "P_total" not in self._energy_lines:
+            self._energy_lines["P_total"] = ax3.plot([], [], 'k-', lw=2, label='Total', zorder=5)[0]
+        self._energy_lines["P_total"].set_data(t, P_total)
+
+        ax3.set_xlabel('Time (ms)')
+        ax3.set_ylabel('Power (µW/cm²)')
+        ax3.set_title(f'Instantaneous power   ATP ≈ {result.atp_estimate:.3e} nmol/cm²')
+        ax3.legend(fontsize=8)
+        ax3.grid(alpha=0.3)
+        ax3.relim()
+        ax3.autoscale_view()
 
         self.fig_energy.tight_layout()
         self.cvs_energy.draw_idle()

@@ -15,7 +15,7 @@ v10.3 changes:
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                                QCheckBox, QGroupBox, QComboBox, QDoubleSpinBox, QLabel, QSpinBox, QPushButton, QMainWindow)
+                                QCheckBox, QGroupBox, QComboBox, QDoubleSpinBox, QLabel, QSpinBox, QPushButton, QMainWindow, QScrollArea, QFormLayout)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPageSize, QPdfWriter
 from .delay_target import junction_index, resolve_delay_target
@@ -204,9 +204,15 @@ class OscilloscopeWidget(QWidget):
 
         root.addWidget(self._win, stretch=10)
 
-        # ── Checkbox panel ────────────────────────────────────────────
+        # ── Scrollable Checkbox panel ─────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumWidth(240)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: #1E1E2E; border: none; }")
+
         cb_widget = QWidget()
-        cb_widget.setMaximumWidth(210)
         cb_widget.setStyleSheet("background:#1E1E2E;")
         cb_layout = QVBoxLayout(cb_widget)
         cb_layout.setContentsMargins(4, 4, 4, 4)
@@ -277,102 +283,88 @@ class OscilloscopeWidget(QWidget):
         # View controls
         grp_view = QGroupBox("View")
         grp_view.setStyleSheet("QGroupBox { color: #94E2D5; font-size:11px; }")
-        vl2 = QVBoxLayout(grp_view)
+        vl2 = QFormLayout(grp_view)
+        vl2.setContentsMargins(4, 8, 4, 4)
+        vl2.setVerticalSpacing(2)
 
-        lbl_theme = QLabel("Theme")
-        lbl_theme.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._combo_theme = QComboBox()
         self._combo_theme.addItems(list(PLOT_THEMES.keys()))
         self._combo_theme.setCurrentText(self._theme_name)
         self._combo_theme.currentTextChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(lbl_theme)
-        vl2.addWidget(self._combo_theme)
+        vl2.addRow("Theme", self._combo_theme)
 
-        lbl_lw = QLabel("Line Width Scale")
-        lbl_lw.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._spin_line_width = QDoubleSpinBox()
         self._spin_line_width.setRange(0.7, 3.0)
         self._spin_line_width.setSingleStep(0.1)
         self._spin_line_width.setDecimals(1)
         self._spin_line_width.setValue(self._line_width_scale)
         self._spin_line_width.valueChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(lbl_lw)
-        vl2.addWidget(self._spin_line_width)
+        vl2.addRow("Line Width", self._spin_line_width)
 
-        lbl_title = QLabel("Title Font (px)")
-        lbl_title.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._spin_title_px = QSpinBox()
         self._spin_title_px.setRange(10, 24)
         self._spin_title_px.setValue(self._title_font_px)
         self._spin_title_px.valueChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(lbl_title)
-        vl2.addWidget(self._spin_title_px)
+        vl2.addRow("Title Font", self._spin_title_px)
 
-        lbl_grid = QLabel("Grid Alpha")
-        lbl_grid.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._spin_grid_alpha = QDoubleSpinBox()
         self._spin_grid_alpha.setRange(0.05, 0.60)
         self._spin_grid_alpha.setSingleStep(0.05)
         self._spin_grid_alpha.setDecimals(2)
         self._spin_grid_alpha.setValue(self._grid_alpha)
         self._spin_grid_alpha.valueChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(lbl_grid)
-        vl2.addWidget(self._spin_grid_alpha)
+        vl2.addRow("Grid Alpha", self._spin_grid_alpha)
 
         self._cb_keep_reference = QCheckBox("Keep as Reference")
         self._cb_keep_reference.setChecked(False)
         self._cb_keep_reference.setToolTip("Freeze current soma trace as a grey reference line for comparison")
         self._cb_keep_reference.setStyleSheet("color:#A6ADC8; font-size:11px;")
-        vl2.insertWidget(4, self._cb_keep_reference)
+        vl2.addRow(self._cb_keep_reference)
 
         self._cb_presentation = QCheckBox("Presentation Mode")
         self._cb_presentation.setChecked(False)
         self._cb_presentation.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._cb_presentation.stateChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(self._cb_presentation)
+        vl2.addRow(self._cb_presentation)
 
         self._cb_show_spike_markers = QCheckBox("Show spike markers")
         self._cb_show_spike_markers.setChecked(True)
         self._cb_show_spike_markers.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._cb_show_spike_markers.stateChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(self._cb_show_spike_markers)
+        vl2.addRow(self._cb_show_spike_markers)
 
         self._cb_show_delay = QCheckBox("Show soma delay overlay")
         self._cb_show_delay.setChecked(True)
         self._cb_show_delay.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._cb_show_delay.stateChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(self._cb_show_delay)
+        vl2.addRow(self._cb_show_delay)
 
-        lbl_delay_target = QLabel("Delay Target")
-        lbl_delay_target.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._combo_delay_target = QComboBox()
         self._combo_delay_target.addItems(
             ["Terminal", "AIS", "Trunk Junction", "Custom Compartment"]
         )
         self._combo_delay_target.setCurrentText(self._delay_target_name)
         self._combo_delay_target.currentTextChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(lbl_delay_target)
-        vl2.addWidget(self._combo_delay_target)
+        vl2.addRow("Delay Target", self._combo_delay_target)
 
-        lbl_delay_comp = QLabel("Custom Comp Index")
-        lbl_delay_comp.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._spin_delay_comp = QSpinBox()
         self._spin_delay_comp.setRange(1, 1)
         self._spin_delay_comp.setValue(self._delay_custom_index)
         self._spin_delay_comp.setEnabled(False)
         self._spin_delay_comp.valueChanged.connect(self._on_view_settings_changed)
-        vl2.addWidget(lbl_delay_comp)
-        vl2.addWidget(self._spin_delay_comp)
+        vl2.addRow("Custom Comp", self._spin_delay_comp)
 
         self._btn_fullscreen = QPushButton("Full Screen")
         self._btn_fullscreen.setToolTip("Open oscilloscope plots in a maximized window")
         self._btn_fullscreen.clicked.connect(self.open_fullscreen)
-        vl2.addWidget(self._btn_fullscreen)
+        vl2.addRow(self._btn_fullscreen)
 
         cb_layout.addWidget(grp_view)
         cb_layout.addStretch()
 
-        root.addWidget(cb_widget, stretch=1)
+        scroll.setWidget(cb_widget)
+        root.addWidget(scroll, stretch=1)
+        self._update_row_visibility()
 
     def _copy_view_state_to(self, other: "OscilloscopeWidget"):
         """Copy current visual toggles/settings into another oscilloscope widget."""
@@ -420,18 +412,33 @@ class OscilloscopeWidget(QWidget):
     def _toggle_v(self, name):
         if name in self._curves_v:
             self._curves_v[name].setVisible(self._cb_v[name].isChecked())
+        self._update_row_visibility()
 
     def _toggle_g(self, name):
         if name in self._curves_gate:
             self._curves_gate[name].setVisible(self._cb_g[name].isChecked())
+        self._update_row_visibility()
 
     def _toggle_i(self, name):
         if name in self._curves_i:
             self._curves_i[name].setVisible(self._cb_i[name].isChecked())
+        self._update_row_visibility()
 
     def _toggle_ca(self):
         if 'calcium' in self._curves_ca:
             self._curves_ca['calcium'].setVisible(self._cb_ca['calcium'].isChecked())
+        self._update_row_visibility()
+
+    def _update_row_visibility(self):
+        """Collapse plot rows entirely if all their checkboxes are disabled."""
+        any_g = any(cb.isChecked() for cb in self._cb_g.values())
+        self._p_g.setVisible(any_g)
+
+        any_i = any(cb.isChecked() for cb in self._cb_i.values())
+        self._p_i.setVisible(any_i)
+
+        any_ca = self._cb_ca['calcium'].isChecked() if 'calcium' in self._cb_ca else False
+        self._p_ca.setVisible(any_ca)
 
     def _on_view_settings_changed(self, *_):
         self._theme_name = self._combo_theme.currentText()
@@ -834,6 +841,7 @@ class OscilloscopeWidget(QWidget):
         self._p_v.autoRange()
         self._p_g.autoRange()
         self._p_i.autoRange()
+        self._update_row_visibility()
 
     # ─────────────────────────────────────────────────────────────────
     #  UPDATE — Monte-Carlo cloud
