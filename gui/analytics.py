@@ -502,7 +502,7 @@ class AnalyticsWidget(QTabWidget):
         """
         self._last_result = result
         from core.analysis import full_analysis
-        compute_lyap = result.config.sim.compute_lyapunov
+        compute_lyap = result.config.stim.compute_lyapunov
         stats = full_analysis(result, compute_lyapunov=compute_lyap)
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
@@ -536,19 +536,14 @@ class AnalyticsWidget(QTabWidget):
         self._last_stats = stats
         self._update_passport(self._last_result, stats)
 
-        # Force-build chaos tab if not visited yet
-        if not hasattr(self, 'fig_chaos'):
-            # Find the chaos tab index
-            chaos_idx = None
-            for idx, spec in self._tab_specs.items():
-                if spec['builder'] == '_build_tab_chaos':
-                    chaos_idx = idx
-                    break
-            if chaos_idx is not None:
-                # Trigger lazy build
-                self._on_tab_changed(chaos_idx)
+        # Force-build chaos tab if not visited yet, using the robust helper
+        self._ensure_built('_build_tab_chaos')
 
         self._update_chaos(self._last_result, stats)
+
+        # Force synchronous repaint so the chart appears immediately
+        if hasattr(self, 'cvs_chaos'):
+            self.cvs_chaos.draw()
 
     # ─────────────────────────────────────────────────────────────────
     #  0 — NEURON PASSPORT
@@ -868,14 +863,21 @@ class AnalyticsWidget(QTabWidget):
         t = stats.get('ftle_time_ms', [])
         div = stats.get('ftle_log_divergence', [])
 
-        # Handle disabled/empty state
-        if len(t) == 0 or len(div) == 0 or stats.get('lyapunov_class') == 'disabled':
+        # Handle disabled/empty state: only block when there is truly no data
+        _no_data = (len(t) == 0 or len(div) == 0
+                    or stats.get('lyapunov_class') in ('disabled', None))
+        if _no_data:
+            msg = ("LLE not computed — run ≥1000 ms simulation, then click 'Compute LLE'."
+                   if stats.get('lyapunov_class') != 'disabled'
+                   else "LLE not computed. Click 'Compute LLE' button.")
             if 'div' not in self._chaos_texts:
                 self._chaos_texts['div'] = self.ax_chaos.text(
-                    0.5, 0.5, "LLE not computed. Click 'Compute LLE' button.",
+                    0.5, 0.5, msg,
                     ha='center', va='center', transform=self.ax_chaos.transAxes,
-                    fontsize=12, color='#666666'
+                    fontsize=11, color='#89B4FA'
                 )
+            else:
+                self._chaos_texts['div'].set_text(msg)
             self._chaos_texts['div'].set_visible(True)
             if 'div' in self._chaos_lines:
                 self._chaos_lines['div'].set_data([], [])
@@ -1664,7 +1666,19 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     #  8 — BIFURCATION
     # ─────────────────────────────────────────────────────────────────
+    def _ensure_built(self, builder_name: str):
+        """Force initialization of a lazy tab by its builder name."""
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, _LazyPlaceholder):
+                title = self.tabText(i)
+                for spec in self._all_tab_specs.values():
+                    if spec['title'] == title and spec['builder'] == builder_name:
+                        self._on_tab_changed(i)
+                        return
+
     def update_bifurcation(self, bif_data: list, param_name: str):
+        self._ensure_built('_build_tab_bif')
         self._last_bif_data = bif_data
         self._last_bif_param_name = param_name
         vals   = np.array([d['val']   for d in bif_data])
@@ -1725,6 +1739,7 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     def update_sweep(self, sweep_results: list, param_name: str):
         """sweep_results: list of (param_value, SimulationResult|None)"""
+        self._ensure_built('_build_tab_sweep')
         self._last_sweep_results = sweep_results
         self._last_sweep_param_name = param_name
         from core.analysis import detect_spikes
@@ -1801,6 +1816,7 @@ class AnalyticsWidget(QTabWidget):
     #  10 — S-D CURVE
     # ─────────────────────────────────────────────────────────────────
     def update_sd_curve(self, sd: dict):
+        self._ensure_built('_build_tab_sd')
         self._last_sd = sd
         dur  = sd['durations']
         I_th = sd['I_threshold']
@@ -1852,6 +1868,7 @@ class AnalyticsWidget(QTabWidget):
     #  11 — EXCITABILITY MAP
     # ─────────────────────────────────────────────────────────────────
     def update_excmap(self, exc: dict):
+        self._ensure_built('_build_tab_excmap')
         self._last_exc = exc
         I_r  = exc['I_range']
         d_r  = exc['dur_range']

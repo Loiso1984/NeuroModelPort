@@ -296,8 +296,8 @@ def run_euler_maruyama(config: FullModelConfig,
     s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10}
     stype = s_map.get(cfg.stim.stim_type, 0)
 
-    # Pre-allocate only what we need for downsampling
-    n_vars = 4 * n_comp + (n_comp if cfg.calcium.dynamic_Ca else 0)
+    # Pre-allocate using actual state size
+    n_vars = len(y)
     sol_buf  = np.zeros((n_vars, n_steps))
     sol_buf[:, 0] = y.copy()
 
@@ -398,7 +398,7 @@ def run_euler_maruyama(config: FullModelConfig,
         an_v = an(V);  bn_v = bn(V)
 
         # ── deterministic drift vector ───────────────────────────────
-        dy = np.empty_like(y)
+        dy = np.zeros_like(y)
         cur = 0
         dy[cur:cur + n_comp] = (I_stim - I_ion + I_ax) / morph['Cm_v'];  cur += n_comp
         dy[cur:cur + n_comp] = phi_na_v * (am_v * (1 - m)  - bm_v * m);        cur += n_comp
@@ -447,12 +447,21 @@ def run_euler_maruyama(config: FullModelConfig,
                                * sqrt_dt / morph['Cm_v'])
 
         # ── Clamp gates [0, 1] ──────────────────────────────────────
-        g_count = n_vars - n_comp - (n_comp if dyn_ca else 0)
-        y_new[n_comp:n_comp + g_count] = np.clip(
-            y_new[n_comp:n_comp + g_count], 0.0, 1.0
-        )
+        # Safely clip all gating variables (everything between V and Ca)
+        gate_start = n_comp
+        gate_end = n_comp * 4  # m, h, n
+        if ch.enable_Ih: gate_end += n_comp
+        if ch.enable_ICa: gate_end += 2 * n_comp
+        if ch.enable_IA: gate_end += 2 * n_comp
+        if ch.enable_ITCa: gate_end += 2 * n_comp
+        if ch.enable_IM: gate_end += n_comp
+        if ch.enable_NaP: gate_end += n_comp
+        if ch.enable_NaR: gate_end += 2 * n_comp
+        if ch.enable_SK: gate_end += n_comp
+
+        y_new[gate_start:gate_end] = np.clip(y_new[gate_start:gate_end], 0.0, 1.0)
         if dyn_ca:
-            y_new[-n_comp:] = np.maximum(y_new[-n_comp:], 1e-9)
+            y_new[gate_end:gate_end+n_comp] = np.maximum(y_new[gate_end:gate_end+n_comp], 1e-9)
 
         y = y_new
         sol_buf[:, k] = y

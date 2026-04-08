@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QCheckBox,
     QDoubleSpinBox,
+    QSlider,
 )
 from .delay_target import resolve_delay_target
 
@@ -114,6 +115,23 @@ class TopologyWidget(QWidget):
         controls.addStretch(1)
         layout.addLayout(controls)
 
+        # Time scrubber for heatmap
+        self._slider_layout = QHBoxLayout()
+        self._lbl_time = QLabel("t = 0.0 ms")
+        self._lbl_time.setStyleSheet("color:#89B4FA; font-weight:bold; min-width:80px;")
+
+        self._time_slider = QSlider(Qt.Orientation.Horizontal)
+        self._time_slider.setEnabled(False)
+        self._time_slider.valueChanged.connect(self._on_time_scrub)
+
+        self._slider_layout.addWidget(self._lbl_time)
+        self._slider_layout.addWidget(self._time_slider)
+        layout.addLayout(self._slider_layout)
+
+        self._heatmap_data = None
+        self._heatmap_time = None
+        self._soma_item = None   # direct reference for scrubber coloring
+
     def _on_reset_view(self):
         self._plot.autoRange()
 
@@ -204,6 +222,7 @@ class TopologyWidget(QWidget):
         dual_config=None,
         delay_target_name: str | None = None,
         delay_custom_index: int | None = None,
+        result=None,
     ):
         """Draw neuron morphology with optional dual-stim overlay and delay focus."""
         if delay_target_name is not None:
@@ -216,6 +235,7 @@ class TopologyWidget(QWidget):
         for item in self._draw_items:
             self._plot.removeItem(item)
         self._draw_items = []
+        self._soma_item = None
         mc = config.morphology
         ch = config.channels
 
@@ -291,6 +311,19 @@ class TopologyWidget(QWidget):
             self._plot.addItem(item)
             self._draw_items.append(item)
 
+        def _seg(x0, y0, x1, y1, color, comp_idx, width=2, style=Qt.PenStyle.SolidLine):
+            """Draw a segment tagged with comp_idx for voltage heatmap scrubbing."""
+            w = _scaled_width(width)
+            item = pg.PlotCurveItem(
+                [x0, x1], [y0, y1],
+                pen=pg.mkPen(_map_color(color), width=w, style=style),
+            )
+            item.comp_idx = comp_idx
+            item._heat_pen_width = w
+            self._plot.addItem(item)
+            self._draw_items.append(item)
+            return item
+
         def _marker(
             x,
             y,
@@ -331,6 +364,8 @@ class TopologyWidget(QWidget):
             symbol="o",
             name=f"Soma {mc.d_soma * 1e4:.0f}um",
         )
+        self._soma_item = soma_item  # keep direct reference for heatmap scrubber
+        soma_item.comp_idx = 0      # voltage index: soma is always compartment 0
         self._plot.addItem(soma_item)
         self._draw_items.append(soma_item)
         _txt(
@@ -362,6 +397,15 @@ class TopologyWidget(QWidget):
                 _marker,
             )
             self._plot.autoRange()
+            if result is not None:
+                self._heatmap_data = result.v_all
+                self._heatmap_time = result.t
+                self._time_slider.setRange(0, len(result.t) - 1)
+                self._time_slider.setEnabled(True)
+                self._on_time_scrub(self._time_slider.value())
+            else:
+                self._heatmap_data = None
+                self._time_slider.setEnabled(False)
             return
 
         ais_len = max(10, int(mc.N_ais) * 3) if int(mc.N_ais) > 0 else 0.0
@@ -378,7 +422,11 @@ class TopologyWidget(QWidget):
         if int(mc.N_ais) > 0:
             _glow(x, 0, x + ais_len, 0, "#FF1414", gw=20, alpha=80)
             _glow(x, 0, x + ais_len, 0, "#FF1414", gw=12, alpha=50)
-            _line(x, 0, x + ais_len, 0, "#FF3030", width=7)
+            _n_ais = int(mc.N_ais)
+            _sw = ais_len / _n_ais
+            for _i in range(_n_ais):
+                _seg(x + _i * _sw, 0, x + (_i + 1) * _sw, 0,
+                     "#FF3030", idx_ais_start + _i, width=7)
             _line(x + ais_len * 0.3, 0, x + ais_len * 0.6, 0, "#FFD060", width=3)
             _txt(
                 "Axon",
@@ -410,7 +458,11 @@ class TopologyWidget(QWidget):
         if int(mc.N_trunk) > 0:
             w_px = max(3.0, mc.d_trunk / mc.d_soma * 5.0)
             _glow(x, 0, x + trunk_len, 0, "#4080DC", gw=8, alpha=30)
-            _line(x, 0, x + trunk_len, 0, "#5090DC", width=w_px)
+            _n_trunk = int(mc.N_trunk)
+            _sw = trunk_len / _n_trunk
+            for _i in range(_n_trunk):
+                _seg(x + _i * _sw, 0, x + (_i + 1) * _sw, 0,
+                     "#5090DC", idx_trunk_start + _i, width=w_px)
             _txt(
                 f"Trunk ({mc.N_trunk}seg)\nd={mc.d_trunk * 1e4:.1f}um  Ra={mc.Ra:.0f} ohm*cm",
                 x + trunk_len / 2,
@@ -439,6 +491,7 @@ class TopologyWidget(QWidget):
             symbol="d",
             name="Fork",
         )
+        fork_item.comp_idx = idx_fork
         self._plot.addItem(fork_item)
         self._draw_items.append(fork_item)
         _txt("Fork", bif_x, 2.5, color="#FAF060", anchor=(0.5, 0.0), size=7)
@@ -455,7 +508,12 @@ class TopologyWidget(QWidget):
             b1_w = max(2.0, mc.d_b1 / mc.d_trunk * 3.5)
             b1_x, b1_y = bif_x + b1_len * 0.85, b1_len * 0.5
             _glow(bif_x, 0, b1_x, b1_y, "#40CC60", gw=6, alpha=40)
-            _line(bif_x, 0, b1_x, b1_y, "#40CC60", width=b1_w)
+            _n_b1 = int(mc.N_b1)
+            for _i in range(_n_b1):
+                _f0, _f1 = _i / _n_b1, (_i + 1) / _n_b1
+                _seg(bif_x + _f0 * (b1_x - bif_x), _f0 * b1_y,
+                     bif_x + _f1 * (b1_x - bif_x), _f1 * b1_y,
+                     "#40CC60", idx_b1_start + _i, width=b1_w)
             b1_item = pg.ScatterPlotItem(
                 x=[b1_x],
                 y=[b1_y],
@@ -464,6 +522,7 @@ class TopologyWidget(QWidget):
                 pen=pg.mkPen(_map_color("#208040"), width=_scaled_width(2)),
                 symbol="o",
             )
+            b1_item.comp_idx = idx_b1_end
             self._plot.addItem(b1_item)
             self._draw_items.append(b1_item)
             _txt(
@@ -487,7 +546,12 @@ class TopologyWidget(QWidget):
             b2_w = max(2.0, mc.d_b2 / mc.d_trunk * 3.5)
             b2_x, b2_y = bif_x + b2_len * 0.85, -b2_len * 0.5
             _glow(bif_x, 0, b2_x, b2_y, "#B040DC", gw=6, alpha=40)
-            _line(bif_x, 0, b2_x, b2_y, "#B040DC", width=b2_w)
+            _n_b2 = int(mc.N_b2)
+            for _i in range(_n_b2):
+                _f0, _f1 = _i / _n_b2, (_i + 1) / _n_b2
+                _seg(bif_x + _f0 * (b2_x - bif_x), _f0 * b2_y,
+                     bif_x + _f1 * (b2_x - bif_x), _f1 * b2_y,
+                     "#B040DC", idx_b2_start + _i, width=b2_w)
             b2_item = pg.ScatterPlotItem(
                 x=[b2_x],
                 y=[b2_y],
@@ -496,6 +560,7 @@ class TopologyWidget(QWidget):
                 pen=pg.mkPen(_map_color("#702090"), width=_scaled_width(2)),
                 symbol="o",
             )
+            b2_item.comp_idx = idx_b2_end
             self._plot.addItem(b2_item)
             self._draw_items.append(b2_item)
             _txt(
@@ -661,6 +726,54 @@ class TopologyWidget(QWidget):
 
         self._info.setText("  |  ".join(info_parts))
         self._plot.autoRange()
+
+        if result is not None:
+            self._heatmap_data = result.v_all
+            self._heatmap_time = result.t
+            self._time_slider.setRange(0, len(result.t) - 1)
+            self._time_slider.setEnabled(True)
+            self._on_time_scrub(self._time_slider.value())
+        else:
+            self._heatmap_data = None
+            self._time_slider.setEnabled(False)
+
+    @staticmethod
+    def _get_heat_color(v: float) -> QColor:
+        """Map membrane voltage (mV) to a blue→yellow→red heatmap color."""
+        v_norm = max(0.0, min(1.0, (v + 80.0) / 120.0))
+        if v_norm < 0.5:
+            r = int(2 * v_norm * 250)
+            g = int(2 * v_norm * 200)
+            b = 250
+        else:
+            r = 250
+            g = int(2 * (1.0 - v_norm) * 200)
+            b = int(2 * (1.0 - v_norm) * 250)
+        return QColor(r, g, b)
+
+    def _on_time_scrub(self, idx: int):
+        if self._heatmap_data is None or self._heatmap_time is None:
+            return
+        idx = max(0, min(idx, self._heatmap_data.shape[1] - 1))
+        t_val = self._heatmap_time[idx]
+        self._lbl_time.setText(f"t = {t_val:.1f} ms")
+
+        v_data = self._heatmap_data[:, idx]
+        n_comp = v_data.shape[0]
+
+        for item in self._draw_items:
+            if not hasattr(item, 'comp_idx'):
+                continue
+            ci = int(item.comp_idx)
+            if ci < 0 or ci >= n_comp:
+                continue
+            color = TopologyWidget._get_heat_color(float(v_data[ci]))
+            if isinstance(item, pg.ScatterPlotItem):
+                item.setBrush(pg.mkBrush(color))
+                item.update()
+            elif isinstance(item, pg.PlotCurveItem):
+                w = getattr(item, '_heat_pen_width', 2.0)
+                item.setPen(pg.mkPen(color, width=w))
 
     def _draw_single_comp(
         self,
