@@ -336,11 +336,10 @@ class NeuronSolver:
         _dydt_buf = np.empty(len(y0), dtype=np.float64)
 
         def _rhs_fn(t, y):
-            # Reuse pre-allocated buffer; rhs_multicompartment fills it in-place.
-            # .copy() returns a UNIQUE array to SciPy so BDF can safely retain
-            # references to previous evaluations in its history buffer.
-            
-            # time-loop that owns its own history — BDF will no longer be involved.
+            # Fill pre-allocated scratch buffer in-place (zero-alloc RHS eval),
+            # then return a COPY so SciPy BDF can safely retain references to
+            # previous evaluations in its internal history buffer.
+            # Native Hines path is fully zero-allocation and never reaches here.
             _dydt_buf.fill(0.0)
             rhs_multicompartment(t, y, physics_params, _dydt_buf)
             return _dydt_buf.copy()
@@ -739,66 +738,104 @@ class NeuronSolver:
         b_ca_v = self._build_b_ca_vector(cfg, morph)
 
         # ── Fixed dt for native loop ──
-        dt = cfg.stim.dt_eval   # use output step as integration step
+        dt_eval_f    = float(cfg.stim.dt_eval)
+        dt_internal  = min(0.025, dt_eval_f / 4.0)   # sub-step for accuracy
+
+        # ── Pack gbar_mat: rows = [gNa, gK, gL, gIh, gCa, gA, gSK, gTCa, gIM, gNaP, gNaR] ──
+        gbar_mat = np.array([
+            morph["gNa_v"], morph["gK_v"],  morph["gL_v"],
+            morph["gIh_v"], morph["gCa_v"], morph["gA_v"],
+            morph["gSK_v"], morph["gTCa_v"],morph["gIM_v"],
+            morph["gNaP_v"],morph["gNaR_v"],
+        ], dtype=np.float64)   # shape (11, n_comp)
+
+        # ── Pack phi_mat: rows = [na, k, ih, ca, ia, tca, im, nap, nar] ──
+        # IA and IM follow K-channel Q10; T-type Ca follows Ca Q10;
+        # persistent/resurgent Na follow Na Q10.
+        phi_mat = np.array([
+            phi_na,  phi_k,   phi_ih,
+            phi_ca,
+            phi_k,   # phi_ia  — IA uses K-family Q10 (Sah & Bhatt 1999)
+            phi_ca,  # phi_tca — T-type Ca same Q10 as L-type Ca
+            phi_k,   # phi_im  — M-type uses K-family Q10 (Yamada 1989)
+            phi_nap, phi_nar,
+        ], dtype=np.float64)   # shape (9, n_comp)
+
+        event_times_arr   = np.array(cfg.stim.event_times or [], dtype=np.float64)
+        event_times_arr_2 = np.array(
+            getattr(cfg.stim, "event_times_2", None) or [], dtype=np.float64)
+
+        physics = create_physics_params(
+            n_comp              = np.int32(n_comp),
+            en_ih               = bool(cc.enable_Ih),
+            en_ica              = bool(cc.enable_ICa),
+            en_ia               = bool(cc.enable_IA),
+            en_sk               = bool(cc.enable_SK),
+            dyn_ca              = bool(cfg.calcium.dynamic_Ca),
+            en_itca             = bool(cc.enable_ITCa),
+            en_im               = bool(cc.enable_IM),
+            en_nap              = bool(cc.enable_NaP),
+            en_nar              = bool(cc.enable_NaR),
+            gbar_mat            = gbar_mat,
+            ena                 = float(cc.ENa),
+            ek                  = float(cc.EK),
+            el                  = float(cc.EL),
+            eih                 = float(cc.E_Ih),
+            ea                  = float(cc.E_A),
+            cm_v                = morph["Cm_v"].astype(np.float64),
+            l_data              = morph["L_data"].astype(np.float64),
+            l_indices           = morph["L_indices"].astype(np.int32),
+            l_indptr            = morph["L_indptr"].astype(np.int32),
+            phi_mat             = phi_mat,
+            t_kelvin            = float(t_kelvin),
+            ca_ext              = float(cfg.calcium.Ca_ext),
+            ca_rest             = float(cfg.calcium.Ca_rest),
+            tau_ca              = float(cfg.calcium.tau_Ca),
+            b_ca                = b_ca_v,
+            mg_ext              = float(getattr(cfg.env, "Mg_ext", 1.0)),
+            tau_sk              = float(getattr(cc, "tau_SK", 15.0)),
+            stype               = np.int32(stype),
+            iext                = float(cfg.stim.Iext),
+            t0                  = float(cfg.stim.pulse_start),
+            td                  = float(cfg.stim.pulse_dur),
+            atau                = float(cfg.stim.alpha_tau),
+            zap_f0_hz           = float(cfg.stim.zap_f0_hz),
+            zap_f1_hz           = float(cfg.stim.zap_f1_hz),
+            event_times_arr     = event_times_arr,
+            n_events            = np.int32(len(event_times_arr)),
+            event_times_arr_2   = event_times_arr_2,
+            n_events_2          = np.int32(len(event_times_arr_2)),
+            stim_comp           = np.int32(cfg.stim.stim_comp),
+            stim_mode           = np.int32(stim_mode),
+            use_dfilter_primary = np.int32(use_dfilter_primary),
+            dfilter_attenuation = float(dfilter_attenuation),
+            dfilter_tau_ms      = float(dfilter_tau_ms),
+            dual_stim_enabled   = np.int32(dual_stim_enabled),
+            stype_2             = np.int32(stype_2),
+            iext_2              = float(iext_2),
+            t0_2                = float(t0_2),
+            td_2                = float(td_2),
+            atau_2              = float(atau_2),
+            zap_f0_hz_2         = float(zap_f0_2),
+            zap_f1_hz_2         = float(zap_f1_2),
+            stim_comp_2         = np.int32(stim_comp_2),
+            stim_mode_2         = np.int32(stim_mode_2),
+            use_dfilter_secondary   = np.int32(use_dfilter_secondary),
+            dfilter_attenuation_2   = float(dfilter_attenuation_2),
+            dfilter_tau_ms_2        = float(dfilter_tau_ms_2),
+        )
 
         t_out, y_out = run_native_loop(
             y0.astype(np.float64),
             float(cfg.stim.t_sim),
-            float(dt),
-            float(cfg.stim.dt_eval),
-            # Morphology
-            int(n_comp),
-            morph["Cm_v"].astype(np.float64),
+            dt_internal,
+            dt_eval_f,
+            physics,
             l_diag,
             morph["parent_idx"].astype(np.int32),
             morph["hines_order"].astype(np.int32),
             morph["g_axial_to_parent"].astype(np.float64),
             morph["g_axial_parent_to_child"].astype(np.float64),
-            # Conductance vectors
-            morph["gNa_v"], morph["gK_v"], morph["gL_v"],
-            morph["gIh_v"], morph["gCa_v"], morph["gA_v"],
-            morph["gSK_v"], morph["gTCa_v"], morph["gIM_v"],
-            morph["gNaP_v"], morph["gNaR_v"],
-            # Reversal potentials
-            float(cc.ENa), float(cc.EK), float(cc.EL),
-            float(cc.E_Ih), float(cc.E_A),
-            # Temperature scaling
-            phi_na, phi_k, phi_ih, phi_ca, phi_nap, phi_nar,
-            # Channel flags
-            bool(cc.enable_Ih), bool(cc.enable_ICa), bool(cc.enable_IA),
-            bool(cc.enable_SK), bool(cc.enable_ITCa), bool(cc.enable_IM),
-            bool(cc.enable_NaP), bool(cc.enable_NaR),
-            bool(cfg.calcium.dynamic_Ca),
-            # State offsets
-            int(off_m), int(off_h), int(off_n),
-            int(off_r), int(off_s), int(off_u),
-            int(off_a), int(off_b), int(off_p), int(off_q),
-            int(off_w), int(off_x), int(off_y), int(off_j),
-            int(off_zsk), int(off_ca),
-            int(off_vfilt_primary), int(off_vfilt_secondary),
-            int(use_dfilter_primary), int(use_dfilter_secondary),
-            float(dfilter_attenuation), float(dfilter_tau_ms),
-            float(dfilter_attenuation_2), float(dfilter_tau_ms_2),
-            # Calcium
-            float(cfg.calcium.Ca_rest), float(cfg.calcium.Ca_ext),
-            float(cfg.calcium.tau_Ca), b_ca_v, float(t_kelvin),
-            # SK
-            float(cc.tau_SK),
-            # Primary stimulus
-            int(stype),
-            float(cfg.stim.Iext), float(cfg.stim.pulse_start),
-            float(cfg.stim.pulse_dur), float(cfg.stim.alpha_tau),
-            float(cfg.stim.zap_f0_hz), float(cfg.stim.zap_f1_hz),
-            np.array(cfg.stim.event_times or [], dtype=np.float64),
-            int(len(cfg.stim.event_times or [])),
-            int(cfg.stim.stim_comp), int(stim_mode),
-            # Secondary stimulus
-            int(dual_stim_enabled),
-            int(stype_2), float(iext_2), float(t0_2), float(td_2), float(atau_2),
-            float(zap_f0_2), float(zap_f1_2),
-            np.array(getattr(cfg.stim, "event_times_2", None) or [], dtype=np.float64),
-            int(len(getattr(cfg.stim, "event_times_2", None) or [])),
-            int(stim_comp_2), int(stim_mode_2),
         )
 
         res = SimulationResult(t_out, y_out, n_comp, cfg)
@@ -887,243 +924,7 @@ class NeuronSolver:
             })
         return results
 
-    # ─────────────────────────────────────────────────────────────────
-    def run_native(self, custom_config: "FullModelConfig | None" = None) -> SimulationResult:
-        """Run simulation with the native Hines solver (v11.1).
-        
-        Fixed-step Backward-Euler + TRUE O(N) Hines tree solver.
-        Returns a standard SimulationResult compatible with GUI and analytics.
-        """
-        from core.native_loop import run_native_loop
-        import scipy.sparse
-        import time
-
-        cfg = custom_config or self.config
-        
-        logger.info("Using NATIVE HINES solver (O(N) tree solver, Exponential Euler)")
-        t_start = time.time()
-
-        morph  = MorphologyBuilder.build(cfg)
-        n_comp = morph['N_comp']
-
-        y0 = self.registry.compute_initial_states(-65.0, cfg)
-
-        # ── Stimulus maps (mirrors run_single) ──
-        s_map = {
-            "const": 0, "pulse": 1, "alpha": 2, "ou_noise": 3,
-            "AMPA": 4, "NMDA": 5, "GABAA": 6, "GABAB": 7,
-            "Kainate": 8, "Nicotinic": 9, "zap": 10,
-        }
-        stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
-        t_kelvin = cfg.env.T_celsius + 273.15
-
-        # --- Primary stimulus source ---
-        primary_stim_type = cfg.stim.stim_type
-        primary_iext = cfg.stim.Iext
-        primary_t0 = cfg.stim.pulse_start
-        primary_td = cfg.stim.pulse_dur
-        primary_atau = cfg.stim.alpha_tau
-        primary_zap_f0 = cfg.stim.zap_f0_hz
-        primary_zap_f1 = cfg.stim.zap_f1_hz
-        primary_stim_comp = cfg.stim.stim_comp
-        primary_location = cfg.stim_location.location
-
-        # --- Dual stimulation detection and parameter preparation ---
-        dual_stim_enabled = 0
-        dual_cfg = getattr(cfg, 'dual_stimulation', None)
-        if dual_cfg is not None and hasattr(dual_cfg, 'enabled') and dual_cfg.enabled:
-            dual_stim_enabled = 1
-            # When dual stimulation is enabled, primary parameters come from dual config.
-            primary_stim_type = getattr(dual_cfg, "primary_stim_type", primary_stim_type)
-            primary_iext = getattr(dual_cfg, "primary_Iext", primary_iext)
-            primary_t0 = getattr(dual_cfg, "primary_start", primary_t0)
-            primary_td = getattr(dual_cfg, "primary_duration", primary_td)
-            primary_atau = getattr(dual_cfg, "primary_alpha_tau", primary_atau)
-            primary_location = getattr(dual_cfg, "primary_location", primary_location)
-            primary_stim_comp = 0
-            primary_zap_f0 = getattr(dual_cfg, "primary_zap_f0_hz", primary_zap_f0)
-            primary_zap_f1 = getattr(dual_cfg, "primary_zap_f1_hz", primary_zap_f1)
-
-        stype = s_map.get(primary_stim_type, 0)
-        stim_mode = stim_mode_map.get(primary_location, 0)
-        use_dfilter_primary = int(
-            stim_mode == 2
-            and cfg.dendritic_filter.enabled
-            and cfg.dendritic_filter.tau_dendritic_ms > 0.0
-        )
-        if use_dfilter_primary == 1:
-            y0 = np.concatenate([y0, np.array([0.0])])
-
-        dfilter_attenuation = 1.0
-        if stim_mode == 2 and cfg.dendritic_filter.space_constant_um > 0:
-            dfilter_attenuation = np.exp(
-                -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
-            )
-        dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
-
-        # Secondary stimulus defaults.
-        stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 0.0
-        zap_f0_2, zap_f1_2 = primary_zap_f0, primary_zap_f1
-        stim_comp_2, stim_mode_2 = 0, 0
-        use_dfilter_secondary = 0
-        dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
-
-        if dual_stim_enabled == 1:
-            stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
-            iext_2 = dual_cfg.secondary_Iext
-            t0_2 = dual_cfg.secondary_start
-            td_2 = dual_cfg.secondary_duration
-            atau_2 = dual_cfg.secondary_alpha_tau
-            stim_comp_2 = 0
-            stim_mode_2 = stim_mode_map.get(dual_cfg.secondary_location, 0)
-            zap_f0_2 = getattr(dual_cfg, "secondary_zap_f0_hz", zap_f0_2)
-            zap_f1_2 = getattr(dual_cfg, "secondary_zap_f1_hz", zap_f1_2)
-            dfilter_tau_ms_2 = dual_cfg.secondary_tau_dendritic_ms
-            use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
-            if use_dfilter_secondary == 1:
-                y0 = np.concatenate([y0, np.array([0.0])])
-            if stim_mode_2 == 2 and dual_cfg.secondary_space_constant_um > 0:
-                dfilter_attenuation_2 = np.exp(
-                    -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
-                )
-
-        # ── Event-driven stimulus preparation ──
-        event_times = []
-        if stype in [4, 5, 6, 7, 8, 9]:  # AMPA, NMDA, GABAA, GABAB, Kainate, Nicotinic
-            event_times = np.array([primary_t0])
-        n_events = len(event_times)
-
-        # ── Conductance vs current mode ──
-        is_conductance_based = stype in [4, 5, 6, 7, 8, 9]
-        is_nmda = stype == 5
-        is_cond_2 = stype_2 in [4, 5, 6, 7, 8, 9]
-        is_nmda_2 = stype_2 == 5
-
-        # ── Synaptic reversal potentials ──
-        e_syn = _get_syn_reversal(stype)
-        e_syn_2 = _get_syn_reversal(stype_2) if dual_stim_enabled else 0.0
-
-        # ── State offsets ──
-        off_s = 0
-        off_m = n_comp
-        off_h = off_m + n_comp
-        off_n = off_h + n_comp
-        off_r = off_n + n_comp
-        off_w = off_r + n_comp
-        off_w_im = off_w + n_comp
-        off_ca = off_w_im + n_comp
-        off_zsk = off_ca + n_comp
-        off_itca = off_zsk + n_comp
-        off_im = off_itca + n_comp
-        off_nap = off_im + n_comp
-        off_nar = off_nap + n_comp
-        off_vfilt_primary = off_nar + n_comp
-        off_vfilt_secondary = off_vfilt_primary + n_comp
-
-        # ── Morphology arrays for Hines ──
-        parent_idx = morph['parent_idx']
-        hines_order = morph['hines_order']
-        g_axial_to_parent = morph['g_axial_to_parent']
-        g_axial_parent_to_child = morph['g_axial_parent_to_child']
-
-        # ── Conductance arrays ──
-        gna_v = morph['gNa_v']
-        gk_v = morph['gK_v']
-        gl_v = morph['gL_v']
-        gih_v = morph['gIh_v']
-        gca_v = morph['gCa_v']
-        ga_v = morph['gA_v']
-        gsk_v = morph['gSK_v']
-        gtca_v = morph['gTCa_v']
-        gim_v = morph['gIM_v']
-        gnap_v = morph['gNaP_v']
-        gnar_v = morph['gNaR_v']
-
-        # ── Reversal potentials ──
-        ena = cfg.channels.E_Na
-        ek = cfg.channels.E_K
-        el = cfg.channels.E_L
-        eih = cfg.channels.E_Ih
-        ea = cfg.channels.E_A
-        en_ica = cfg.channels.E_Ca
-        en_sk = cfg.channels.E_SK
-        en_itca = cfg.channels.E_TCa
-        en_im = cfg.channels.E_IM
-        en_nap = cfg.channels.E_NaP
-        en_nar = cfg.channels.E_NaR
-
-        # ── Channel enable flags ──
-        en_sk = cfg.channels.enable_SK
-        en_itca = cfg.channels.enable_TCa
-        en_im = cfg.channels.enable_IM
-        en_nap = cfg.channels.enable_NaP
-        en_nar = cfg.channels.enable_NaR
-        dyn_ca = cfg.calcium.dynamic_Ca
-
-        # ── Membrane capacitance ──
-        cm_v = np.full(n_comp, cfg.channels.C_m)
-
-        # ── Build B_Ca vector ──
-        b_ca_v = self._build_b_ca_vector(cfg, morph)
-
-        # ── Time stepping: internal vs output ──
-        # Hodgkin-Huxley needs dt ≤ 0.025ms for stability
-        dt_eval = float(cfg.stim.dt_eval)
-        dt_internal = min(0.025, dt_eval / 4.0)  # At least 4 micro-steps per output point
-        
-        t_out, y_out = run_native_loop(
-            y0.astype(np.float64),
-            float(cfg.stim.t_sim), dt_internal, dt_eval,
-            int(n_comp),
-            parent_idx.astype(np.int64),
-            hines_order.astype(np.int64),
-            # Morphology arrays
-            g_axial_to_parent.astype(np.float64),
-            g_axial_parent_to_child.astype(np.float64),
-            cm_v.astype(np.float64),
-            # Conductance arrays
-            gna_v.astype(np.float64), gk_v.astype(np.float64), gl_v.astype(np.float64),
-            gih_v.astype(np.float64), gca_v.astype(np.float64), ga_v.astype(np.float64),
-            gsk_v.astype(np.float64), gtca_v.astype(np.float64), gim_v.astype(np.float64),
-            gnap_v.astype(np.float64), gnar_v.astype(np.float64),
-            # Reversal potentials
-            ena, ek, el, eih, ea, en_ica, en_sk, en_itca, en_im, en_nap, en_nar,
-            # Environment
-            t_kelvin, cfg.env.Ca_ext, cfg.calcium.Ca_rest,
-            cfg.calcium.tau_Ca, cfg.env.Mg_ext, cfg.calcium.tau_SK,
-            # Channel enable flags
-            cfg.channels.enable_Ih, cfg.channels.enable_ICa, cfg.channels.enable_IA,
-            cfg.channels.enable_SK, cfg.channels.enable_ITCa, cfg.channels.enable_IM,
-            cfg.channels.enable_NaP, cfg.channels.enable_NaR, dyn_ca,
-            # Primary stimulus
-            stype, primary_iext, primary_t0, primary_td, primary_atau,
-            primary_zap_f0, primary_zap_f1, primary_stim_comp, stim_mode,
-            use_dfilter_primary, dfilter_attenuation, dfilter_tau_ms,
-            # Secondary stimulus
-            dual_stim_enabled, stype_2, iext_2, t0_2, td_2, atau_2,
-            zap_f0_2, zap_f1_2, stim_comp_2, stim_mode_2,
-            use_dfilter_secondary, dfilter_attenuation_2, dfilter_tau_ms_2,
-            # Event-driven
-            event_times.astype(np.float64), n_events,
-            # Synaptic
-            is_conductance_based, is_nmda,
-            e_syn,
-        )
-
-        # ── Package result ──
-        result = SimulationResult(t_out, y_out, n_comp, cfg)
-        result.morph = morph
-        result.currents = {
-            'gna_v': gna_v, 'gk_v': gk_v, 'gl_v': gl_v, 'gih_v': gih_v,
-            'gca_v': gca_v, 'ga_v': ga_v, 'gsk_v': gsk_v, 'gtca_v': gtca_v,
-            'gim_v': gim_v, 'gnap_v': gnap_v, 'gnar_v': gnar_v,
-        }
-        result.atp_estimate = self._estimate_atp_consumption(result, cfg)
-        
-        t_elapsed = time.time() - t_start
-        logger.info("Native Hines solver completed in %.2fs", t_elapsed)
-        
-        return result
+    # (ghost run_native removed — authoritative version at line 615)
 
 
 def worker_task(config: FullModelConfig) -> SimulationResult:
