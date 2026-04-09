@@ -349,13 +349,14 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs)
 
     def _build_tab_currents(self) -> QWidget:
-        self._currents_max_rows = 12
-        self.fig_currents, cvs = _mpl_fig(self._currents_max_rows, 1)
+        self._currents_max_plots = 12
+        # Use 4x3 grid layout instead of 12x1 to make graphs larger
+        self.fig_currents, cvs = _mpl_fig(4, 3)
         self.cvs_currents = cvs
-        self._currents_n_rows: int | None = None
+        self._currents_n_plots: int | None = None
         self._currents_axes: list = [
-            self.fig_currents.add_subplot(self._currents_max_rows, 1, k)
-            for k in range(1, self._currents_max_rows + 1)
+            self.fig_currents.add_subplot(4, 3, k)
+            for k in range(1, 13)
         ]
         for ax in self._currents_axes:
             ax.set_visible(False)
@@ -363,6 +364,7 @@ class AnalyticsWidget(QTabWidget):
         self._currents_lines: dict[str, object] = {}
         self._currents_zero_lines: dict[str, object] = {}
         self._currents_signature: tuple[str, ...] = ()
+        self.fig_currents.set_tight_layout({'pad': 3.0, 'w_pad': 1.5, 'h_pad': 1.5})
         return _tab_with_toolbar(cvs)
 
     def _build_tab_spike_mech(self) -> QWidget:
@@ -1015,7 +1017,7 @@ class AnalyticsWidget(QTabWidget):
     #  2.5 — CHANNEL CURRENTS (NEW)
     # ─────────────────────────────────────────────────────────────────
     def _update_currents(self, result):
-        """Plot channel currents with membrane potential overlay."""
+        """Plot channel currents with membrane potential overlay using 4x3 grid layout."""
         if not hasattr(self, 'fig_currents'):
             return  # tab not yet visited
         t = result.t
@@ -1028,21 +1030,21 @@ class AnalyticsWidget(QTabWidget):
         # Count non-zero current traces
         currents = {name: curr for name, curr in result.currents.items()
                     if np.max(np.abs(curr)) > 1e-9}
-        n_rows = max(2, len(currents) + 1)
+        n_plots = max(2, len(currents) + 1)
         currents_signature = tuple(currents.keys())
-        n_rows = min(n_rows, self._currents_max_rows)
+        n_plots = min(n_plots, self._currents_max_plots)
 
-        if self._currents_n_rows != n_rows or self._currents_signature != currents_signature:
-            self._currents_n_rows = n_rows
+        if self._currents_n_plots != n_plots or self._currents_signature != currents_signature:
+            self._currents_n_plots = n_plots
             self._currents_signature = currents_signature
             self._currents_line_v = None
             self._currents_lines = {}
             self._currents_zero_lines = {}
 
         for idx, ax in enumerate(self._currents_axes):
-            ax.set_visible(idx < n_rows)
+            ax.set_visible(idx < n_plots)
 
-        # Row 0: Membrane potential
+        # Plot 0: Membrane potential (top-left)
         ax_v = self._currents_axes[0]
         if self._currents_line_v is None:
             self._currents_line_v = ax_v.plot([], [], color='#2060CC', lw=2.5, alpha=0.9)[0]
@@ -1053,10 +1055,10 @@ class AnalyticsWidget(QTabWidget):
                                   xlabel='', ylabel='V (mV)', show_legend=False)
         ax_v.tick_params(labelbottom=False)
 
-        # Remaining rows: Individual currents
+        # Remaining plots: Individual currents
         visible_names: set[str] = set()
         for i, (name, curr) in enumerate(currents.items(), start=1):
-            if i >= n_rows:
+            if i >= n_plots:
                 break
             ax = self._currents_axes[i]
             color = CHAN_COLORS.get(name, '#888888')
@@ -1070,9 +1072,8 @@ class AnalyticsWidget(QTabWidget):
             self._currents_zero_lines[name].set_visible(True)
             ax.relim()
             ax.autoscale_view()
-            ax.set_ylabel(f'I_{name} (pA)', fontsize=10, fontweight='bold')
-            is_last = (i == n_rows - 1)
-            ax.tick_params(labelbottom=is_last)
+            ax.set_ylabel(f'I_{name} (µA/cm²)', fontsize=9, fontweight='bold')
+            ax.tick_params(labelsize=8)
             _configure_ax_interactive(ax, show_legend=True, grid_alpha=0.15)
             visible_names.add(name)
 
@@ -1084,7 +1085,10 @@ class AnalyticsWidget(QTabWidget):
             if name not in visible_names:
                 zline.set_visible(False)
 
-        self._currents_axes[-1].set_xlabel('Time (ms)', fontsize=10, fontweight='bold')
+        # Add xlabel to bottom row plots
+        for i in range(9, min(n_plots, 12)):
+            self._currents_axes[i].set_xlabel('Time (ms)', fontsize=9, fontweight='bold')
+        
         self.cvs_currents.draw_idle()
 
     def _init_spike_mechanism_artists(self) -> None:
