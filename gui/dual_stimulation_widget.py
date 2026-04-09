@@ -192,6 +192,33 @@ class DualStimulationWidget(QWidget):
         self.line_secondary_event_times.textChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.line_secondary_event_times, 3, 1, 1, 3)
         
+        # Train generator (ephemeral)
+        secondary_layout.addWidget(QLabel("Train Type:"), 4, 0)
+        self.combo_secondary_train_type = QComboBox()
+        self.combo_secondary_train_type.addItems(["none", "regular", "poisson"])
+        self.combo_secondary_train_type.setToolTip("Auto-generate spike train (ephemeral, does not mutate manual event_times)")
+        self.combo_secondary_train_type.currentTextChanged.connect(self.on_config_changed)
+        secondary_layout.addWidget(self.combo_secondary_train_type, 4, 1)
+        
+        secondary_layout.addWidget(QLabel("Train Freq (Hz):"), 4, 2)
+        self.spin_secondary_train_freq = QDoubleSpinBox()
+        self.spin_secondary_train_freq.setRange(0.1, 500.0)
+        self.spin_secondary_train_freq.setSingleStep(1.0)
+        self.spin_secondary_train_freq.setDecimals(1)
+        self.spin_secondary_train_freq.setValue(40.0)
+        self.spin_secondary_train_freq.setToolTip("Spike frequency for auto-generated train")
+        self.spin_secondary_train_freq.valueChanged.connect(self.on_config_changed)
+        secondary_layout.addWidget(self.spin_secondary_train_freq, 4, 3)
+        
+        secondary_layout.addWidget(QLabel("Train Dur (ms):"), 5, 0)
+        self.spin_secondary_train_duration = QDoubleSpinBox()
+        self.spin_secondary_train_duration.setRange(1.0, 5000.0)
+        self.spin_secondary_train_duration.setSingleStep(10.0)
+        self.spin_secondary_train_duration.setValue(200.0)
+        self.spin_secondary_train_duration.setToolTip("Duration of auto-generated train")
+        self.spin_secondary_train_duration.valueChanged.connect(self.on_config_changed)
+        secondary_layout.addWidget(self.spin_secondary_train_duration, 5, 1, 1, 3)
+        
         layout.addWidget(secondary_group)
         
         # ── Dendritic Parameters ───────────────────────────────────
@@ -301,6 +328,8 @@ class DualStimulationWidget(QWidget):
             self.spin_secondary_current, self.spin_secondary_start,
             self.spin_secondary_duration, self.spin_secondary_alpha,
             self.line_secondary_event_times,
+            self.combo_secondary_train_type, self.spin_secondary_train_freq,
+            self.spin_secondary_train_duration,
             self.spin_dendritic_distance, self.spin_dendritic_lambda,
             self.spin_dendritic_tau, self.check_enabled,
         ]
@@ -332,6 +361,11 @@ class DualStimulationWidget(QWidget):
             )
         else:
             self.line_secondary_event_times.setText("")
+        
+        # Train generator
+        self.combo_secondary_train_type.setCurrentText(self.config.secondary_train_type)
+        self.spin_secondary_train_freq.setValue(self.config.secondary_train_freq_hz)
+        self.spin_secondary_train_duration.setValue(self.config.secondary_train_duration_ms)
 
         # Dendritic parameters
         self.spin_dendritic_distance.setValue(self.config.secondary_distance_um)
@@ -394,6 +428,11 @@ class DualStimulationWidget(QWidget):
         else:
             self.config.secondary_event_times = []
             self.line_secondary_event_times.setStyleSheet("")  # Clear error style
+        
+        # Train generator
+        self.config.secondary_train_type = self.combo_secondary_train_type.currentText()
+        self.config.secondary_train_freq_hz = self.spin_secondary_train_freq.value()
+        self.config.secondary_train_duration_ms = self.spin_secondary_train_duration.value()
         
         # Dendritic parameters
         self.config.secondary_distance_um = self.spin_dendritic_distance.value()

@@ -75,6 +75,52 @@ class SimulationResult:
         self.morph: dict = {}
 
 
+def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms: float, t_start: float, manual_times: list) -> np.ndarray:
+    """Generates an ephemeral array of event times without mutating the base config.
+    
+    Args:
+        train_type: Type of train ('none', 'regular', 'poisson')
+        freq_hz: Frequency in Hz for auto-generated trains
+        duration_ms: Duration in ms for auto-generated trains
+        t_start: Start time in ms
+        manual_times: Manual event times list
+        
+    Returns:
+        Array of event times
+    """
+    import numpy as np
+    
+    # Input validation
+    if train_type not in ('none', 'regular', 'poisson'):
+        logger.warning(f"Unknown train_type '{train_type}', defaulting to 'none'")
+        train_type = 'none'
+    
+    if train_type == 'none':
+        return np.array(manual_times or [], dtype=np.float64)
+    
+    if freq_hz <= 0:
+        logger.warning(f"Invalid freq_hz {freq_hz}, must be > 0. Defaulting to 40 Hz")
+        freq_hz = 40.0
+    
+    if duration_ms <= 0:
+        logger.warning(f"Invalid duration_ms {duration_ms}, must be > 0. Defaulting to 200 ms")
+        duration_ms = 200.0
+        
+    from core.stochastic_rng import get_rng
+    rng = get_rng()
+    
+    if train_type == 'regular':
+        isi_ms = 1000.0 / freq_hz
+        return np.arange(t_start, t_start + duration_ms, isi_ms, dtype=np.float64)
+    elif train_type == 'poisson':
+        rate_ms = freq_hz / 1000.0
+        expected_spikes = int(duration_ms * rate_ms * 1.5)
+        intervals = rng.exponential(1.0 / rate_ms, expected_spikes)
+        times = t_start + np.cumsum(intervals)
+        return times[times < (t_start + duration_ms)].astype(np.float64)
+    return np.array([], dtype=np.float64)
+
+
 class NeuronSolver:
     """Multi-threaded simulation engine v10.0."""
 
@@ -125,28 +171,6 @@ class NeuronSolver:
             return self.run_native(cfg)
         for msg in validate_simulation_config(cfg):
             logger.warning("Simulation config warning: %s", msg)
-        
-        # Auto-generate synaptic event train if requested
-        if cfg.stim.synaptic_train_type != 'none':
-            from core.stochastic_rng import get_rng
-            rng = get_rng()
-            t_start = cfg.stim.pulse_start
-            duration = cfg.stim.synaptic_train_duration_ms
-            freq_hz = cfg.stim.synaptic_train_freq_hz
-            
-            if cfg.stim.synaptic_train_type == 'regular':
-                isi_ms = 1000.0 / freq_hz
-                # Generate strictly periodic spikes
-                train = np.arange(t_start, t_start + duration, isi_ms).tolist()
-                cfg.stim.event_times = train
-            elif cfg.stim.synaptic_train_type == 'poisson':
-                # Generate Poisson spike train
-                rate_ms = freq_hz / 1000.0
-                expected_spikes = int(duration * rate_ms * 1.5) # Buffer
-                intervals = rng.exponential(1.0 / rate_ms, expected_spikes)
-                times = t_start + np.cumsum(intervals)
-                train = times[times < (t_start + duration)].tolist()
-                cfg.stim.event_times = train
         
         # ── Simulation complexity estimation ──
         rt = estimate_simulation_runtime(cfg)
@@ -248,6 +272,28 @@ class NeuronSolver:
                     -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
                 )
 
+        # Generate ephemeral primary train
+        eff_event_times_1 = generate_effective_event_times(
+            cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
+            cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times
+        )
+        
+        # Generate ephemeral secondary train
+        eff_event_times_2 = np.zeros(0, dtype=np.float64)
+        if dual_stim_enabled == 1 and dual_cfg is not None:
+            eff_event_times_2 = generate_effective_event_times(
+                getattr(dual_cfg, 'secondary_train_type', 'none'),
+                getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                dual_cfg.secondary_start,
+                dual_cfg.secondary_event_times
+            )
+
+        # ── Initialize RNG state for reproducibility ──
+        from core.stochastic_rng import get_rng
+        rng = get_rng()
+        rng_state = rng.get_state()['state'] if (cfg.stim.stoch_gating or cfg.stim.noise_sigma > 0) else None
+
         rhs_values = {
             "n_comp": n_comp,
             "en_ih": cfg.channels.enable_Ih,
@@ -311,11 +357,13 @@ class NeuronSolver:
             "use_dfilter_primary": use_dfilter_primary,
             "dfilter_attenuation": dfilter_attenuation,
             "dfilter_tau_ms": dfilter_tau_ms,
-            "event_times_arr": np.array(cfg.stim.event_times or [], dtype=np.float64),
-            "n_events": int(len(cfg.stim.event_times or [])),
-            "event_times_arr_2": np.array(cfg.stim.event_times_2 or [], dtype=np.float64),
-            "n_events_2": int(len(cfg.stim.event_times_2 or [])),
+            "event_times_arr": eff_event_times_1,
+            "n_events": int(len(eff_event_times_1)),
+            "event_times_arr_2": eff_event_times_2,
+            "n_events_2": int(len(eff_event_times_2)),
             "dual_stim_enabled": dual_stim_enabled,
+            "gna_max": cfg.channels.gNa_max,
+            "gk_max": cfg.channels.gK_max,
             "stype_2": stype_2,
             "iext_2": iext_2,
             "t0_2": t0_2,
@@ -761,9 +809,33 @@ class NeuronSolver:
             phi_nap, phi_nar,
         ], dtype=np.float64)   # shape (9, n_comp)
 
-        event_times_arr   = np.array(cfg.stim.event_times or [], dtype=np.float64)
-        event_times_arr_2 = np.array(
-            getattr(cfg.stim, "event_times_2", None) or [], dtype=np.float64)
+        # ── Stochastic parameters ──
+        stoch_gating = getattr(cfg.stim, 'stoch_gating', False)
+        noise_sigma = getattr(cfg.stim, 'noise_sigma', 0.0)
+        gna_max = cfg.channels.gNa_max
+        gk_max = cfg.channels.gK_max
+        
+        # ── Initialize RNG state for reproducibility ──
+        from core.stochastic_rng import get_rng
+        rng = get_rng()
+        rng_state = rng.get_state()['state'] if (stoch_gating or noise_sigma > 0) else None
+
+        # Generate ephemeral primary train
+        event_times_arr = generate_effective_event_times(
+            cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
+            cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times
+        )
+        
+        # Generate ephemeral secondary train
+        event_times_arr_2 = np.zeros(0, dtype=np.float64)
+        if dual_stim_enabled == 1 and dual_cfg is not None:
+            event_times_arr_2 = generate_effective_event_times(
+                getattr(dual_cfg, 'secondary_train_type', 'none'),
+                getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                dual_cfg.secondary_start,
+                dual_cfg.secondary_event_times
+            )
 
         physics = create_physics_params(
             n_comp              = np.int32(n_comp),
@@ -823,6 +895,11 @@ class NeuronSolver:
             use_dfilter_secondary   = np.int32(use_dfilter_secondary),
             dfilter_attenuation_2   = float(dfilter_attenuation_2),
             dfilter_tau_ms_2        = float(dfilter_tau_ms_2),
+            stoch_gating       = stoch_gating,
+            noise_sigma       = noise_sigma,
+            gna_max           = gna_max,
+            gk_max            = gk_max,
+            rng_state         = None,
         )
 
         t_out, y_out = run_native_loop(

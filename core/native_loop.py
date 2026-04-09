@@ -32,6 +32,7 @@ from .rhs import (
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
 from .hines import hines_solve, update_gates_analytic
+from .kinetics import am, bm, ah, bh, an, bn
 
 
 @njit(cache=True)
@@ -78,6 +79,11 @@ def run_native_loop(
     en_nap  = physics.en_nap
     en_nar  = physics.en_nar
     dyn_ca  = physics.dyn_ca
+
+    # ── Channel counts for Langevin noise (approximate, proportional to conductance) ──
+    N_Na = np.maximum(50.0, 1000.0 * gna_v / physics.gna_max)
+    N_K  = np.maximum(50.0, 1000.0 * gk_v / physics.gk_max)
+    sqrt_dt = np.sqrt(dt)
 
     # ── Reversal potentials ──
     ena = physics.ena
@@ -234,6 +240,37 @@ def run_native_loop(
         )
 
         # ─────────────────────────────────────────────────────────────
+        # 2.5. Add Langevin gate noise if enabled (after deterministic update)
+        # NOTE: np.random.randn() in Numba-jitted code uses global NumPy RNG state.
+        # For full reproducibility, set numpy seed before simulation: np.random.seed(seed)
+        # ─────────────────────────────────────────────────────────────
+        if physics.stoch_gating:
+            for i in range(n_comp):
+                vi = y[i]
+                # Na m-gate noise
+                am_v, bm_v = am(vi), bm(vi)
+                m_val = y[off_m + i]
+                var_m = max(0.0, am_v * (1.0 - m_val) + bm_v * m_val) / N_Na[i]
+                y[off_m + i] += np.sqrt(var_m) * phi_na[i] * np.random.randn() * sqrt_dt
+                
+                # Na h-gate noise
+                ah_v, bh_v = ah(vi), bh(vi)
+                h_val = y[off_h + i]
+                var_h = max(0.0, ah_v * (1.0 - h_val) + bh_v * h_val) / N_Na[i]
+                y[off_h + i] += np.sqrt(var_h) * phi_na[i] * np.random.randn() * sqrt_dt
+                
+                # K n-gate noise
+                an_v, bn_v = an(vi), bn(vi)
+                n_val = y[off_n + i]
+                var_n = max(0.0, an_v * (1.0 - n_val) + bn_v * n_val) / N_K[i]
+                y[off_n + i] += np.sqrt(var_n) * phi_k[i] * np.random.randn() * sqrt_dt
+                
+                # Clamp gates to [0, 1]
+                y[off_m + i] = max(0.0, min(1.0, y[off_m + i]))
+                y[off_h + i] = max(0.0, min(1.0, y[off_h + i]))
+                y[off_n + i] = max(0.0, min(1.0, y[off_n + i]))
+
+        # ─────────────────────────────────────────────────────────────
         # 3. Compute stimulus currents at time t
         # ─────────────────────────────────────────────────────────────
         if physics.n_events > 0 and is_cond:
@@ -376,6 +413,10 @@ def run_native_loop(
                     i_stim_eff += i_stim_s
 
             rhs[i] = cm_over_dt * vi + e_eff + i_stim_eff
+
+            # ── Additive membrane noise if enabled ──
+            if physics.noise_sigma > 0.0:
+                rhs[i] += (physics.noise_sigma * np.random.randn() * sqrt_dt) / dt
 
         # ─────────────────────────────────────────────────────────────
         # 5. Solve Hines tridiagonal system → V_{n+1}

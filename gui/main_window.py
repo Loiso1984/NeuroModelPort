@@ -168,6 +168,22 @@ class MainWindow(QMainWindow):
                 self.load_preset("A: Squid Giant Axon (HH 1952)")
         else:
             self.load_preset("A: Squid Giant Axon (HH 1952)")
+        
+        # Load UI state if available
+        if os.path.exists(".ui_state.json"):
+            try:
+                import json
+                with open(".ui_state.json", "r") as f:
+                    ui_state = json.load(f)
+                # Restore splitter sizes
+                if "splitter_sizes" in ui_state:
+                    self._main_splitter.setSizes(ui_state["splitter_sizes"])
+                # Restore live deck combo values
+                if "live_deck" in ui_state and len(ui_state["live_deck"]) == len(self._live_combos):
+                    for i, combo_text in enumerate(ui_state["live_deck"]):
+                        self._live_combos[i].setCurrentText(combo_text)
+            except Exception:
+                pass  # Silently fail on UI state load errors
 
     def _wire_service_signals(self):
         """Connect ConfigManager and SimulationController signals to MainWindow slots."""
@@ -476,11 +492,12 @@ class MainWindow(QMainWindow):
     def _setup_tabs(self):
         self.tabs = QTabWidget()
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.tabs.setMovable(True)  # Allow users to rearrange tabs
 
         # ── Sidebar panel (replaces old "1) Setup" tab) ───────────────
         self._sidebar_frame = QFrame()
         self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self._sidebar_frame.setMinimumWidth(280)  # Prevent collapse on small screens
+        self._sidebar_frame.setMinimumWidth(320)  # Prevent collapse on small screens
         self._sidebar_frame.setMaximumWidth(520)
         self._build_sidebar_panel()
         # Dummy tab_params kept for backward-compat references (not in tabs)
@@ -798,12 +815,18 @@ class MainWindow(QMainWindow):
         obj, attr = self._resolve_param(param_name)
         if obj is not None and attr is not None:
             val = getattr(obj, attr)
-            # Use reasonable default ranges for custom paths
-            lo, hi = -100.0, 500.0
             # Check if this is a known parameter with specific ranges
             simple_name = param_name.split('.')[-1] if '.' in param_name else param_name
             if simple_name in _LIVE_PARAMS:
                 lo, hi, _, _ = _LIVE_PARAMS[simple_name]
+            else:
+                # SMART DYNAMIC BOUNDS
+                if val == 0.0:
+                    lo, hi = -1.0, 1.0
+                elif val > 0:
+                    lo, hi = val * 0.1, val * 5.0
+                else:
+                    lo, hi = val * 0.1, val * 5.0
         elif param_name in _LIVE_PARAMS:
             lo, hi, _, getter = _LIVE_PARAMS[param_name]
             val = getter(self.config_manager.config)
@@ -868,10 +891,19 @@ class MainWindow(QMainWindow):
         # Try custom path resolution first
         obj, attr = self._resolve_param(param)
         if obj is not None and attr is not None:
-            # Use reasonable default ranges for custom paths
-            lo, hi = -100.0, 500.0
-            if param in _LIVE_PARAMS:
-                lo, hi, _, _ = _LIVE_PARAMS[param]
+            val = getattr(obj, attr)
+            # Use the same dynamic bound calculation as _val_to_live_slider
+            simple_name = param.split('.')[-1] if '.' in param else param
+            if simple_name in _LIVE_PARAMS:
+                lo, hi, _, _ = _LIVE_PARAMS[simple_name]
+            else:
+                # SMART DYNAMIC BOUNDS
+                if val == 0.0:
+                    lo, hi = -1.0, 1.0
+                elif val > 0:
+                    lo, hi = val * 0.1, val * 5.0
+                else:
+                    lo, hi = val * 0.1, val * 5.0
             val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
             self._live_labels[row_i].setText(f"{val:.2f}")
             setattr(obj, attr, val)
@@ -1258,6 +1290,27 @@ class MainWindow(QMainWindow):
             self._sidebar_frame.setMaximumWidth(520)
         
         self._status(f"Window resized to {width}×{height}")
+    
+    def closeEvent(self, event):
+        """Save UI state on close."""
+        try:
+            import json
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            self.config_manager.save_config_as(".last_session.json")
+            # Save UI state
+            ui_state = {
+                "splitter_sizes": self._main_splitter.sizes(),
+                "live_deck": [combo.currentText() for combo in self._live_combos]
+            }
+            with open(".ui_state.json", "w") as f:
+                json.dump(ui_state, f)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to save UI state on close: {e}")
+        super().closeEvent(event)
     
     def _toggle_fullscreen(self):
         """Toggle fullscreen mode."""
