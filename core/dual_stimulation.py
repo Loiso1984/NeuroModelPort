@@ -46,6 +46,11 @@ class DualStimulationConfig(BaseModel):
     secondary_alpha_tau: float = 5.0
     secondary_event_times: List[float] = Field(default_factory=list)  # Event queue for secondary (e.g., [30, 40] ms)
     
+    # Secondary train generator (ephemeral, does not mutate manual event_times)
+    secondary_train_type: str = Field(default='none', description="Auto-generate spike train (none/regular/poisson)")
+    secondary_train_freq_hz: float = Field(default=40.0, ge=0.1, le=500.0)
+    secondary_train_duration_ms: float = Field(default=200.0, ge=1.0)
+    
     # Secondary stimulus dendritic parameters (if dendritic_filtered)
     secondary_distance_um: float = 150.0
     secondary_space_constant_um: float = 150.0

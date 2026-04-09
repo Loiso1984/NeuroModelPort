@@ -95,6 +95,8 @@ class PhysicsParams(NamedTuple):
     # Stochastic parameters
     stoch_gating: boolean  # Enable Langevin gate noise
     noise_sigma: float64    # Additive membrane current noise
+    gna_max: float64        # Max Na conductance for channel count scaling
+    gk_max: float64         # Max K conductance for channel count scaling
     rng_state: Optional[np.ndarray]  # RNG state for reproducibility
 
 
@@ -115,6 +117,8 @@ def create_physics_params(**kwargs) -> PhysicsParams:
     defaults = {
         'stoch_gating': False,
         'noise_sigma': 0.0,
+        'gna_max': 120.0,
+        'gk_max': 36.0,
         'rng_state': None,
         'event_times_arr_2': np.zeros(0, dtype=np.float64),
         'n_events_2': np.int32(0),

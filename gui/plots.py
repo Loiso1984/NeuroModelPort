@@ -150,6 +150,26 @@ class OscilloscopeWidget(QWidget):
         self._p_i.setTitle(self._title_html("Ion Currents  (soma)", "#FAB387"))
 
     # ─────────────────────────────────────────────────────────────────
+    def _mouse_moved(self, evt):
+        """Handle mouse movement for crosshair display."""
+        pos = evt[0]
+        if self._p_v.sceneBoundingRect().contains(pos):
+            mousePoint = self._p_v.getViewBox().mapSceneToView(pos)
+            self.vLine.setPos(mousePoint.x())
+            self.hLine.setPos(mousePoint.y())
+            self.crosshair_label.setText(f"t={mousePoint.x():.2f} ms\nV={mousePoint.y():.2f} mV")
+            self.crosshair_label.setPos(mousePoint.x(), mousePoint.y())
+
+    def cleanup(self):
+        """Clean up resources to prevent memory leaks."""
+        if hasattr(self, 'proxy') and self.proxy is not None:
+            self.proxy.disconnect()
+            self.proxy = None
+
+    def __del__(self):
+        """Destructor to ensure cleanup."""
+        self.cleanup()
+
     def _build_ui(self):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -166,6 +186,17 @@ class OscilloscopeWidget(QWidget):
         self._p_v.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_v.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_v.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
+        
+        # Crosshair for V(t) plot
+        self.vLine = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#A6ADC8', style=Qt.PenStyle.DashLine))
+        self.hLine = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('#A6ADC8', style=Qt.PenStyle.DashLine))
+        self._p_v.addItem(self.vLine, ignoreBounds=True)
+        self._p_v.addItem(self.hLine, ignoreBounds=True)
+        self.crosshair_label = pg.TextItem(text="", color='#CBA6F7', fill='#1E1E2E88')
+        self._p_v.addItem(self.crosshair_label, ignoreBounds=True)
+        
+        self.proxy = pg.SignalProxy(self._p_v.scene().sigMouseMoved, rateLimit=60, slot=self._mouse_moved)
+        
         self._win.nextRow()
 
         # Gate variables — row 1

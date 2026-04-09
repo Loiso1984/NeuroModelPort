@@ -830,6 +830,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
     2) Otherwise reconstruct from configured stimulus equations including event_times.
     """
     from core.rhs import get_stim_current, get_event_driven_conductance
+    from core.solver import generate_effective_event_times
 
     t = np.asarray(result.t, dtype=float)
     n = len(t)
@@ -855,9 +856,18 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                 np.exp(-cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um)
             )
         
-        # Get event_times for synaptic stimulation
-        event_times = getattr(cfg.stim, "event_times", [])
-        event_times_arr = np.array(event_times or [], dtype=np.float64)
+        # Get event_times - only use train generator for synaptic types (4-9)
+        if 4 <= stype <= 9:
+            event_times_arr = generate_effective_event_times(
+                getattr(cfg.stim, "synaptic_train_type", "none"),
+                getattr(cfg.stim, "synaptic_train_freq_hz", 40.0),
+                getattr(cfg.stim, "synaptic_train_duration_ms", 200.0),
+                cfg.stim.pulse_start,
+                getattr(cfg.stim, "event_times", [])
+            )
+        else:
+            # For non-synaptic types, just use manual event_times directly
+            event_times_arr = np.array(getattr(cfg.stim, "event_times", []), dtype=np.float64)
         n_events = len(event_times_arr)
         
         for i, ti in enumerate(t):
@@ -908,9 +918,18 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             if space_const > 0.0:
                 attenuation_2 = float(np.exp(-dist / space_const))
         
-        # Get event_times for secondary synaptic stimulation
-        event_times_2 = getattr(dual_cfg, "secondary_event_times", [])
-        event_times_arr_2 = np.array(event_times_2 or [], dtype=np.float64)
+        # Get event_times for secondary - only use train generator for synaptic types (4-9)
+        if 4 <= stype_2 <= 9:
+            event_times_arr_2 = generate_effective_event_times(
+                getattr(dual_cfg, 'secondary_train_type', 'none'),
+                getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                getattr(dual_cfg, 'secondary_start', 0.0),
+                getattr(dual_cfg, 'secondary_event_times', [])
+            )
+        else:
+            # For non-synaptic types, just use manual event_times directly
+            event_times_arr_2 = np.array(getattr(dual_cfg, 'secondary_event_times', []), dtype=np.float64)
         n_events_2 = len(event_times_arr_2)
         
         for i, ti in enumerate(t):
