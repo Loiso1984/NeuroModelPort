@@ -67,6 +67,16 @@ _LIVE_PARAMS = {
                   lambda cfg:    cfg.stim.pulse_dur),
 }
 _LIVE_PARAM_NAMES = list(_LIVE_PARAMS.keys())
+# Default suggestions for editable combos (dot-separated paths)
+_LIVE_PARAM_SUGGESTIONS = [
+    "stim.Iext",
+    "channels.gNa_max",
+    "channels.gK_max",
+    "env.T_celsius",
+    "morphology.Ra",
+    "channels.gL",
+    "stim.pulse_dur",
+]
 _LIVE_SLIDER_STEPS = 1000   # integer slider resolution
 
 
@@ -133,11 +143,11 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         self._main_layout = QVBoxLayout(central)
-        self._main_layout.setContentsMargins(6, 6, 6, 6)
-        self._main_layout.setSpacing(6)
+        self._main_layout.setContentsMargins(4, 4, 4, 4)
+        self._main_layout.setSpacing(4)
         self._main_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         central.setMinimumSize(0, 0)
-        self.setMinimumSize(900, 650)
+        self.setMinimumSize(1000, 700)
 
         self._setup_top_bar()
         self._setup_tabs()
@@ -190,18 +200,25 @@ class MainWindow(QMainWindow):
     #  TOP BAR
     # ─────────────────────────────────────────────────────────────────
     def _setup_top_bar(self):
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
+        # Create a two-row layout to prevent overlap
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setSpacing(4)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Row 1: Main action buttons
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
 
         # ── Run button ──────────────────────────────────────────────
         self.btn_run = QPushButton("▶ RUN SIMULATION")
-        self.btn_run.setMinimumHeight(46)
+        self.btn_run.setMinimumHeight(38)
         self.btn_run.setStyleSheet("""
             QPushButton {
-                font-weight: bold; font-size: 15px;
+                font-weight: bold; font-size: 14px;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #40A060, stop:1 #2E7D32);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #4CAF70; }
             QPushButton:disabled { background: #555568; color: #888; }
@@ -210,13 +227,13 @@ class MainWindow(QMainWindow):
 
         # ── Stochastic button ────────────────────────────────────────
         self.btn_stoch = QPushButton("🎲 STOCHASTIC")
-        self.btn_stoch.setMinimumHeight(46)
+        self.btn_stoch.setMinimumHeight(38)
         self.btn_stoch.setStyleSheet("""
             QPushButton {
-                font-weight: bold; font-size: 13px;
+                font-weight: bold; font-size: 12px;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #6050A0, stop:1 #40306A);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #7060B0; }
             QPushButton:disabled { background: #555568; color: #888; }
@@ -226,13 +243,13 @@ class MainWindow(QMainWindow):
 
         # ── Sweep button ─────────────────────────────────────────────
         self.btn_sweep = QPushButton("↔ SWEEP")
-        self.btn_sweep.setMinimumHeight(46)
+        self.btn_sweep.setMinimumHeight(38)
         self.btn_sweep.setStyleSheet("""
             QPushButton {
-                font-weight: bold; font-size: 13px;
+                font-weight: bold; font-size: 12px;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #0070A0, stop:1 #004E70);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #0080B0; }
             QPushButton:disabled { background: #555568; color: #888; }
@@ -242,13 +259,13 @@ class MainWindow(QMainWindow):
 
         # ── SD / ExcMap buttons ───────────────────────────────────────
         self.btn_sd = QPushButton("⏱ S-D")
-        self.btn_sd.setMinimumHeight(46)
+        self.btn_sd.setMinimumHeight(38)
         self.btn_sd.setStyleSheet("""
             QPushButton {
-                font-weight: bold;
+                font-weight: bold; font-size: 12px;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #906030, stop:1 #603010);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #A07040; }
             QPushButton:disabled { background: #555568; color: #888; }
@@ -257,13 +274,13 @@ class MainWindow(QMainWindow):
         self.btn_sd.clicked.connect(self.run_sd_curve)
 
         self.btn_excmap = QPushButton("🗺 EXCIT. MAP")
-        self.btn_excmap.setMinimumHeight(46)
+        self.btn_excmap.setMinimumHeight(38)
         self.btn_excmap.setStyleSheet("""
             QPushButton {
-                font-weight: bold;
+                font-weight: bold; font-size: 12px;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #208080, stop:1 #106060);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #30A0A0; }
             QPushButton:disabled { background: #555568; color: #888; }
@@ -273,13 +290,13 @@ class MainWindow(QMainWindow):
 
         # ── Cancel button (hidden until computation starts) ──────────
         self.btn_cancel = QPushButton("⛔ CANCEL")
-        self.btn_cancel.setMinimumHeight(46)
+        self.btn_cancel.setMinimumHeight(38)
         self.btn_cancel.setStyleSheet("""
             QPushButton {
                 font-weight: bold;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #CC3030, stop:1 #991818);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #FF4040; }
         """)
@@ -290,12 +307,12 @@ class MainWindow(QMainWindow):
 
         # ── Hines solver toggle ──────────────────────────────────────
         self.btn_hines = QPushButton("⚡ HINES")
-        self.btn_hines.setMinimumHeight(46)
+        self.btn_hines.setMinimumHeight(38)
         self.btn_hines.setCheckable(True)
         self.btn_hines.setChecked(False)
         self.btn_hines.setStyleSheet("""
             QPushButton {
-                background: #313244; color: #89DCEB; border-radius: 6px;
+                background: #313244; color: #89DCEB; border-radius: 5px;
                 border: 1px solid #45475A;
                 font-weight: bold;
             }
@@ -305,14 +322,14 @@ class MainWindow(QMainWindow):
         self.btn_hines.setToolTip("Toggle native Hines solver (O(N) vs SciPy BDF)")
         self.btn_hines.clicked.connect(self._on_hines_toggled)
 
-        # ── Export button ─────────────────────────────────────
-        self.btn_export = QPushButton("💾 Export CSV")
-        self.btn_export_plot = QPushButton("Export Plot")
-        self.btn_export_plot.setMinimumHeight(46)
+        # ── Export buttons ─────────────────────────────────────
+        self.btn_export = QPushButton("💾 CSV")
+        self.btn_export_plot = QPushButton("📊 Plot")
+        self.btn_export_plot.setMinimumHeight(38)
         self.btn_export_plot.setEnabled(False)
         self.btn_export_plot.setStyleSheet("""
             QPushButton {
-                background: #313244; color: #A6E3A1; border-radius: 6px;
+                background: #313244; color: #A6E3A1; border-radius: 5px;
                 border: 1px solid #45475A;
             }
             QPushButton:hover  { background: #3E3F5E; }
@@ -320,11 +337,11 @@ class MainWindow(QMainWindow):
         """)
         self.btn_export_plot.clicked.connect(self.export_plot)
 
-        self.btn_export.setMinimumHeight(46)
+        self.btn_export.setMinimumHeight(38)
         self.btn_export.setEnabled(False)
         self.btn_export.setStyleSheet("""
             QPushButton {
-                background: #313244; color: #89DCEB; border-radius: 6px;
+                background: #313244; color: #89DCEB; border-radius: 5px;
                 border: 1px solid #45475A;
             }
             QPushButton:hover  { background: #3E3F5E; }
@@ -333,26 +350,26 @@ class MainWindow(QMainWindow):
         self.btn_export.clicked.connect(self.export_csv)
 
         self.btn_export_nml = QPushButton("📄 NeuroML")
-        self.btn_export_nml.setMinimumHeight(46)
+        self.btn_export_nml.setMinimumHeight(38)
         self.btn_export_nml.setToolTip("Export model config to NeuroML 2.2 XML (Stage 6.4)")
         self.btn_export_nml.setStyleSheet("""
             QPushButton {
-                background: #313244; color: #CBA6F7; border-radius: 6px;
-                font-size: 13px; font-weight: bold;
+                background: #313244; color: #CBA6F7; border-radius: 5px;
+                font-size: 12px; font-weight: bold;
             }
             QPushButton:hover { background: #45475A; }
         """)
         self.btn_export_nml.clicked.connect(self.export_neuroml)
 
         # ── Save/Load Config buttons ─────────────────────────────
-        self.btn_save_config = QPushButton("💾 Save Config")
-        self.btn_save_config.setMinimumHeight(46)
+        self.btn_save_config = QPushButton("💾 Save")
+        self.btn_save_config.setMinimumHeight(38)
         self.btn_save_config.setStyleSheet("""
             QPushButton {
-                font-weight: bold; font-size: 13px;
+                font-weight: bold; font-size: 12px;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #28A745, stop:1 #20893D);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #36A349; }
             QPushButton:disabled { background: #555568; color: #888; }
@@ -360,14 +377,14 @@ class MainWindow(QMainWindow):
         self.btn_save_config.setToolTip("Save current configuration to JSON file")
         self.btn_save_config.clicked.connect(self.save_config_as)
 
-        self.btn_load_config = QPushButton("📂 Open Config")
-        self.btn_load_config.setMinimumHeight(46)
+        self.btn_load_config = QPushButton("📂 Open")
+        self.btn_load_config.setMinimumHeight(38)
         self.btn_load_config.setStyleSheet("""
             QPushButton {
-                font-weight: bold; font-size: 13px;
+                font-weight: bold; font-size: 12px;
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #6F42C1, stop:1 #4A1E61);
-                color: white; border-radius: 6px;
+                color: white; border-radius: 5px;
             }
             QPushButton:hover { background: #8B5CF6; }
             QPushButton:disabled { background: #555568; color: #888; }
@@ -375,10 +392,53 @@ class MainWindow(QMainWindow):
         self.btn_load_config.setToolTip("Load configuration from JSON file")
         self.btn_load_config.clicked.connect(self.load_config_from)
 
+        # ── Sidebar toggle button ──────────────────────────────
+        self.btn_toggle_sidebar = QPushButton("◀")
+        self.btn_toggle_sidebar.setFixedWidth(30)
+        self.btn_toggle_sidebar.setFixedHeight(38)
+        self.btn_toggle_sidebar.setToolTip("Show / hide parameters panel")
+        self.btn_toggle_sidebar.setStyleSheet(
+            "QPushButton { background:#313244; color:#89B4FA; border-radius:5px; font-size:14px; }"
+            "QPushButton:hover { background:#45475A; }"
+        )
+        self.btn_toggle_sidebar.clicked.connect(self._toggle_sidebar)
+
+        # ── Window size preset button ────────────────────────────
+        self.btn_window_size = QPushButton("📐")
+        self.btn_window_size.setFixedWidth(30)
+        self.btn_window_size.setFixedHeight(38)
+        self.btn_window_size.setToolTip("Window size preset (for laptops)")
+        self.btn_window_size.setStyleSheet(
+            "QPushButton { background:#313244; color:#CBA6F7; border-radius:5px; font-size:14px; }"
+            "QPushButton:hover { background:#45475A; }"
+        )
+        self.btn_window_size.clicked.connect(self._show_window_size_menu)
+
+        # Add row 1 buttons
+        row1.addWidget(self.btn_run, 4)
+        row1.addWidget(self.btn_cancel, 2)
+        row1.addWidget(self.btn_hines, 2)
+        row1.addWidget(self.btn_stoch, 2)
+        row1.addWidget(self.btn_sweep, 2)
+        row1.addWidget(self.btn_sd, 2)
+        row1.addWidget(self.btn_excmap, 2)
+        row1.addWidget(self.btn_export_plot, 2)
+        row1.addWidget(self.btn_export, 2)
+        row1.addWidget(self.btn_export_nml, 2)
+        row1.addWidget(self.btn_save_config, 2)
+        row1.addWidget(self.btn_load_config, 2)
+        row1.addWidget(self.btn_window_size)
+        row1.addWidget(self.btn_toggle_sidebar)
+        row1.addStretch()
+        
+        # Row 2: Preset, Language, and Sparkline
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        
         # ── Preset selector ───────────────────────────────────────────
         self.lbl_preset = QLabel("Preset:")
         self.combo_presets = QComboBox()
-        self.combo_presets.setMinimumWidth(260)
+        self.combo_presets.setMinimumWidth(200)
         self.combo_presets.addItems(["— Select preset —"] + get_preset_names())
         self.combo_presets.currentTextChanged.connect(self.load_preset)
 
@@ -389,49 +449,26 @@ class MainWindow(QMainWindow):
         self.combo_lang.setCurrentText("EN")
         self.combo_lang.currentTextChanged.connect(self.change_language)
 
-        bar.addWidget(self.btn_run,    4)
-        bar.addWidget(self.btn_cancel, 2)
-        bar.addWidget(self.btn_hines, 2)
-        bar.addWidget(self.btn_stoch, 2)
-        bar.addWidget(self.btn_sweep, 2)
-        bar.addWidget(self.btn_sd,     2)
-        bar.addWidget(self.btn_excmap, 2)
-        bar.addWidget(self.btn_export_plot, 2)
-        bar.addWidget(self.btn_export, 2)
-        bar.addWidget(self.btn_export_nml, 2)
-        # ── Save/Load Config buttons ─────────────────────────────
-        bar.addWidget(self.btn_save_config, 2)
-        bar.addWidget(self.btn_load_config, 2)
-        # ── Preset selector ───────────────────────────────────
-        bar.addWidget(self.lbl_preset)
-        bar.addWidget(self.combo_presets, 3)
-        bar.addWidget(self.lbl_lang)
-        bar.addWidget(self.combo_lang)
-
         # ── Sparkline (mini Vm trace) ──────────────────────────
         self._sparkline = pg.PlotWidget()
-        self._sparkline.setFixedHeight(42)
-        self._sparkline.setMinimumWidth(100)
+        self._sparkline.setFixedHeight(36)
+        self._sparkline.setMinimumWidth(150)
         self._sparkline.hideAxis('left')
         self._sparkline.hideAxis('bottom')
         self._sparkline.setBackground('#0D1117')
         self._sparkline.setToolTip("Latest somatic Vm trace")
         self._sparkline_curve = self._sparkline.plot([], [], pen=pg.mkPen('#89B4FA', width=1))
-        bar.addWidget(self._sparkline, 3)
 
-        # ── Sidebar toggle button ──────────────────────────────
-        self.btn_toggle_sidebar = QPushButton("◀")
-        self.btn_toggle_sidebar.setFixedWidth(34)
-        self.btn_toggle_sidebar.setFixedHeight(46)
-        self.btn_toggle_sidebar.setToolTip("Show / hide parameters panel")
-        self.btn_toggle_sidebar.setStyleSheet(
-            "QPushButton { background:#313244; color:#89B4FA; border-radius:4px; font-size:16px; }"
-            "QPushButton:hover { background:#45475A; }"
-        )
-        self.btn_toggle_sidebar.clicked.connect(self._toggle_sidebar)
-        bar.addWidget(self.btn_toggle_sidebar)
+        row2.addWidget(self.lbl_preset)
+        row2.addWidget(self.combo_presets, 2)
+        row2.addWidget(self.lbl_lang)
+        row2.addWidget(self.combo_lang)
+        row2.addWidget(self._sparkline, 1)
+        row2.addStretch()
 
-        self._main_layout.addLayout(bar)
+        top_layout.addLayout(row1)
+        top_layout.addLayout(row2)
+        self._main_layout.addWidget(top_container)
 
     # ─────────────────────────────────────────────────────────────────
     #  TABS  +  COLLAPSIBLE SIDEBAR
@@ -443,19 +480,99 @@ class MainWindow(QMainWindow):
         # ── Sidebar panel (replaces old "1) Setup" tab) ───────────────
         self._sidebar_frame = QFrame()
         self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self._sidebar_frame.setMinimumWidth(0)
+        self._sidebar_frame.setMinimumWidth(280)  # Prevent collapse on small screens
         self._sidebar_frame.setMaximumWidth(520)
         self._build_sidebar_panel()
         # Dummy tab_params kept for backward-compat references (not in tabs)
         self.tab_params = self._sidebar_frame
 
-        # ── Tab 1: Dual Stimulation ───────────────────────────────────
-        # Step 2: Dual Stimulation
+        # ── Tab 1: Stimulation Studio ───────────────────────────────
+        # Step 2: Stimulation Studio (consolidated stimulation controls)
+        stim_studio_widget_outer = QWidget()
+        stim_outer_layout = QVBoxLayout(stim_studio_widget_outer)
+        stim_outer_layout.setContentsMargins(0, 0, 0, 0)
+        stim_outer_layout.setSpacing(0)
+        
+        # Create scroll area for stim studio content
+        from PySide6.QtWidgets import QScrollArea
+        stim_scroll = QScrollArea()
+        stim_scroll.setWidgetResizable(True)
+        stim_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        stim_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        stim_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        stim_scroll.setStyleSheet("QScrollArea { background: #1E1E2E; }")
+        
+        stim_studio_widget = QWidget()
+        stim_main_layout = QVBoxLayout(stim_studio_widget)
+        stim_main_layout.setSpacing(6)
+        stim_main_layout.setContentsMargins(4, 4, 4, 4)
+        
+        # Top section: Primary and Secondary stimulus controls
+        stim_controls_widget = QWidget()
+        stim_layout = QHBoxLayout(stim_controls_widget)
+        stim_layout.setSpacing(10)
+        stim_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Left column: Primary stimulus controls
+        left_col = QWidget()
+        left_layout = QVBoxLayout(left_col)
+        left_layout.setSpacing(6)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.form_stim = PydanticFormWidget(
+            self.config_manager.config.stim,
+            "Primary Stimulus",
+            on_change=self._on_stim_field_changed,
+            hidden_fields={"Iext_absolute_nA"},
+        )
+        self.form_stim_loc = PydanticFormWidget(
+            self.config_manager.config.stim_location,
+            "Stimulus Location",
+            on_change=self._on_stim_loc_field_changed,
+        )
+        self.form_dfilter = PydanticFormWidget(
+            self.config_manager.config.dendritic_filter,
+            "Dendritic Filter",
+            on_change=self._on_dfilter_field_changed,
+        )
+        
+        left_layout.addWidget(self.form_stim)
+        left_layout.addWidget(self.form_stim_loc)
+        left_layout.addWidget(self.form_dfilter)
+        left_layout.addStretch()
+        
+        # Right column: Secondary stimulus (dual stimulation widget)
         self.dual_stim_widget = getattr(self, "dual_stim_widget", DualStimulationWidget())
         if not self._dual_stim_signal_connected:
             self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
             self._dual_stim_signal_connected = True
-        self.tabs.addTab(self.dual_stim_widget, "2) Dual Stim")
+        
+        stim_layout.addWidget(left_col, 1)
+        stim_layout.addWidget(self.dual_stim_widget, 1)
+        
+        # Vertical splitter for resizable stim preview
+        stim_splitter = QSplitter(Qt.Orientation.Vertical)
+        stim_splitter.setChildrenCollapsible(False)  # Prevent complete collapse
+        stim_splitter.addWidget(stim_controls_widget)
+        
+        # Bottom section: Real-time stimulus preview (resizable)
+        self._stim_preview_plot = pg.PlotWidget(title="Stimulus Protocol Preview")
+        self._stim_preview_plot.setLabel('left', 'Total Input Current')
+        self._stim_preview_plot.setLabel('bottom', 'Time (ms)')
+        self._stim_preview_plot.setBackground('#1E1E2E')
+        self._stim_preview_plot.setMinimumHeight(150)  # Larger minimum for better visibility
+        self._stim_preview_plot.setMaximumHeight(500)  # Allow more space for plot
+        stim_splitter.addWidget(self._stim_preview_plot)
+        stim_splitter.setSizes([250, 300])  # Give preview more space initially
+        stim_splitter.setStretchFactor(0, 1)  # Controls get 1x stretch
+        stim_splitter.setStretchFactor(1, 2)  # Preview gets 2x stretch
+        
+        stim_main_layout.addWidget(stim_splitter)
+        
+        stim_scroll.setWidget(stim_studio_widget)
+        stim_outer_layout.addWidget(stim_scroll)
+        
+        self.tabs.addTab(stim_studio_widget_outer, "2) Stimulation Studio")
 
         # ── Tab 2: Oscilloscope ───────────────────────────────────────
         # Step 3: Oscilloscope
@@ -498,10 +615,12 @@ class MainWindow(QMainWindow):
 
         # ── Main splitter: sidebar | tabs ────────────────────────────
         self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._main_splitter.setChildrenCollapsible(True)
+        self._main_splitter.setChildrenCollapsible(False)  # Prevent complete collapse
+        self._main_splitter.setHandleWidth(6)
         self._main_splitter.addWidget(self._sidebar_frame)
         self._main_splitter.addWidget(self.tabs)
-        self._main_splitter.setSizes([420, 980])
+        # Use smaller initial sizes for laptop screens
+        self._main_splitter.setSizes([350, 800])
         self._main_splitter.setStretchFactor(0, 0)
         self._main_splitter.setStretchFactor(1, 1)
         self._main_layout.addWidget(self._main_splitter, stretch=1)
@@ -516,7 +635,7 @@ class MainWindow(QMainWindow):
         """Build the collapsible left parameter panel (replaces old '1) Setup' tab)."""
         layout = QVBoxLayout(self._sidebar_frame)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
 
         # ── Quick Preset shortcut row (Step 5) ────────────────────────
         preset_row = QHBoxLayout()
@@ -530,20 +649,21 @@ class MainWindow(QMainWindow):
         # ── Live Control Deck (Step 2) ─────────────────────────────────
         deck = QGroupBox("🎛️ Live Control Deck")
         deck_layout = QVBoxLayout(deck)
-        deck_layout.setSpacing(4)
+        deck_layout.setSpacing(6)
         deck_layout.setContentsMargins(6, 10, 6, 6)
         deck.setStyleSheet("QGroupBox { font-weight:bold; color:#89B4FA; }")
 
-        for row_i, default_param in enumerate(('Iext', 'gNa_max', 'T_celsius')):
+        for row_i, default_param in enumerate(('stim.Iext', 'channels.gNa_max', 'env.T_celsius')):
             row_w = QWidget()
             row_h = QHBoxLayout(row_w)
             row_h.setContentsMargins(0, 0, 0, 0)
             row_h.setSpacing(4)
 
             combo = QComboBox()
-            combo.addItems(_LIVE_PARAM_NAMES)
+            combo.setEditable(True)
+            combo.addItems(_LIVE_PARAM_SUGGESTIONS)
             combo.setCurrentText(default_param)
-            combo.setFixedWidth(90)
+            combo.setFixedWidth(120)
             combo.currentTextChanged.connect(
                 lambda _text, ri=row_i: self._on_live_combo_changed(ri)
             )
@@ -557,8 +677,15 @@ class MainWindow(QMainWindow):
             )
             self._live_sliders.append(slider)
 
-            lo, hi, _, getter = _LIVE_PARAMS[default_param]
-            cur_val = getter(self.config_manager.config)
+            # Get current value for label using path resolution
+            obj, attr = self._resolve_param(default_param)
+            if obj is not None and attr is not None:
+                cur_val = getattr(obj, attr)
+            elif default_param in _LIVE_PARAMS:
+                lo, hi, _, getter = _LIVE_PARAMS[default_param]
+                cur_val = getter(self.config_manager.config)
+            else:
+                cur_val = self.config_manager.config.stim.Iext
             lbl = QLabel(f"{cur_val:.2f}")
             lbl.setFixedWidth(52)
             lbl.setStyleSheet("color:#CBA6F7; font-size:11px;")
@@ -593,7 +720,7 @@ class MainWindow(QMainWindow):
         content = QWidget()
         content.setMinimumSize(0, 0)
         c_layout = QVBoxLayout(content)
-        c_layout.setSpacing(10)
+        c_layout.setSpacing(8)
 
         # Forms
         self.form_stim = PydanticFormWidget(
@@ -634,31 +761,21 @@ class MainWindow(QMainWindow):
             "Analysis / Sweep / Map",
         )
 
-        # Group 1: run setup
-        grp_setup = QGroupBox("Run Setup (Edit First)")
-        setup_layout = QHBoxLayout(grp_setup)
-        setup_left = QVBoxLayout()
-        setup_right = QVBoxLayout()
-        setup_left.addWidget(self.form_stim)
-        setup_left.addWidget(self.form_stim_loc)
-        setup_left.addWidget(self.form_dfilter)
-        setup_right.addWidget(self.form_preset_modes)
-        self.lbl_dual_priority = QLabel("")
-        self.lbl_dual_priority.setWordWrap(True)
-        self.lbl_dual_priority.setStyleSheet(
-            "QLabel { color:#f9e2af; background:#2a1f1f; border:1px solid #5a4a3a; border-radius:6px; padding:8px; }"
-        )
-        setup_right.addWidget(self.lbl_dual_priority)
-        setup_right.addStretch()
-        setup_layout.addLayout(setup_left)
-        setup_layout.addLayout(setup_right)
-        c_layout.addWidget(grp_setup)
+        # Group 1: preset modes
+        grp_preset = QGroupBox("Preset Modes")
+        preset_layout = QVBoxLayout(grp_preset)
+        preset_layout.setSpacing(4)
+        preset_layout.addWidget(self.form_preset_modes)
+        c_layout.addWidget(grp_preset)
 
         # Group 2: model biophysics
-        grp_model = QGroupBox("Model Biophysics")
+        grp_model = QGroupBox("Biophysics")
         model_layout = QHBoxLayout(grp_model)
+        model_layout.setSpacing(8)
         model_left = QVBoxLayout()
         model_right = QVBoxLayout()
+        model_left.setSpacing(4)
+        model_right.setSpacing(4)
         model_left.addWidget(self.form_chan)
         model_left.addWidget(self.form_calcium)
         model_right.addWidget(self.form_morph)
@@ -670,37 +787,73 @@ class MainWindow(QMainWindow):
         # Group 3: advanced analysis/sweep tools
         grp_ana = QGroupBox("Advanced Analysis Tools")
         ana_layout = QVBoxLayout(grp_ana)
+        ana_layout.setSpacing(4)
         ana_layout.addWidget(self.form_ana)
         c_layout.addWidget(grp_ana)
 
         scroll.setWidget(content)
         layout.addWidget(scroll)
-
-    # ─────────────────────────────────────────────────────────────────
-    #  SIDEBAR TOGGLE
-    # ─────────────────────────────────────────────────────────────────
-    def _toggle_sidebar(self):
-        self._sidebar_visible = not self._sidebar_visible
-        self._sidebar_frame.setVisible(self._sidebar_visible)
-        self.btn_toggle_sidebar.setText("◀" if self._sidebar_visible else "▶")
-        if self._sidebar_visible:
-            self._main_splitter.setSizes([420, max(1, self._main_splitter.width() - 420)])
-
-    # ─────────────────────────────────────────────────────────────────
-    #  LIVE CONTROL DECK HELPERS
-    # ─────────────────────────────────────────────────────────────────
     def _val_to_live_slider(self, param_name: str) -> int:
-        lo, hi, _, getter = _LIVE_PARAMS[param_name]
-        val = getter(self.config_manager.config)
+        # Try custom path resolution first
+        obj, attr = self._resolve_param(param_name)
+        if obj is not None and attr is not None:
+            val = getattr(obj, attr)
+            # Use reasonable default ranges for custom paths
+            lo, hi = -100.0, 500.0
+            # Check if this is a known parameter with specific ranges
+            simple_name = param_name.split('.')[-1] if '.' in param_name else param_name
+            if simple_name in _LIVE_PARAMS:
+                lo, hi, _, _ = _LIVE_PARAMS[simple_name]
+        elif param_name in _LIVE_PARAMS:
+            lo, hi, _, getter = _LIVE_PARAMS[param_name]
+            val = getter(self.config_manager.config)
+        else:
+            # Fallback to Iext if unknown
+            lo, hi = -50.0, 250.0
+            val = self.config_manager.config.stim.Iext
         return int(round(max(0.0, min(1.0, (val - lo) / max(hi - lo, 1e-9))) * _LIVE_SLIDER_STEPS))
+
+    def _resolve_param(self, path: str):
+        """Safely get object and attribute name from a dot-separated path (e.g. 'channels.gNa_max')."""
+        if not path or not path.strip():
+            return None, None
+        
+        obj = self.config_manager.config
+        parts = [p for p in path.split('.') if p]  # Filter out empty parts
+        
+        if not parts:
+            return None, None
+        
+        for part in parts[:-1]:
+            if not hasattr(obj, part):
+                return None, None
+            obj = getattr(obj, part)
+        if not hasattr(obj, parts[-1]):
+            return None, None
+        return obj, parts[-1]
 
     def _on_live_combo_changed(self, row_i: int):
         """Sync slider position to new parameter's current value."""
         param = self._live_combos[row_i].currentText()
-        if param not in _LIVE_PARAMS:
+        combo = self._live_combos[row_i]
+        
+        # Try custom path resolution first
+        obj, attr = self._resolve_param(param)
+        if obj is not None and attr is not None:
+            val = getattr(obj, attr)
+            # Use reasonable default ranges for custom paths
+            lo, hi = -100.0, 500.0
+            if param in _LIVE_PARAMS:
+                lo, hi, _, _ = _LIVE_PARAMS[param]
+            combo.setStyleSheet("")  # Clear error style
+        elif param in _LIVE_PARAMS:
+            lo, hi, _, getter = _LIVE_PARAMS[param]
+            val = getter(self.config_manager.config)
+            combo.setStyleSheet("")  # Clear error style
+        else:
+            combo.setStyleSheet("color: #F38BA8;")  # Red text for invalid path
             return
-        lo, hi, _, getter = _LIVE_PARAMS[param]
-        val = getter(self.config_manager.config)
+        
         new_pos = int(round(max(0.0, min(1.0, (val - lo) / max(hi - lo, 1e-9))) * _LIVE_SLIDER_STEPS))
         self._live_sliders[row_i].blockSignals(True)
         self._live_sliders[row_i].setValue(new_pos)
@@ -709,12 +862,34 @@ class MainWindow(QMainWindow):
 
     def _on_live_slider_moved(self, row_i: int, raw_val: int):
         param = self._live_combos[row_i].currentText()
-        if param not in _LIVE_PARAMS:
+        combo = self._live_combos[row_i]
+        slider = self._live_sliders[row_i]
+        
+        # Try custom path resolution first
+        obj, attr = self._resolve_param(param)
+        if obj is not None and attr is not None:
+            # Use reasonable default ranges for custom paths
+            lo, hi = -100.0, 500.0
+            if param in _LIVE_PARAMS:
+                lo, hi, _, _ = _LIVE_PARAMS[param]
+            val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
+            self._live_labels[row_i].setText(f"{val:.2f}")
+            setattr(obj, attr, val)
+            combo.setStyleSheet("")  # Clear error style
+        elif param in _LIVE_PARAMS:
+            lo, hi, setter, _ = _LIVE_PARAMS[param]
+            val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
+            self._live_labels[row_i].setText(f"{val:.2f}")
+            setter(self.config_manager.config, val)
+            combo.setStyleSheet("")  # Clear error style
+        else:
+            combo.setStyleSheet("color: #F38BA8;")  # Red text for invalid path
+            # Reset slider to previous valid position (based on current actual value)
+            slider.blockSignals(True)
+            slider.setValue(self._val_to_live_slider(param))
+            slider.blockSignals(False)
             return
-        lo, hi, setter, _ = _LIVE_PARAMS[param]
-        val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
-        self._live_labels[row_i].setText(f"{val:.2f}")
-        setter(self.config_manager.config, val)
+        
         # Sync forms so the change is visible in the detail fields
         for form in (self.form_stim, self.form_chan, self.form_morph, self.form_env):
             try:
@@ -843,13 +1018,16 @@ class MainWindow(QMainWindow):
             self.form_stim.refresh()
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._refresh_topology_preview()
+        self._update_stim_preview()
 
     def _on_stim_loc_field_changed(self, _field_name: str, _value):
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._refresh_topology_preview()
+        self._update_stim_preview()
 
     def _on_dfilter_field_changed(self, _field_name: str, _value):
         self._refresh_topology_preview()
+        self._update_stim_preview()
 
     def _on_channel_field_changed(self, _field_name: str, _value):
         self._refresh_topology_preview()
@@ -863,7 +1041,7 @@ class MainWindow(QMainWindow):
             else None
         )
         self.topology.draw_neuron(
-            self.config,
+            self.config_manager.config,
             dual_config=dual_cfg,
             delay_target_name=self._delay_target_name,
             delay_custom_index=self._delay_custom_index,
@@ -896,7 +1074,6 @@ class MainWindow(QMainWindow):
         self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_stim_type_controls()
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
-        self.lbl_dual_priority.setText(self.config_manager.get_dual_priority_text())
 
     def _sync_preset_mode_controls(self):
         """Show only the mode selector that applies to the active preset."""
@@ -968,7 +1145,6 @@ class MainWindow(QMainWindow):
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
-        self.lbl_dual_priority.setText(self.config_manager.get_dual_priority_text())
         self._sync_stim_type_controls()
         self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
@@ -979,15 +1155,118 @@ class MainWindow(QMainWindow):
         for row_i, (combo, slider, lbl) in enumerate(
                 zip(self._live_combos, self._live_sliders, self._live_labels)):
             param = combo.currentText()
-            if param not in _LIVE_PARAMS:
+            
+            # Try custom path resolution first
+            obj, attr = self._resolve_param(param)
+            if obj is not None and attr is not None:
+                val = getattr(obj, attr)
+                # Use reasonable default ranges for custom paths
+                lo, hi = -100.0, 500.0
+                if param in _LIVE_PARAMS:
+                    lo, hi, _, _ = _LIVE_PARAMS[param]
+            elif param in _LIVE_PARAMS:
+                lo, hi, _, getter = _LIVE_PARAMS[param]
+                val = getter(self.config_manager.config)
+            else:
                 continue
-            lo, hi, _, getter = _LIVE_PARAMS[param]
-            val = getter(self.config_manager.config)
+            
             pos = int(round(max(0.0, min(1.0, (val - lo) / max(hi - lo, 1e-9))) * _LIVE_SLIDER_STEPS))
             slider.blockSignals(True)
             slider.setValue(pos)
             slider.blockSignals(False)
             lbl.setText(f"{val:.2f}")
+    
+    def _update_stim_preview(self):
+        """Quickly plot the expected stimulus without running the full HH solver."""
+        if not hasattr(self, '_stim_preview_plot'):
+            return
+        
+        try:
+            # Create a dummy time vector
+            t_sim = self.config_manager.config.stim.t_sim
+            t = np.linspace(0, t_sim, int(t_sim * 10))  # High resolution
+            
+            # Use existing reconstruct_stimulus_trace logic
+            # Construct a dummy SimulationResult with just t and config
+            class DummyResult:
+                pass
+            res = DummyResult()
+            res.t = t
+            res.config = self.config_manager.config
+            res.v_dendritic_filtered = None  # Ignore filter state for pure input preview
+            
+            from core.analysis import reconstruct_stimulus_trace
+            i_stim = reconstruct_stimulus_trace(res)
+            self._stim_preview_plot.clear()
+            self._stim_preview_plot.plot(t, i_stim, pen=pg.mkPen('#F5C2E7', width=2))
+        except Exception as e:
+            # Show error message in plot area instead of silent failure
+            self._stim_preview_plot.clear()
+            from pyqtgraph import TextItem
+            error_text = TextItem(
+                f"Preview unavailable: {str(e)[:50]}...",
+                color='#F38BA8',
+                anchor=(0.5, 0.5)
+            )
+            error_text.setPos(self._stim_preview_plot.width() / 2, 0)
+            self._stim_preview_plot.addItem(error_text)
+
+    def _toggle_sidebar(self):
+        """Toggle sidebar visibility."""
+        if self._sidebar_visible:
+            self._sidebar_frame.hide()
+            self.btn_toggle_sidebar.setText("▶")
+        else:
+            self._sidebar_frame.show()
+            self.btn_toggle_sidebar.setText("◀")
+        self._sidebar_visible = not self._sidebar_visible
+    
+    def _show_window_size_menu(self):
+        """Show window size preset menu for laptop users."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        
+        action_desktop = menu.addAction("🖥 Desktop (1400×900)")
+        action_desktop.triggered.connect(lambda: self._set_window_size(1400, 900))
+        
+        action_laptop_small = menu.addAction("💻 Laptop Small (1100×700)")
+        action_laptop_small.triggered.connect(lambda: self._set_window_size(1100, 700))
+        
+        action_laptop_large = menu.addAction("💻 Laptop Large (1280×800)")
+        action_laptop_large.triggered.connect(lambda: self._set_window_size(1280, 800))
+        
+        menu.addSeparator()
+        
+        action_fullscreen = menu.addAction("⛶ Fullscreen")
+        action_fullscreen.triggered.connect(self._toggle_fullscreen)
+        
+        menu.exec(self.btn_window_size.mapToGlobal(self.btn_window_size.rect().bottomLeft()))
+    
+    def _set_window_size(self, width: int, height: int):
+        """Set window to specified size and adjust splitter sizes for laptop screens."""
+        self.resize(width, height)
+        
+        # Adjust splitter sizes based on window width
+        if width < 1200:  # Small laptop
+            self._main_splitter.setSizes([280, width - 320])
+            self._sidebar_frame.setMaximumWidth(350)
+        elif width < 1400:  # Large laptop
+            self._main_splitter.setSizes([320, width - 360])
+            self._sidebar_frame.setMaximumWidth(450)
+        else:  # Desktop
+            self._main_splitter.setSizes([350, width - 400])
+            self._sidebar_frame.setMaximumWidth(520)
+        
+        self._status(f"Window resized to {width}×{height}")
+    
+    def _toggle_fullscreen(self):
+        """Toggle fullscreen mode."""
+        if self.isFullScreen():
+            self.showNormal()
+            self._status("Windowed mode")
+        else:
+            self.showFullScreen()
+            self._status("Fullscreen mode")
 
     def _on_preset_mode_changed(self, _field_name: str, _value):
         """Reapply active preset when user changes a mode selector."""
@@ -1206,9 +1485,13 @@ class MainWindow(QMainWindow):
             self._lock_ui(False)
 
     def _on_dual_stim_config_changed(self):
-        """Handle dual stimulation config changes from widget."""
+        """Handle dual stimulation configuration changes."""
+        if not hasattr(self, 'config_manager'):
+            return
         self._sync_dual_stim_into_config()
         self._sync_stim_controls_with_dual_mode()
+        self._refresh_topology_preview()
+        self._update_stim_preview()
         if self.dual_stim_widget.config.enabled:
             self._status(
                 "Dual stim enabled: "

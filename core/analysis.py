@@ -827,7 +827,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
 
     Priority:
     1) If dendritic filtering state exists in solution, use that directly.
-    2) Otherwise reconstruct from configured stimulus equations.
+    2) Otherwise reconstruct from configured stimulus equations including event_times.
     """
     from core.rhs import get_stim_current, get_event_driven_conductance
 
@@ -855,31 +855,43 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                 np.exp(-cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um)
             )
         
-        # Check for event-driven synaptic stimulation
-        if (stype >= 4 and 
-            hasattr(cfg.stim, 'n_events') and cfg.stim.n_events > 0 and 
-            hasattr(cfg.stim, 'event_times_arr') and len(cfg.stim.event_times_arr) > 0):
-            # Use event-driven conductance for synaptic types
-            for i, ti in enumerate(t):
-                conductance = get_event_driven_conductance(
-                    float(ti),
-                    stype,
-                    cfg.stim.Iext,
-                    cfg.stim.event_times_arr,
-                    cfg.stim.n_events,
-                    cfg.stim.alpha_tau
-                )
-                stim[i] += attenuation * float(conductance)
-        else:
-            # Use regular stimulus current
-            for i, ti in enumerate(t):
+        # Get event_times for synaptic stimulation
+        event_times = getattr(cfg.stim, "event_times", [])
+        event_times_arr = np.array(event_times or [], dtype=np.float64)
+        n_events = len(event_times_arr)
+        
+        for i, ti in enumerate(t):
+            # For synaptic types (4-9), use event-driven conductance if event_times are provided
+            if 4 <= stype <= 9:
+                if n_events > 0:
+                    base = get_event_driven_conductance(
+                        float(ti),
+                        stype,
+                        float(cfg.stim.Iext),
+                        event_times_arr,
+                        n_events,
+                        float(cfg.stim.alpha_tau),
+                    )
+                    # Convert conductance to current (simplified for preview)
+                    # Use reversal potential based on type
+                    if stype == 6:  # GABA-A
+                        e_rev = -70.0  # mV
+                    elif stype == 7:  # GABA-B
+                        e_rev = -95.0  # mV
+                    else:  # Excitatory
+                        e_rev = 0.0  # mV
+                    # Assume V ~ -65 mV for preview
+                    stim[i] += attenuation * abs(float(base)) * (e_rev - (-65.0))
+                # If synaptic type but no event times, produce no stimulation (skip)
+            else:
+                # Non-synaptic types use regular stimulus current
                 base = get_stim_current(
                     float(ti),
                     stype,
-                    cfg.stim.Iext,
-                    cfg.stim.pulse_start,
-                    cfg.stim.pulse_dur,
-                    cfg.stim.alpha_tau,
+                    float(cfg.stim.Iext),
+                    float(cfg.stim.pulse_start),
+                    float(cfg.stim.pulse_dur),
+                    float(cfg.stim.alpha_tau),
                     float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
                     float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
                 )
@@ -895,18 +907,48 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             dist = float(getattr(dual_cfg, "secondary_distance_um", 0.0))
             if space_const > 0.0:
                 attenuation_2 = float(np.exp(-dist / space_const))
+        
+        # Get event_times for secondary synaptic stimulation
+        event_times_2 = getattr(dual_cfg, "secondary_event_times", [])
+        event_times_arr_2 = np.array(event_times_2 or [], dtype=np.float64)
+        n_events_2 = len(event_times_arr_2)
+        
         for i, ti in enumerate(t):
-            base_2 = get_stim_current(
-                float(ti),
-                stype_2,
-                float(getattr(dual_cfg, "secondary_Iext", 0.0)),
-                float(getattr(dual_cfg, "secondary_start", 0.0)),
-                float(getattr(dual_cfg, "secondary_duration", 0.0)),
-                float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
-                float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
-                float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
-            )
-            stim[i] += attenuation_2 * float(base_2)
+            # For synaptic types (4-9), use event-driven conductance if event_times are provided
+            if 4 <= stype_2 <= 9:
+                if n_events_2 > 0:
+                    base_2 = get_event_driven_conductance(
+                        float(ti),
+                        stype_2,
+                        float(getattr(dual_cfg, "secondary_Iext", 0.0)),
+                        event_times_arr_2,
+                        n_events_2,
+                        float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
+                    )
+                    # Convert conductance to current (simplified for preview)
+                    # Use reversal potential based on type
+                    if stype_2 == 6:  # GABA-A
+                        e_rev_2 = -70.0  # mV
+                    elif stype_2 == 7:  # GABA-B
+                        e_rev_2 = -95.0  # mV
+                    else:  # Excitatory
+                        e_rev_2 = 0.0  # mV
+                    # Assume V ~ -65 mV for preview
+                    stim[i] += attenuation_2 * abs(float(base_2)) * (e_rev_2 - (-65.0))
+                # If synaptic type but no event times, produce no stimulation (skip)
+            else:
+                # Non-synaptic types use regular stimulus current
+                base_2 = get_stim_current(
+                    float(ti),
+                    stype_2,
+                    float(getattr(dual_cfg, "secondary_Iext", 0.0)),
+                    float(getattr(dual_cfg, "secondary_start", 0.0)),
+                    float(getattr(dual_cfg, "secondary_duration", 0.0)),
+                    float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
+                    float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
+                    float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
+                )
+                stim[i] += attenuation_2 * float(base_2)
 
     return stim
 

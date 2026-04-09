@@ -113,9 +113,14 @@ class ConfigManager(QObject):
         try:
             new_cfg = FullModelConfig.load_from_file(file_path)
             # CRITICAL: Do not replace self.config object identity
-            # Use field-by-field copy to preserve form bindings
+            # Use Pydantic v2's model_validate to properly reconstruct nested models
             config_dict = new_cfg.model_dump()
-            self.config.model_update(**config_dict)
+            # Reconstruct the config with proper Pydantic models (runs full validation)
+            updated_config = FullModelConfig.model_validate(config_dict)
+            
+            # Update __dict__ to preserve object identity while using validated data
+            # This ensures forms/widgets holding references to self.config continue to work
+            self.config.__dict__.update(updated_config.__dict__)
             
             # Handle dual stimulation tab if present
             if self.config.dual_stimulation is not None and self._dual_stim_widget:

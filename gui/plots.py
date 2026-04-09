@@ -165,6 +165,7 @@ class OscilloscopeWidget(QWidget):
         self._p_v.setLabel('left', 'V', units='mV', color='#CDD6F4')
         self._p_v.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_v.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
+        self._p_v.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
         self._win.nextRow()
 
         # Gate variables — row 1
@@ -175,6 +176,7 @@ class OscilloscopeWidget(QWidget):
         self._p_g.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_g.setXLink(self._p_v)
         self._p_g.setYRange(-0.05, 1.05)
+        self._p_g.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
         self._win.nextRow()
 
         # Currents — row 2
@@ -185,6 +187,7 @@ class OscilloscopeWidget(QWidget):
         self._p_i.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_i.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_i.setXLink(self._p_v)
+        self._p_i.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
         self._win.nextRow()
 
         # Calcium — row 3
@@ -195,11 +198,12 @@ class OscilloscopeWidget(QWidget):
         self._p_ca.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_ca.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_ca.setXLink(self._p_v)
+        self._p_ca.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
 
-        # Row stretch: V(t) is tallest (3), gates (2), currents (2), calcium (1)
+        # Row stretch: V(t) is tallest (3), gates (1.5), currents (4) - enlarged, calcium (1)
         self._win.ci.layout.setRowStretchFactor(0, 3)
-        self._win.ci.layout.setRowStretchFactor(1, 2)
-        self._win.ci.layout.setRowStretchFactor(2, 2)
+        self._win.ci.layout.setRowStretchFactor(1, 1.5)
+        self._win.ci.layout.setRowStretchFactor(2, 4)
         self._win.ci.layout.setRowStretchFactor(3, 1)
 
         root.addWidget(self._win, stretch=10)

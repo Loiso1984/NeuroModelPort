@@ -394,7 +394,7 @@ class FullModelConfig(BaseModel):
     stim:       SimulationParams  = SimulationParams()
     stim_location: StimulationLocationParams = StimulationLocationParams()
     dendritic_filter: DendriticFilterParams = DendriticFilterParams()
-    dual_stimulation: Optional[Any] = None  # Optional dual stimulation config (DualStimulationConfig or None)
+    dual_stimulation: Optional["DualStimulationConfig"] = None  # Optional dual stimulation config
     analysis:   AnalysisParams    = AnalysisParams()
     preset_modes: PresetModeParams = PresetModeParams()
 

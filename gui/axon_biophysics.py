@@ -86,11 +86,21 @@ class AxonBiophysicsWidget(QWidget):
         layout.addWidget(self._info)
 
         self._current_channel = 0
+        self._last_result = None
+        self._last_config = None
+        
+    def clear_cached_data(self):
+        """Clear cached simulation data to prevent stale display."""
+        self._last_result = None
+        self._last_config = None
+        self._clear_plots()
 
     def _on_channel_changed(self):
         """User changed channel view selection."""
         self._current_channel = self.combo_channel.currentIndex()
-        # Will re-render on next plot call
+        # Re-render immediately if we have data
+        if self._last_result is not None and self._last_config is not None:
+            self.plot_axon_data(self._last_result, self._last_config)
 
     # ─────────────────────────────────────────────────────────────────
     def plot_axon_data(self, result, config):
@@ -101,6 +111,10 @@ class AxonBiophysicsWidget(QWidget):
             result: SimulationResult from solver
             config: FullModelConfig with morphology and channel info
         """
+        # Store for re-rendering on channel change
+        self._last_result = result
+        self._last_config = config
+        
         self._clear_plots()
 
         t = result.t
@@ -144,28 +158,23 @@ class AxonBiophysicsWidget(QWidget):
         if hasattr(result, 'currents') and result.currents:
             currents_list = []
             current_names = []
+            channel_map = {
+                0: ['Na', 'K', 'Leak', 'Ih', 'ICa', 'IA', 'SK'],  # All
+                1: ['Na'],  # Sodium
+                2: ['K'],  # Potassium
+                3: ['Leak'],  # Leak
+                4: ['Ih'],  # Ih
+                5: ['ICa'],  # Calcium
+                6: ['IA'],  # A-type
+                7: ['SK'],  # SK
+            }
+            
+            channels_to_show = channel_map.get(self._current_channel, channel_map[0])
 
-            if 'Na' in result.currents:
-                currents_list.append(result.currents['Na'])
-                current_names.append('I_Na')
-            if 'K' in result.currents:
-                currents_list.append(result.currents['K'])
-                current_names.append('I_K')
-            if 'Leak' in result.currents:
-                currents_list.append(result.currents['Leak'])
-                current_names.append('I_L')
-            if 'Ih' in result.currents:
-                currents_list.append(result.currents['Ih'])
-                current_names.append('I_h')
-            if 'ICa' in result.currents:
-                currents_list.append(result.currents['ICa'])
-                current_names.append('I_Ca')
-            if 'IA' in result.currents:
-                currents_list.append(result.currents['IA'])
-                current_names.append('I_A')
-            if 'SK' in result.currents:
-                currents_list.append(result.currents['SK'])
-                current_names.append('I_SK')
+            for ch in channels_to_show:
+                if ch in result.currents:
+                    currents_list.append(result.currents[ch])
+                    current_names.append(f'I_{ch}')
 
             if currents_list:
                 # Stack currents into 2D array [channels × time]

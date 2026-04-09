@@ -11,46 +11,50 @@ Use Cases:
 4. Any combination of stimulation modes
 
 Architecture:
-- DualStimulationConfig: Configuration for two stimuli
+- DualStimulationConfig: Configuration for two stimuli (Pydantic model for serialization)
 - DualStimulationState: State tracking for both stimuli
 - Integration with existing RHS and solver
 """
 
 import numpy as np
-from typing import Tuple, TYPE_CHECKING
+from typing import Tuple, TYPE_CHECKING, List
 from numba import njit, float64
+from pydantic import BaseModel, Field, ConfigDict
 
 if TYPE_CHECKING:
     from .models import FullModelConfig
 
 
-class DualStimulationConfig:
-    """Configuration for dual stimulation with two independent stimuli."""
+class DualStimulationConfig(BaseModel):
+    """Configuration for dual stimulation with two independent stimuli (Pydantic model for JSON serialization)."""
     
-    def __init__(self):
-        # Primary stimulus (e.g., excitatory)
-        self.primary_location = "soma"  # soma, ais, dendritic_filtered
-        self.primary_stim_type = "const"
-        self.primary_Iext = 10.0
-        self.primary_start = 10.0
-        self.primary_duration = 1.0
-        self.primary_alpha_tau = 2.0
-        
-        # Secondary stimulus (e.g., inhibitory)
-        self.secondary_location = "dendritic_filtered"
-        self.secondary_stim_type = "GABAA"
-        self.secondary_Iext = 5.0
-        self.secondary_start = 15.0
-        self.secondary_duration = 50.0
-        self.secondary_alpha_tau = 5.0
-        
-        # Secondary stimulus dendritic parameters (if dendritic_filtered)
-        self.secondary_distance_um = 150.0
-        self.secondary_space_constant_um = 150.0
-        self.secondary_tau_dendritic_ms = 10.0
-        
-        # Enable/disable
-        self.enabled = False
+    # Primary stimulus (e.g., excitatory)
+    primary_location: str = "soma"  # soma, ais, dendritic_filtered
+    primary_stim_type: str = "const"
+    primary_Iext: float = 10.0
+    primary_start: float = 10.0
+    primary_duration: float = 1.0
+    primary_alpha_tau: float = 2.0
+    primary_event_times: List[float] = Field(default_factory=list)  # Event queue for primary (e.g., [10, 20, 30] ms)
+    
+    # Secondary stimulus (e.g., inhibitory)
+    secondary_location: str = "dendritic_filtered"
+    secondary_stim_type: str = "GABAA"
+    secondary_Iext: float = 5.0
+    secondary_start: float = 15.0
+    secondary_duration: float = 50.0
+    secondary_alpha_tau: float = 5.0
+    secondary_event_times: List[float] = Field(default_factory=list)  # Event queue for secondary (e.g., [30, 40] ms)
+    
+    # Secondary stimulus dendritic parameters (if dendritic_filtered)
+    secondary_distance_um: float = 150.0
+    secondary_space_constant_um: float = 150.0
+    secondary_tau_dendritic_ms: float = 10.0
+    
+    # Enable/disable
+    enabled: bool = False
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class DualStimulationState:

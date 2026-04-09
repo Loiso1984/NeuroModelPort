@@ -125,6 +125,15 @@ class DualStimulationWidget(QWidget):
         self.spin_primary_alpha.valueChanged.connect(self.on_config_changed)
         primary_layout.addWidget(self.spin_primary_alpha, 2, 3)
         
+        # Event times
+        primary_layout.addWidget(QLabel("Event Times (ms):"), 3, 0)
+        from PySide6.QtWidgets import QLineEdit
+        self.line_primary_event_times = QLineEdit()
+        self.line_primary_event_times.setPlaceholderText("e.g., 10, 20, 30")
+        self.line_primary_event_times.setToolTip("Comma-separated event timestamps (ms). Overrides pulse_start for synaptic types.")
+        self.line_primary_event_times.textChanged.connect(self.on_config_changed)
+        primary_layout.addWidget(self.line_primary_event_times, 3, 1, 1, 3)
+        
         layout.addWidget(primary_group)
         
         # ── Secondary Stimulus ─────────────────────────────────────
@@ -174,6 +183,14 @@ class DualStimulationWidget(QWidget):
         self.spin_secondary_alpha.setDecimals(1)
         self.spin_secondary_alpha.valueChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.spin_secondary_alpha, 2, 3)
+        
+        # Event times
+        secondary_layout.addWidget(QLabel("Event Times (ms):"), 3, 0)
+        self.line_secondary_event_times = QLineEdit()
+        self.line_secondary_event_times.setPlaceholderText("e.g., 30, 40, 50")
+        self.line_secondary_event_times.setToolTip("Comma-separated event timestamps (ms). Overrides pulse_start for synaptic types.")
+        self.line_secondary_event_times.textChanged.connect(self.on_config_changed)
+        secondary_layout.addWidget(self.line_secondary_event_times, 3, 1, 1, 3)
         
         layout.addWidget(secondary_group)
         
@@ -279,9 +296,11 @@ class DualStimulationWidget(QWidget):
             self.combo_primary_location, self.combo_primary_type,
             self.spin_primary_current, self.spin_primary_start,
             self.spin_primary_duration, self.spin_primary_alpha,
+            self.line_primary_event_times,
             self.combo_secondary_location, self.combo_secondary_type,
             self.spin_secondary_current, self.spin_secondary_start,
             self.spin_secondary_duration, self.spin_secondary_alpha,
+            self.line_secondary_event_times,
             self.spin_dendritic_distance, self.spin_dendritic_lambda,
             self.spin_dendritic_tau, self.check_enabled,
         ]
@@ -295,6 +314,11 @@ class DualStimulationWidget(QWidget):
         self.spin_primary_start.setValue(self.config.primary_start)
         self.spin_primary_duration.setValue(self.config.primary_duration)
         self.spin_primary_alpha.setValue(self.config.primary_alpha_tau)
+        if self.config.primary_event_times and len(self.config.primary_event_times) > 0:
+            self.line_primary_event_times.setText(", ".join(str(x) for x in self.config.primary_event_times)
+            )
+        else:
+            self.line_primary_event_times.setText("")
 
         # Secondary stimulus
         self.combo_secondary_location.setCurrentText(self.config.secondary_location)
@@ -303,6 +327,11 @@ class DualStimulationWidget(QWidget):
         self.spin_secondary_start.setValue(self.config.secondary_start)
         self.spin_secondary_duration.setValue(self.config.secondary_duration)
         self.spin_secondary_alpha.setValue(self.config.secondary_alpha_tau)
+        if self.config.secondary_event_times and len(self.config.secondary_event_times) > 0:
+            self.line_secondary_event_times.setText(", ".join(str(x) for x in self.config.secondary_event_times)
+            )
+        else:
+            self.line_secondary_event_times.setText("")
 
         # Dendritic parameters
         self.spin_dendritic_distance.setValue(self.config.secondary_distance_um)
@@ -332,6 +361,19 @@ class DualStimulationWidget(QWidget):
         self.config.primary_duration = self.spin_primary_duration.value()
         self.config.primary_alpha_tau = self.spin_primary_alpha.value()
         
+        # Parse primary event times
+        event_text = self.line_primary_event_times.text().strip()
+        if event_text:
+            try:
+                self.config.primary_event_times = [float(x.strip()) for x in event_text.split(",") if x.strip()]
+                self.line_primary_event_times.setStyleSheet("")  # Clear error style
+            except ValueError:
+                self.config.primary_event_times = []
+                self.line_primary_event_times.setStyleSheet("border: 2px solid #F38BA8;")  # Red border for error
+        else:
+            self.config.primary_event_times = []
+            self.line_primary_event_times.setStyleSheet("")  # Clear error style
+        
         # Secondary stimulus
         self.config.secondary_location = self.combo_secondary_location.currentText()
         self.config.secondary_stim_type = self.combo_secondary_type.currentText()
@@ -339,6 +381,19 @@ class DualStimulationWidget(QWidget):
         self.config.secondary_start = self.spin_secondary_start.value()
         self.config.secondary_duration = self.spin_secondary_duration.value()
         self.config.secondary_alpha_tau = self.spin_secondary_alpha.value()
+        
+        # Parse secondary event times
+        event_text = self.line_secondary_event_times.text().strip()
+        if event_text:
+            try:
+                self.config.secondary_event_times = [float(x.strip()) for x in event_text.split(",") if x.strip()]
+                self.line_secondary_event_times.setStyleSheet("")  # Clear error style
+            except ValueError:
+                self.config.secondary_event_times = []
+                self.line_secondary_event_times.setStyleSheet("border: 2px solid #F38BA8;")  # Red border for error
+        else:
+            self.config.secondary_event_times = []
+            self.line_secondary_event_times.setStyleSheet("")  # Clear error style
         
         # Dendritic parameters
         self.config.secondary_distance_um = self.spin_dendritic_distance.value()
