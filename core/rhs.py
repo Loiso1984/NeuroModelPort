@@ -57,9 +57,18 @@ def _biexp_waveform(t, t0, tau_rise, tau_decay):
     """Normalised dual-exponential waveform, peak = 1.0 at t_peak."""
     if t < t0:
         return 0.0
+    # Guard against tau_decay == tau_rise (would cause division by zero)
+    if abs(tau_decay - tau_rise) < 1e-12:
+        # Fallback to simple exponential
+        dt = t - t0
+        tau_safe = max(tau_decay, 1e-12)
+        return np.exp(-dt / tau_safe)
     dt = t - t0
     t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * np.log(tau_decay / tau_rise)
     norm = np.exp(-t_peak / tau_decay) - np.exp(-t_peak / tau_rise)
+    # Guard against norm == 0
+    if abs(norm) < 1e-12:
+        return 0.0
     return (np.exp(-dt / tau_decay) - np.exp(-dt / tau_rise)) / norm
 
 @njit(float64(float64), cache=True)
@@ -82,26 +91,29 @@ def _calculate_syn_tau(stype, atau):
 
     Centralises the biological time-constant logic so that get_stim_current
     and get_event_driven_conductance stay consistent.
+    v12.0: Updated to literature-accurate kinetics with parameter-based scaling.
     Reference: Destexhe et al. 1994, J Neurophysiol 72:689-703.
+             Jonas et al. 1993, J Physiol 468:743-767 (GABA kinetics).
     """
-    if stype == 4:      # AMPA — fast excitatory
-        tau_r = max(0.1, min(1.0,   atau / TAU_RISE_RATIO))
-        tau_d = max(1.0, min(10.0,  atau))
-    elif stype == 5:    # NMDA — slow excitatory
-        tau_r = max(1.0, min(10.0,  atau / TAU_RISE_RATIO))
+    TAU_RISE_RATIO = 10.0  # tau_rise = tau_decay / TAU_RISE_RATIO
+    if stype == 4:      # AMPA — fast excitatory (literature: tau_r=0.2, tau_d=2.0)
+        tau_r = max(0.2, min(1.0,   atau / TAU_RISE_RATIO))
+        tau_d = max(2.0, min(10.0,  atau))
+    elif stype == 5:    # NMDA — slow excitatory (literature: tau_r=5.0, tau_d=120.0)
+        tau_r = max(5.0, min(10.0,  atau / TAU_RISE_RATIO))
         tau_d = max(10.0, min(200.0, atau))
-    elif stype == 6:    # GABA-A — fast inhibitory
-        tau_r = max(0.2, min(2.0,   atau / TAU_RISE_RATIO))
-        tau_d = max(2.0, min(20.0,  atau))
-    elif stype == 7:    # GABA-B — slow inhibitory
-        tau_r = max(5.0, min(100.0, atau / TAU_RISE_RATIO))
+    elif stype == 6:    # GABA-A — fast inhibitory (literature: tau_r=0.5, tau_d=6.0)
+        tau_r = max(0.5, min(2.0,   atau / TAU_RISE_RATIO))
+        tau_d = max(6.0, min(20.0,  atau))
+    elif stype == 7:    # GABA-B — slow inhibitory (literature: tau_r=30.0, tau_d=250.0)
+        tau_r = max(30.0, min(100.0, atau / TAU_RISE_RATIO))
         tau_d = max(50.0, min(500.0, atau))
-    elif stype == 8:    # Kainate — intermediate excitatory
-        tau_r = max(0.5, min(5.0,   atau / TAU_RISE_RATIO))
-        tau_d = max(5.0, min(50.0,  atau))
-    elif stype == 9:    # Nicotinic ACh — moderate excitatory
-        tau_r = max(1.0, min(10.0,  atau / TAU_RISE_RATIO))
-        tau_d = max(10.0, min(100.0, atau))
+    elif stype == 8:    # Kainate — intermediate excitatory (literature: tau_r=1.0, tau_d=10.0)
+        tau_r = max(1.0, min(5.0,   atau / TAU_RISE_RATIO))
+        tau_d = max(10.0, min(50.0,  atau))
+    elif stype == 9:    # Nicotinic ACh — moderate excitatory (literature: tau_r=2.0, tau_d=20.0)
+        tau_r = max(2.0, min(10.0,  atau / TAU_RISE_RATIO))
+        tau_d = max(20.0, min(100.0, atau))
     else:
         tau_r = 0.0
         tau_d = 0.0
@@ -543,7 +555,7 @@ def rhs_multicompartment(
                 i_stim_eff += i_stim_secondary
 
         # dV/dt
-        dydt[off_v + i] = (i_stim_eff - i_ion + i_ax) / cm_v[i]
+        dydt[off_v + i] = (i_stim_eff - i_ion + i_ax) / max(cm_v[i], 1e-12)
 
         # Gate derivatives (HH core) — per-compartment Q10 (Stage 6.2: thermal gradient)
         dydt[off_m + i] = phi_na[i] * (am(vi) * (1.0 - mi) - bm(vi) * mi)

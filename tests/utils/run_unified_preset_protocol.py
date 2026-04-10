@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -40,7 +41,9 @@ def _first_cross(v: np.ndarray, t: np.ndarray, threshold: float = 0.0) -> float:
 
 
 def _collect_single(cfg: FullModelConfig, name: str) -> dict:
+    start_time = time.perf_counter()
     res = NeuronSolver(cfg).run_single()
+    wall_time_ms = (time.perf_counter() - start_time) * 1000.0
     st = _spike_times(res.v_soma, res.t)
     freq_inst = float(1000.0 / np.mean(np.diff(st))) if len(st) > 1 else 0.0
     total_dur_ms = float(res.t[-1] - res.t[0]) if len(res.t) > 1 else 0.0
@@ -58,6 +61,7 @@ def _collect_single(cfg: FullModelConfig, name: str) -> dict:
         "v_min_mV": float(np.min(res.v_soma)),
         "ca_peak_nM": float(np.max(res.ca_i[0, :]) * 1e6) if res.ca_i is not None else None,
         "stable_finite": bool(np.all(np.isfinite(res.v_soma))),
+        "wall_time_ms": wall_time_ms,
     }
     if res.n_comp > 1:
         if cfg.morphology.N_trunk > 0:
@@ -74,12 +78,12 @@ def _collect_single(cfg: FullModelConfig, name: str) -> dict:
     return row
 
 
-def _base_cfg(name: str, *, t_sim: float = 260.0, dt_eval: float = 0.2) -> FullModelConfig:
+def _base_cfg(name: str, *, t_sim: float = 1000.0, dt_eval: float = 0.5) -> FullModelConfig:
     cfg = FullModelConfig()
     apply_preset(cfg, name)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
     return cfg
 
 
@@ -93,9 +97,9 @@ def _build_standard_probe_cfg(name: str) -> FullModelConfig:
     probe_amp = max(8.0, min(30.0, probe_amp if probe_amp > 0 else 10.0))
     cfg.stim.stim_type = "const"
     cfg.stim.Iext = probe_amp
-    cfg.stim.t_sim = 160.0
-    cfg.stim.dt_eval = 0.3
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.t_sim = 1000.0
+    cfg.stim.dt_eval = 0.5
+    cfg.stim.jacobian_mode = "native_hines"
     return cfg
 
 
@@ -111,7 +115,7 @@ def main() -> int:
     }
 
     for preset in get_preset_names():
-        cfg = _base_cfg(preset, t_sim=220.0, dt_eval=0.25)
+        cfg = _base_cfg(preset, t_sim=1000.0, dt_eval=0.5)
         report["default_behavior"].append(_collect_single(cfg, preset))
         probe_cfg = _build_standard_probe_cfg(preset)
         report["standard_probe"].append(_collect_single(probe_cfg, preset))
@@ -121,9 +125,9 @@ def main() -> int:
         cfg = FullModelConfig()
         cfg.preset_modes.k_mode = mode
         apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
-        cfg.stim.t_sim = 300.0
-        cfg.stim.dt_eval = 0.2
-        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.t_sim = 1000.0
+        cfg.stim.dt_eval = 0.5
+        cfg.stim.jacobian_mode = "native_hines"
         row = _collect_single(cfg, f"K_mode={mode}")
         row["mode_family"] = "K"
         report["mode_variants"].append(row)
@@ -132,9 +136,9 @@ def main() -> int:
         cfg = FullModelConfig()
         cfg.preset_modes.alzheimer_mode = mode
         apply_preset(cfg, "N: Alzheimer's (v10 Calcium Toxicity)")
-        cfg.stim.t_sim = 320.0
-        cfg.stim.dt_eval = 0.2
-        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.t_sim = 1000.0
+        cfg.stim.dt_eval = 0.5
+        cfg.stim.jacobian_mode = "native_hines"
         row = _collect_single(cfg, f"N_mode={mode}")
         row["mode_family"] = "N"
         report["mode_variants"].append(row)
@@ -145,7 +149,7 @@ def main() -> int:
         apply_preset(cfg, "O: Hypoxia (v10 ATP-pump failure)")
         cfg.stim.t_sim = 320.0
         cfg.stim.dt_eval = 0.2
-        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.jacobian_mode = "native_hines"
         res = NeuronSolver(cfg).run_single()
         st = _spike_times(res.v_soma, res.t)
         total_dur_ms = float(res.t[-1] - res.t[0]) if len(res.t) > 1 else 0.0
@@ -165,13 +169,13 @@ def main() -> int:
             "ca_peak_nM": float(np.max(res.ca_i[0, :]) * 1e6) if res.ca_i is not None else None,
             "stable_finite": bool(np.all(np.isfinite(res.v_soma))),
         }
-        row["spikes_first_half"] = int(np.sum(st < 160.0))
-        row["spikes_second_half"] = int(np.sum(st >= 160.0))
+        row["spikes_first_half"] = int(np.sum(st < 500.0))
+        row["spikes_second_half"] = int(np.sum(st >= 500.0))
         report["mode_variants"].append(row)
 
     # Demyelination conduction check (D vs F)
-    cfg_d = _base_cfg("D: alpha-Motoneuron (Powers 2001)", t_sim=220.0, dt_eval=0.15)
-    cfg_f = _base_cfg("F: Multiple Sclerosis (Demyelination)", t_sim=220.0, dt_eval=0.15)
+    cfg_d = _base_cfg("D: alpha-Motoneuron (Powers 2001)", t_sim=1000.0, dt_eval=0.5)
+    cfg_f = _base_cfg("F: Multiple Sclerosis (Demyelination)", t_sim=1000.0, dt_eval=0.5)
     row_d = _collect_single(cfg_d, "D")
     row_f = _collect_single(cfg_f, "F")
     report["demyelination_conduction_check"] = {

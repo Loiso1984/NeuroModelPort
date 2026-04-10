@@ -25,6 +25,7 @@ class SimulationResult:
         self.y      = y
         self.config = config
         self.n_comp = n_comp
+        self.diverged = False  # v12.0: Flag for simulation divergence due to non-physical parameters
 
         self.v_all  = y[0:n_comp, :]
         self.v_soma = self.v_all[0, :]
@@ -108,12 +109,18 @@ def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms:
         
     from core.stochastic_rng import get_rng
     rng = get_rng()
-    
+
     if train_type == 'regular':
+        if freq_hz <= 0:
+            return np.array([t_start], dtype=np.float64)  # Fallback: single event
         isi_ms = 1000.0 / freq_hz
         return np.arange(t_start, t_start + duration_ms, isi_ms, dtype=np.float64)
     elif train_type == 'poisson':
+        if freq_hz <= 0:
+            return np.array([t_start], dtype=np.float64)  # Fallback: single event
         rate_ms = freq_hz / 1000.0
+        if rate_ms <= 0:
+            return np.array([t_start], dtype=np.float64)  # Fallback: single event
         expected_spikes = int(duration_ms * rate_ms * 1.5)
         intervals = rng.exponential(1.0 / rate_ms, expected_spikes)
         times = t_start + np.cumsum(intervals)
@@ -148,13 +155,13 @@ class NeuronSolver:
         #   Soma (sphere):   A/V = 6/d
         #   Cylinder:        A/V = 4/d
         d_soma = diameters[0]
-        av_soma = 6.0 / d_soma  # sphere
+        av_soma = 6.0 / max(d_soma, 1e-12)  # sphere, guard against zero diameter
 
         b_ca_v = np.empty(n_comp, dtype=np.float64)
         b_ca_v[0] = b_ca_base  # soma = user value
 
         for i in range(1, n_comp):
-            av_i = 4.0 / diameters[i]  # cylinder
+            av_i = 4.0 / max(diameters[i], 1e-12)  # cylinder, guard against zero diameter
             b_ca_v[i] = b_ca_base * (av_i / av_soma)
 
         return b_ca_v
@@ -684,8 +691,31 @@ class NeuronSolver:
         stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
         t_kelvin = cfg.env.T_celsius + 273.15
 
-        stype = s_map.get(cfg.stim.stim_type, 0)
-        stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
+        # --- Dual stimulation detection and parameter preparation ---
+        dual_stim_enabled = 0
+        dual_cfg = getattr(cfg, "dual_stimulation", None)
+        if dual_cfg is not None and hasattr(dual_cfg, 'enabled') and dual_cfg.enabled:
+            dual_stim_enabled = 1
+            # When dual stimulation is enabled, primary parameters come from the dual config.
+            stype = s_map.get(dual_cfg.primary_stim_type, 0)
+            iext = dual_cfg.primary_Iext
+            t0 = dual_cfg.primary_start
+            td = dual_cfg.primary_duration
+            atau = dual_cfg.primary_alpha_tau
+            stim_mode = stim_mode_map.get(dual_cfg.primary_location, 0)
+            stim_comp = 0
+            zap_f0 = getattr(dual_cfg, "primary_zap_f0_hz", cfg.stim.zap_f0_hz)
+            zap_f1 = getattr(dual_cfg, "primary_zap_f1_hz", cfg.stim.zap_f1_hz)
+        else:
+            stype = s_map.get(cfg.stim.stim_type, 0)
+            iext = cfg.stim.Iext
+            t0 = cfg.stim.pulse_start
+            td = cfg.stim.pulse_dur
+            atau = cfg.stim.alpha_tau
+            stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
+            stim_comp = cfg.stim.stim_comp
+            zap_f0 = cfg.stim.zap_f0_hz
+            zap_f1 = cfg.stim.zap_f1_hz
         use_dfilter_primary = int(
             stim_mode == 2
             and cfg.dendritic_filter.enabled
@@ -701,14 +731,11 @@ class NeuronSolver:
         dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
 
         stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
-        zap_f0_2, zap_f1_2 = cfg.stim.zap_f0_hz, cfg.stim.zap_f1_hz
+        zap_f0_2, zap_f1_2 = zap_f0, zap_f1
         stim_comp_2, stim_mode_2 = 0, 0
         use_dfilter_secondary = 0
         dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
-        dual_stim_enabled = 0
-        dual_cfg = getattr(cfg, "dual_stimulation", None)
-        if dual_cfg is not None and getattr(dual_cfg, "enabled", False):
-            dual_stim_enabled = 1
+        if dual_stim_enabled == 1:
             stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
             iext_2 = dual_cfg.secondary_Iext
             t0_2 = dual_cfg.secondary_start
@@ -724,6 +751,16 @@ class NeuronSolver:
             if stim_mode_2 == 2 and dual_cfg.secondary_space_constant_um > 0:
                 dfilter_attenuation_2 = np.exp(
                     -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
+                )
+            # Generate event times for secondary stimulus (synaptic train)
+            event_times_arr_2 = np.zeros(0, dtype=np.float64)
+            if stype_2 >= 4:  # Conductance-based synapse
+                event_times_arr_2 = generate_effective_event_times(
+                    getattr(dual_cfg, 'secondary_train_type', 'none'),
+                    getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                    getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                    dual_cfg.secondary_start,
+                    dual_cfg.secondary_event_times
                 )
 
         # ── Reconstruct state offsets (must match rhs.py exactly) ──
@@ -867,17 +904,17 @@ class NeuronSolver:
             mg_ext              = float(getattr(cfg.env, "Mg_ext", 1.0)),
             tau_sk              = float(getattr(cc, "tau_SK", 15.0)),
             stype               = np.int32(stype),
-            iext                = float(cfg.stim.Iext),
-            t0                  = float(cfg.stim.pulse_start),
-            td                  = float(cfg.stim.pulse_dur),
-            atau                = float(cfg.stim.alpha_tau),
-            zap_f0_hz           = float(cfg.stim.zap_f0_hz),
-            zap_f1_hz           = float(cfg.stim.zap_f1_hz),
+            iext                = float(iext),
+            t0                  = float(t0),
+            td                  = float(td),
+            atau                = float(atau),
+            zap_f0_hz           = float(zap_f0),
+            zap_f1_hz           = float(zap_f1),
             event_times_arr     = event_times_arr,
             n_events            = np.int32(len(event_times_arr)),
             event_times_arr_2   = event_times_arr_2,
             n_events_2          = np.int32(len(event_times_arr_2)),
-            stim_comp           = np.int32(cfg.stim.stim_comp),
+            stim_comp           = np.int32(stim_comp),
             stim_mode           = np.int32(stim_mode),
             use_dfilter_primary = np.int32(use_dfilter_primary),
             dfilter_attenuation = float(dfilter_attenuation),
@@ -902,7 +939,7 @@ class NeuronSolver:
             rng_state         = None,
         )
 
-        t_out, y_out = run_native_loop(
+        t_out, y_out, diverged = run_native_loop(
             y0.astype(np.float64),
             float(cfg.stim.t_sim),
             dt_internal,
@@ -914,6 +951,14 @@ class NeuronSolver:
             morph["g_axial_to_parent"].astype(np.float64),
             morph["g_axial_parent_to_child"].astype(np.float64),
         )
+
+        if diverged:
+            # Return partial result with warning flag
+            res = SimulationResult(t_out, y_out, n_comp, cfg)
+            self._post_process_physics(res, morph)
+            res.morph = morph
+            res.diverged = True
+            return res
 
         res = SimulationResult(t_out, y_out, n_comp, cfg)
         self._post_process_physics(res, morph)

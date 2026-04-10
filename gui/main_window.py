@@ -497,7 +497,11 @@ class MainWindow(QMainWindow):
         # ── Sidebar panel (replaces old "1) Setup" tab) ───────────────
         self._sidebar_frame = QFrame()
         self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self._sidebar_frame.setMinimumWidth(320)  # Prevent collapse on small screens
+        # Calculate sidebar width based on screen size (15-20% of screen width, min 320px)
+        from PySide6.QtWidgets import QApplication
+        screen_width = QApplication.primaryScreen().availableSize().width()
+        calculated_width = max(320, min(int(screen_width * 0.18), 400))
+        self._sidebar_frame.setMinimumWidth(calculated_width)
         self._sidebar_frame.setMaximumWidth(520)
         self._build_sidebar_panel()
         # Dummy tab_params kept for backward-compat references (not in tabs)
@@ -573,13 +577,34 @@ class MainWindow(QMainWindow):
         stim_splitter.addWidget(stim_controls_widget)
         
         # Bottom section: Real-time stimulus preview (resizable)
+        preview_container = QWidget()
+        preview_layout = QVBoxLayout(preview_container)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(4)
+        
+        # Preview controls row
+        preview_controls = QHBoxLayout()
+        preview_controls.setSpacing(8)
+        
+        btn_refresh_preview = QPushButton("🔄 Refresh Preview")
+        btn_refresh_preview.setToolTip("Manually refresh stimulus preview with current parameters")
+        btn_refresh_preview.clicked.connect(self._update_stim_preview)
+        btn_refresh_preview.setMaximumWidth(140)
+        
+        preview_controls.addWidget(btn_refresh_preview)
+        preview_controls.addStretch()
+        
         self._stim_preview_plot = pg.PlotWidget(title="Stimulus Protocol Preview")
         self._stim_preview_plot.setLabel('left', 'Total Input Current')
         self._stim_preview_plot.setLabel('bottom', 'Time (ms)')
         self._stim_preview_plot.setBackground('#1E1E2E')
         self._stim_preview_plot.setMinimumHeight(150)  # Larger minimum for better visibility
         self._stim_preview_plot.setMaximumHeight(500)  # Allow more space for plot
-        stim_splitter.addWidget(self._stim_preview_plot)
+        
+        preview_layout.addLayout(preview_controls)
+        preview_layout.addWidget(self._stim_preview_plot)
+        
+        stim_splitter.addWidget(preview_container)
         stim_splitter.setSizes([250, 300])  # Give preview more space initially
         stim_splitter.setStretchFactor(0, 1)  # Controls get 1x stretch
         stim_splitter.setStretchFactor(1, 2)  # Preview gets 2x stretch
@@ -712,8 +737,6 @@ class MainWindow(QMainWindow):
             row_h.addWidget(slider, 1)
             row_h.addWidget(lbl)
             deck_layout.addWidget(row_w)
-
-        layout.addWidget(deck)
 
         # ── Params hint ───────────────────────────────────────────────
         self.lbl_params_hint = QLabel("")
@@ -930,6 +953,69 @@ class MainWindow(QMainWindow):
                 pass
         # Debounced auto-run if HINES mode is active
         self._live_timer.start()
+
+    def _on_quick_set_changed(self, selection: str):
+        """Handle Quick-Set dropdown selection to configure live deck sliders."""
+        if selection == "— Quick-Set —":
+            return
+
+        quick_set_params = {
+            "Channel Densities": ["channels.gNa_max", "channels.gK_max", "channels.gCa_max"],
+            "Dendritic Cable": ["morphology.Ra", "dendritic_filter.distance_um", "dendritic_filter.space_constant_um"],
+            "Metabolism": ["calcium.tau_Ca", "calcium.B_Ca", "env.T_celsius"],
+        }
+
+        if selection not in quick_set_params:
+            return
+
+        params = quick_set_params[selection]
+        # Ensure we have enough rows in the live deck
+        while len(self._live_combos) < len(params):
+            # Add a new row (copy from existing row creation logic)
+            row_i = len(self._live_combos)
+            row_w = QWidget()
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            row_h.setSpacing(4)
+
+            combo = QComboBox()
+            combo.setEditable(True)
+            combo.addItems(_LIVE_PARAM_SUGGESTIONS)
+            combo.setCurrentText("")
+            combo.setFixedWidth(120)
+            combo.currentTextChanged.connect(
+                lambda _text, ri=row_i: self._on_live_combo_changed(ri)
+            )
+            self._live_combos.append(combo)
+
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, _LIVE_SLIDER_STEPS)
+            slider.setValue(0)
+            slider.valueChanged.connect(
+                lambda raw, ri=row_i: self._on_live_slider_moved(ri, raw)
+            )
+            self._live_sliders.append(slider)
+
+            lbl = QLabel("0.00")
+            lbl.setFixedWidth(52)
+            lbl.setStyleSheet("color:#CBA6F7; font-size:11px;")
+            self._live_labels.append(lbl)
+
+            row_h.addWidget(combo)
+            row_h.addWidget(slider, 1)
+            row_h.addWidget(lbl)
+            # Get the deck layout
+            deck = self.findChild(QGroupBox, "🎛️ Live Control Deck")
+            if deck:
+                deck.layout().addWidget(row_w)
+
+        # Set the parameters
+        for i, param in enumerate(params):
+            if i < len(self._live_combos):
+                self._live_combos[i].setCurrentText(param)
+                self._on_live_combo_changed(i)
+
+        self._sync_live_deck_to_config()
 
     def _on_live_timer_fired(self):
         """Auto-run after debounce if HINES is active."""
@@ -1214,8 +1300,11 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # Create a dummy time vector
-            t_sim = self.config_manager.config.stim.t_sim
+            cfg = self.config_manager.config.stim
+            # Use synaptic train duration if available, otherwise use simulation time
+            t_sim = cfg.t_sim
+            if cfg.synaptic_train_type != 'none':
+                t_sim = max(t_sim, cfg.synaptic_train_duration_ms + cfg.pulse_start + 50)
             t = np.linspace(0, t_sim, int(t_sim * 10))  # High resolution
             
             # Use existing reconstruct_stimulus_trace logic
@@ -1257,13 +1346,13 @@ class MainWindow(QMainWindow):
         """Show window size preset menu for laptop users."""
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
-        
+
         action_desktop = menu.addAction("🖥 Desktop (1400×900)")
         action_desktop.triggered.connect(lambda: self._set_window_size(1400, 900))
-        
+
         action_laptop_small = menu.addAction("💻 Laptop Small (1100×700)")
         action_laptop_small.triggered.connect(lambda: self._set_window_size(1100, 700))
-        
+
         action_laptop_large = menu.addAction("💻 Laptop Large (1280×800)")
         action_laptop_large.triggered.connect(lambda: self._set_window_size(1280, 800))
         
@@ -1299,10 +1388,23 @@ class MainWindow(QMainWindow):
             logger = logging.getLogger(__name__)
             
             self.config_manager.save_config_as(".last_session.json")
-            # Save UI state
+            # Save UI state - check if widgets are still valid before accessing
+            try:
+                splitter_sizes = self._main_splitter.sizes()
+            except:
+                splitter_sizes = []
+            
+            live_deck = []
+            for combo in self._live_combos:
+                try:
+                    if hasattr(combo, 'currentText'):
+                        live_deck.append(combo.currentText())
+                except:
+                    pass  # Widget already deleted, skip
+            
             ui_state = {
-                "splitter_sizes": self._main_splitter.sizes(),
-                "live_deck": [combo.currentText() for combo in self._live_combos]
+                "splitter_sizes": splitter_sizes,
+                "live_deck": live_deck
             }
             with open(".ui_state.json", "w") as f:
                 json.dump(ui_state, f)
@@ -1320,6 +1422,11 @@ class MainWindow(QMainWindow):
         else:
             self.showFullScreen()
             self._status("Fullscreen mode")
+
+    def _reset_layout(self):
+        """Reset splitter sizes to default (350/800)."""
+        self._main_splitter.setSizes([350, 800])
+        self._status("Layout reset to default")
 
     def _on_preset_mode_changed(self, _field_name: str, _value):
         """Reapply active preset when user changes a mode selector."""
@@ -1499,6 +1606,22 @@ class MainWindow(QMainWindow):
                 on_error=self._on_sim_error
             )
 
+    def _on_compartment_selected(self, comp_idx: int):
+        """Handle compartment selection from topology click."""
+        cfg = self.config_manager.config
+        cfg.stim.stim_comp = comp_idx
+        self._status(f"Stimulation compartment set to idx {comp_idx}")
+        # Refresh stimulation form to show new value
+        self._refresh_all_forms()
+        # Redraw topology to move PRI marker
+        dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
+        self.topology.draw_neuron(
+            cfg,
+            dual_config=dual_cfg,
+            delay_target_name=self._delay_target_name,
+            delay_custom_index=self._delay_custom_index,
+        )
+
     def _on_simulation_done(self, result: dict):
         """Handle simulation results on the main thread (UI updates)."""
         try:
@@ -1508,6 +1631,14 @@ class MainWindow(QMainWindow):
             elif 'single' in result:
                 res = result['single']
                 self._last_result = res
+                # Check for divergence (v12.0)
+                if getattr(res, 'diverged', False):
+                    self._status("⚠️ Simulation Diverged: Check for non-physical parameters (e.g. zero resistance or infinite conductance)")
+                    # Still update plots with partial result
+                    self.oscilloscope.update_plots(res)
+                    self.analytics.update_analytics(res)
+                    self._lock_ui(False)
+                    return
                 self.oscilloscope.update_plots(res)
                 self.analytics.update_analytics(res)
                 dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None

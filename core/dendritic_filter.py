@@ -45,7 +45,8 @@ class DendriticFilterState:
         self.tau_dendritic_ms = tau_dendritic_ms
         
         # Pre-compute attenuation factor
-        self.attenuation = np.exp(-distance_um / space_constant_um)
+        space_const_safe = max(space_constant_um, 1e-12)
+        self.attenuation = np.exp(-distance_um / space_const_safe)
         
         # State: filtered (low-pass) version of input
         self.V_filtered = 0.0  # Will be updated each step
@@ -110,7 +111,7 @@ def apply_dendritic_filter(
     
     # Low-pass filter update (Euler method)
     if tau_dendritic_ms > 0.0:
-        inv_tau = 1.0 / tau_dendritic_ms
+        inv_tau = 1.0 / max(tau_dendritic_ms, 1e-12)
         dV_dt = (I_dend - V_filtered_prev) * inv_tau
         V_filtered_new = V_filtered_prev + dV_dt * dt
     else:
@@ -135,7 +136,7 @@ def validate_dendritic_filter(distance_um: float, space_constant_um: float) -> b
     if space_constant_um < 50 or space_constant_um > 300:
         print(f"⚠️  Warning: space_constant_um = {space_constant_um} µm (typical: 100-200 µm)")
     
-    attenuation = np.exp(-distance_um / space_constant_um)
+    attenuation = np.exp(-distance_um / max(space_constant_um, 1e-12))
     if attenuation < 0.05:
         print(f"⚠️  Warning: attenuation = {attenuation:.4f} (very small, signal nearly blocked)")
     if attenuation > 0.99:

@@ -55,7 +55,7 @@ def test_hypoxia_preset_calcium_safety():
     apply_preset(config, 'Hypoxia')
     config.stim.t_sim = 2000.0  # Extended simulation
     config.stim.dt_eval = 0.5   # Чуть увеличим шаг вывода для ускорения теста (не влияет на точность)
-    config.stim.jacobian_mode = 'sparse_fd' # Убедимся что используется быстрый режим
+    config.stim.jacobian_mode = 'native_hines' # Убедимся что используется быстрый режим
 
     solver = NeuronSolver(config)
     result = solver.run_single()
@@ -81,7 +81,7 @@ def test_alzheimer_preset_calcium_safety():
     apply_preset(config, "Alzheimer's")
     config.stim.t_sim = 2000.0 
     config.stim.dt_eval = 0.5
-    config.stim.jacobian_mode = 'sparse_fd'
+    config.stim.jacobian_mode = 'native_hines'
 
     solver = NeuronSolver(config)
     result = solver.run_single()

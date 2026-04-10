@@ -205,6 +205,9 @@ def spike_threshold(V: np.ndarray, t: np.ndarray,
     Returns the voltage at which dV/dt first exceeds `pct`×max(dV/dt).
     Classic electrophysiology definition (Hille 2001).
     """
+    # Validate time array for gradient calculation
+    if len(t) < 2 or len(np.unique(t)) < 2:
+        return np.nan
     dvdt = np.gradient(V, t)
     max_dvdt = np.max(dvdt)
     if max_dvdt < 0.5:          # no fast depolarisation
@@ -604,7 +607,11 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     V   = result.v_soma
     cfg = result.config
 
-    dVdt = np.gradient(V, t)
+    # Validate time array for gradient calculation
+    if len(t) < 2 or len(np.unique(t)) < 2:
+        dVdt = np.zeros_like(V)
+    else:
+        dVdt = np.gradient(V, t)
 
     # Total ionic current (soma, index 0)
     I_ion_soma = sum(result.currents.values())
@@ -865,11 +872,19 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                 cfg.stim.pulse_start,
                 getattr(cfg.stim, "event_times", [])
             )
+            # Fallback: if no event times for synaptic type, generate single event at pulse_start
+            if len(event_times_arr) == 0:
+                event_times_arr = np.array([cfg.stim.pulse_start], dtype=np.float64)
         else:
             # For non-synaptic types, just use manual event_times directly
             event_times_arr = np.array(getattr(cfg.stim, "event_times", []), dtype=np.float64)
         n_events = len(event_times_arr)
         
+        # Backward Euler integration for dendritic low-pass filtering (unconditionally stable)
+        dt = t[1] - t[0] if len(t) > 1 else cfg.stim.dt_eval
+        v_fil = 0.0
+        tau_dend = getattr(cfg.dendritic_filter, "tau_dendritic_ms", 0.0)
+
         for i, ti in enumerate(t):
             # For synaptic types (4-9), use event-driven conductance if event_times are provided
             if 4 <= stype <= 9:
@@ -890,8 +905,15 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                         e_rev = -95.0  # mV
                     else:  # Excitatory
                         e_rev = 0.0  # mV
-                    # Assume V ~ -65 mV for preview
-                    stim[i] += attenuation * abs(float(base)) * (e_rev - (-65.0))
+                    # Use actual leak potential from config
+                    current_val = abs(float(base)) * (e_rev - cfg.channels.EL)
+                    # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
+                    if mode == "dendritic_filtered" and tau_dend > 0:
+                        alpha = dt / (dt + tau_dend)  # Backward Euler coefficient
+                        v_fil = alpha * (current_val * attenuation) + (1 - alpha) * v_fil
+                        stim[i] += v_fil
+                    else:
+                        stim[i] += attenuation * current_val
                 # If synaptic type but no event times, produce no stimulation (skip)
             else:
                 # Non-synaptic types use regular stimulus current
@@ -905,7 +927,14 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                     float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
                     float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
                 )
-                stim[i] += attenuation * float(base)
+                current_val = float(base)
+                # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
+                if mode == "dendritic_filtered" and tau_dend > 0:
+                    alpha = dt / (dt + tau_dend)  # Backward Euler coefficient
+                    v_fil = alpha * (current_val * attenuation) + (1 - alpha) * v_fil
+                    stim[i] += v_fil
+                else:
+                    stim[i] += attenuation * current_val
 
     dual_cfg = getattr(cfg, "dual_stimulation", None)
     if dual_cfg is not None and getattr(dual_cfg, "enabled", False):
@@ -916,7 +945,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             space_const = float(getattr(dual_cfg, "secondary_space_constant_um", 0.0))
             dist = float(getattr(dual_cfg, "secondary_distance_um", 0.0))
             if space_const > 0.0:
-                attenuation_2 = float(np.exp(-dist / space_const))
+                attenuation_2 = float(np.exp(-dist / max(space_const, 1e-12)))
         
         # Get event_times for secondary - only use train generator for synaptic types (4-9)
         if 4 <= stype_2 <= 9:
@@ -927,10 +956,17 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                 getattr(dual_cfg, 'secondary_start', 0.0),
                 getattr(dual_cfg, 'secondary_event_times', [])
             )
+            # Fallback: if no event times for synaptic type, generate single event at secondary_start
+            if len(event_times_arr_2) == 0:
+                event_times_arr_2 = np.array([getattr(dual_cfg, 'secondary_start', 0.0)], dtype=np.float64)
         else:
             # For non-synaptic types, just use manual event_times directly
             event_times_arr_2 = np.array(getattr(dual_cfg, 'secondary_event_times', []), dtype=np.float64)
         n_events_2 = len(event_times_arr_2)
+        
+        # Backward Euler integration for secondary dendritic low-pass filtering (unconditionally stable)
+        v_fil_2 = 0.0
+        tau_dend_2 = getattr(dual_cfg, "secondary_tau_dendritic_ms", 0.0) if mode_2 == "dendritic_filtered" else 0.0
         
         for i, ti in enumerate(t):
             # For synaptic types (4-9), use event-driven conductance if event_times are provided
@@ -952,8 +988,15 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                         e_rev_2 = -95.0  # mV
                     else:  # Excitatory
                         e_rev_2 = 0.0  # mV
-                    # Assume V ~ -65 mV for preview
-                    stim[i] += attenuation_2 * abs(float(base_2)) * (e_rev_2 - (-65.0))
+                    # Use actual leak potential from config
+                    current_val_2 = abs(float(base_2)) * (e_rev_2 - cfg.channels.EL)
+                    # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
+                    if mode_2 == "dendritic_filtered" and tau_dend_2 > 0:
+                        alpha_2 = dt / (dt + tau_dend_2)  # Backward Euler coefficient
+                        v_fil_2 = alpha_2 * (current_val_2 * attenuation_2) + (1 - alpha_2) * v_fil_2
+                        stim[i] += v_fil_2
+                    else:
+                        stim[i] += attenuation_2 * current_val_2
                 # If synaptic type but no event times, produce no stimulation (skip)
             else:
                 # Non-synaptic types use regular stimulus current
@@ -967,7 +1010,14 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
                     float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
                     float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
                 )
-                stim[i] += attenuation_2 * float(base_2)
+                current_val_2 = float(base_2)
+                # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
+                if mode_2 == "dendritic_filtered" and tau_dend_2 > 0:
+                    alpha_2 = dt / (dt + tau_dend_2)  # Backward Euler coefficient
+                    v_fil_2 = alpha_2 * (current_val_2 * attenuation_2) + (1 - alpha_2) * v_fil_2
+                    stim[i] += v_fil_2
+                else:
+                    stim[i] += attenuation_2 * current_val_2
 
     return stim
 
@@ -1264,7 +1314,11 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
     if n_spikes > 0 and len(peak_idx) > 0:
         V_ahp = after_hyperpolarization(V, t, int(peak_idx[0]))
 
-    dvdt     = np.gradient(V, t)
+    # Validate time array for gradient calculation
+    if len(t) < 2 or len(np.unique(t)) < 2:
+        dvdt = np.zeros_like(V)
+    else:
+        dvdt = np.gradient(V, t)
     dvdt_max = float(np.max(dvdt))
     dvdt_min = float(np.min(dvdt))
 
@@ -1275,8 +1329,8 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
 
     if n_spikes > 1:
         isi = np.diff(spike_times)
-        f_initial = 1000.0 / isi[0]
-        f_steady  = 1000.0 / float(np.mean(isi[max(0, len(isi) - 2):]))
+        f_initial = 1000.0 / isi[0] if isi[0] > 0 else np.nan
+        f_steady  = 1000.0 / float(np.mean(isi[max(0, len(isi) - 2):])) if np.mean(isi[max(0, len(isi) - 2):]) > 0 else np.nan
         AI = adaptation_index(spike_times)
         neuron_type = classify_neuron(
             AI,
@@ -1378,12 +1432,14 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
     # Firing reliability (proportion of time neuron was able to spike)
     # Estimate as (actual ISI / expected ISI) — useful for stability metric
     firing_reliability = np.nan
-    if n_spikes > 1 and not np.isnan(f_steady):
+    if n_spikes > 2 and not np.isnan(f_steady):  # Need at least 3 spikes for steady-state calculation
         expected_isi = 1000.0 / f_steady if f_steady > 0 else np.nan
         if not np.isnan(expected_isi):
-            actual_isi_steady = np.mean(np.diff(spike_times[max(0, n_spikes-3):]))
-            if actual_isi_steady > 0:
-                firing_reliability = min(1.0, expected_isi / actual_isi_steady)
+            isi_slice = spike_times[max(0, n_spikes-3):]
+            if len(isi_slice) >= 2:
+                actual_isi_steady = np.mean(np.diff(isi_slice))
+                if actual_isi_steady > 0:
+                    firing_reliability = min(1.0, expected_isi / actual_isi_steady)
 
     # Optional FTLE/LLE stability analysis (default OFF).
     lyap = {

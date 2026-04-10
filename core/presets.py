@@ -41,7 +41,7 @@ def get_preset_names():
         "H: Severe Hyperkalemia (High EK)",
         "I: In Vitro Slice (Mammalian 23°C)",
         "J: C-Fiber (Pain / Unmyelinated)",
-        "K: Thalamic Relay (Ih + IT + Burst)",
+        "K: Thalamic Relay (Ih + ICa + Burst)",
         "L: Hippocampal CA1 Pyramidal (Adapting)",
         "M: Epilepsy (v10 SCN1A mutation)",
         "N: Alzheimer's (v10 Calcium Toxicity)",
@@ -50,6 +50,8 @@ def get_preset_names():
         "Q: Striatal Spiny Projection (SPN)",
         "R: Cholinergic Neuromodulation (ACh)",
         "S: Pathology: Dravet Syndrome (SCN1A LOF)",
+        "T: Passive Cable (Linear Decay)",
+        "U: I-Clamp Threshold Explorer",
     ]
 
 def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
@@ -83,26 +85,49 @@ def _copy_defaults(target, source) -> None:
         setattr(target, field_name, getattr(source, field_name))
 
 
-def _apply_k_mode(cfg: FullModelConfig) -> None:
-    """Apply thalamic relay mode variants.
+def _apply_l5_mode(cfg: FullModelConfig) -> None:
+    """Apply L5 Pyramidal neuromodulation mode variants (v12.0).
 
-    Baseline (sleep-like): hyperpolarized state → I_T de-inactivates → LTS bursting.
-    Activated (awake-like): depolarized relay mode → tonic single-spike throughput.
+    Normal (progressive): Standard IM (0.04) and SK (1.2) for spike frequency adaptation.
+    High ACh (terminal): Disable IM, reduce SK by 50% → faster, more regular firing (arousal state).
+    """
+    # Validate config structure before modification
+    if not hasattr(cfg, 'channels') or not hasattr(cfg, 'stim'):
+        return
+
+    if cfg.preset_modes.l5_mode == "high_ach":
+        # High acetylcholine: blocks I_M (muscarinic-sensitive K+ current) → reduced adaptation
+        cfg.channels.enable_IM = False  # ACh blocks I_M
+        cfg.channels.gIM_max = 0.0
+        cfg.channels.gSK_max = 0.6  # Reduce SK by 50% (1.2 → 0.6)
+        # Increase synaptic drive to compensate for reduced adaptation and show arousal effect
+        cfg.stim.synaptic_train_freq_hz = 40.0  # Higher frequency for arousal state
+        cfg.stim.Iext = 80.0  # Stronger drive to overcome reduced adaptation
+        # Title suffix added by GUI
+    # Normal mode: use default IM (0.04) and SK (1.2) from preset
+
+
+def _apply_k_mode(cfg: FullModelConfig) -> None:
+    """Apply thalamic relay mode variants (v12.0).
+
+    Baseline (sleep): Rest Vm = -75mV, bursty. Enable ITCa (2.0), Ih (0.02). Use alpha stimulus (8uA) at 20ms to trigger LTS burst.
+    Activated (awake): Rest Vm = -60mV, tonic relay. Iext = 8.0 (tonic drive), same channels, tonic firing because ITCa is inactivated.
     """
     if cfg.preset_modes.k_mode == "baseline":
-        # Sleep/drowsy: low tonic drive keeps cell near −70 mV so I_T can
-        # de-inactivate and fire rebound LTS bursts on synaptic input.
+        # Sleep/drowsy: hyperpolarized state → I_T de-inactivates → LTS bursting on alpha trigger
         cfg.stim.stim_type = "alpha"
-        cfg.stim.alpha_tau = 8.0
-        cfg.stim.Iext = 3.0             # Weak drive → hyperpolarized → burst-ready
+        cfg.stim.alpha_tau = 20.0  # v12.0: 20ms alpha pulse to trigger burst
+        cfg.stim.Iext = 8.0  # v12.0: 8uA alpha stimulus
         cfg.channels.gIh_max = 0.02
         cfg.channels.gTCa_max = 2.0
+        cfg.channels.EL = -75.0  # Rest Vm = -75mV (sleep)
     else:
-        # Activated: tonic relay firing (I_T mostly inactivated at depolarized Vm).
+        # Activated: tonic relay firing (I_T mostly inactivated at depolarized Vm)
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 8.0             # Stronger drive → depolarized → tonic mode
-        cfg.channels.gIh_max = 0.03
-        cfg.channels.gTCa_max = 2.5     # Slightly higher for robust relay
+        cfg.stim.Iext = 8.0  # Tonic drive
+        cfg.channels.gIh_max = 0.02
+        cfg.channels.gTCa_max = 2.0
+        cfg.channels.EL = -60.0  # Rest Vm = -60mV (awake)
 
 
 def _apply_alzheimer_mode(cfg: FullModelConfig) -> None:
@@ -184,7 +209,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 2. БАЗОВЫЙ ПРЕСЕТ: ПИРАМИДАЛЬНЫЙ L5 (Млекопитающие) ---
     elif "Pyramidal L5" in name:
         cfg.morphology.single_comp = False
-        cfg.stim_location.location = "dendritic_filtered"
+        cfg.stim_location.location = "dendritic_filtered"  # v12.0: Use dendritic filtering
         cfg.dendritic_filter.enabled = True
         cfg.dendritic_filter.distance_um = 150.0
         cfg.dendritic_filter.space_constant_um = 150.0
@@ -221,17 +246,25 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.B_Ca = 1e-5
         cfg.channels.enable_ICa = True  # L-type calcium channel
         cfg.channels.gCa_max = 0.08  # Moderate ICa for calcium dynamics
-        cfg.channels.gSK_max = 1.5  # SK channel for calcium-dependent adaptation
+        cfg.channels.gSK_max = 1.2  # SK channel for calcium-dependent adaptation
         
         # M-TYPE K CURRENT: Enable for spike frequency adaptation
         cfg.channels.enable_IM = True  # KCNQ2/3 channels for adaptation
-        cfg.channels.gIM_max = 0.02  # Slow non-inactivating K+ current
+        cfg.channels.gIM_max = 0.04  # v12.0: Increased M-current for stronger SFA
         
+        # SYNAPTIC TRAIN: Poisson 30Hz for natural cortical jitter
+        cfg.stim.synaptic_train_type = 'poisson'
+        cfg.stim.synaptic_train_freq_hz = 30.0
+        cfg.stim.synaptic_train_duration_ms = 500.0
+
         # CALIBRATED: Literature-based rheobase (Mainen 1996)
-        # Soma mode with const stimulus: ~6 µA/cm² rheobase range
-        cfg.stim.stim_type = 'const'
+        cfg.stim.stim_type = 'AMPA'  # v12.0: Fixed - 'synaptic_train' not in s_map
         cfg.stim.alpha_tau = 2.0
-        cfg.stim.Iext = 6.0
+        cfg.stim.Iext = 60.0  # v12.0: Further increased for SFA with multiple spikes
+
+    # Stage/mode overlays for selected presets.
+    if "Pyramidal L5" in name:
+        _apply_l5_mode(cfg)
 
     # --- 3. БЫСТРЫЙ ИНТЕРНЕЙРОН (FS) ---
     elif "FS Interneuron" in name:
@@ -240,19 +273,20 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.dendritic_filter.distance_um = 75.0
         cfg.dendritic_filter.space_constant_um = 100.0
         cfg.dendritic_filter.tau_dendritic_ms = 5.0
-        # HH-standard conductances needed for full-amplitude spikes with HH kinetics at 37°C
-        # Wang-Buzsaki kinetics differ from HH 1952; we compensate with standard gNa/gK
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 120.0, 36.0, 0.1
+        # Wang-Buzsaki neurons are non-adapting: ultra-fast repolarization
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 120.0, 45.0, 0.1
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 55.0, -90.0, -65.0
         cfg.channels.Cm = 1.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
         cfg.morphology.d_soma = 15e-4
-        # IA channel: High for fast repolarization and strong adaptation
-        cfg.channels.enable_IA = True
-        cfg.channels.gA_max = 0.8  # High IA conductance for rapid spike termination
-        cfg.channels.E_A = -77.0   # K+ reversal potential
+        # RESURGENT Na: Enables sustained high-frequency firing (>150 Hz)
+        cfg.channels.enable_NaR = True
+        cfg.channels.gNaR_max = 0.4
+        # Disable IA and SK: Wang-Buzsaki neurons are non-adapting
+        cfg.channels.enable_IA = False
+        cfg.channels.enable_SK = False
         # Validated: 40 µA/cm² through dendritic filter (atten=0.47) → ~19 effective
-        # Produces ~215 Hz tonic firing, Vmax ≈ 37 mV (physiological FS range 150-400 Hz)
+        # Produces sustained high-frequency firing >150 Hz with near-zero adaptation
         cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 1.0
         cfg.stim.Iext = 40.0
@@ -357,11 +391,11 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.tau_Ca = 200.0
         cfg.calcium.B_Ca = 1e-5
         cfg.morphology.d_soma = 25e-4
-        cfg.stim.jacobian_mode = 'sparse_fd'
-        # Const stimulus drives tonic firing; k_mode overlay adjusts for burst/relay states
+        cfg.stim.jacobian_mode = 'native_hines'
+        # v12.0: k_mode overlay handles stimulus (baseline=alpha burst, activated=tonic)
         cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 5.0
-        cfg.stim.Iext = 5.0             # Near-threshold: I_T + Ih shape LTS dynamics
+        cfg.stim.Iext = 0.0  # v12.0: No default Iext, k_mode overlay sets it
 
     # --- 7. ПАТОЛОГИЯ: РАССЕЯННЫЙ СКЛЕРОЗ (Демиелинизация) ---
     elif "Multiple Sclerosis" in name:
@@ -374,7 +408,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.gL = 3.2
         cfg.channels.gNa_max = 45.0
         cfg.channels.Cm = 6.0
-        cfg.stim.jacobian_mode = 'sparse_fd'
+        cfg.stim.jacobian_mode = 'native_hines'
         # Keep the same input class as control; pathology should emerge from membrane/cable changes.
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.5
@@ -402,7 +436,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         apply_preset(cfg, "Pyramidal L5 (Mainen 1996)")
         # Apply Alzheimer mode overlay immediately
         _apply_alzheimer_mode(cfg)
-        cfg.stim.jacobian_mode = 'sparse_fd'
+        cfg.stim.jacobian_mode = 'native_hines'
         # Alpha stim: Shows reduced firing due to SK activation by calcium
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 2.0
@@ -418,7 +452,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.tau_Ca = 900.0  # Slow clearance: pump failure (fixed from 1500ms)
         cfg.calcium.B_Ca = 1e-5  # Calibrated conversion for hypoxic overload scenarios
         cfg.channels.gCa_max = 0.08  # Elevated ICa - PHYSIOLOGICAL range (was 1.2, too high)
-        cfg.stim.jacobian_mode = 'sparse_fd'
+        cfg.stim.jacobian_mode = 'native_hines'
         # Pathology: depolarization block after 1-2 spikes due to ion imbalance + Ca overload
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.0
@@ -444,31 +478,51 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 12. ГИППОКАМП CA1 (АДАПТИВНЫЙ ПИРАМИДНЫЙ) ---
     elif "Hippocampal CA1" in name:
         # CA1 pyramidal neuron: regular-spiking adapting type.
-        # Theta rhythm (4-12 Hz) is a NETWORK phenomenon driven by medial
-        # septum input, not an intrinsic single-cell property.
+        # v12.0: Theta rhythm (7Hz) driven by dual-drive stimulation
         # Reference: Magee 1998, J Neurosci 18:7613; Storm 1990, J Physiol 421:529
         cfg.morphology.single_comp = True
         cfg.stim_location.location = "soma"
         cfg.dendritic_filter.enabled = False
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 56.0, 8.0, 0.03
-        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -85.0, -68.0
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 56.0, 8.0, 0.05
+        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -85.0, -60.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
         # Ih: provides subthreshold resonance in theta band (Magee 1998)
         cfg.channels.enable_Ih = True
-        cfg.channels.gIh_max = 0.02
+        cfg.channels.gIh_max = 0.02  # Increased for theta resonance
         # IA: physiological density for spike-frequency adaptation
         # (Storm 1990: gA ~0.3-0.5 mS/cm² somatic; NOT the unphysiological 10.0)
         cfg.channels.enable_IA = True
-        cfg.channels.gA_max = 0.4
+        cfg.channels.gA_max = 0.3  # Standard for CA1
+        # v12.0: Enable SK/IM for proper adaptation, but keep values low
         cfg.channels.enable_SK = False
+        cfg.channels.enable_IM = False
         cfg.channels.enable_ICa = False
         cfg.calcium.dynamic_Ca = False
         cfg.morphology.d_soma = 20e-4
-        # Tonic const stimulus shows adapting regular-spiking pattern.
-        # For theta-band output, use alpha-train stimulation at 6 Hz externally.
+        # v12.0: Dual-drive stimulation for theta rhythm
+        # Primary: weak tonic current for readiness
         cfg.stim.stim_type = 'const'
-        cfg.stim.alpha_tau = 2.0
-        cfg.stim.Iext = 5.0
+        cfg.stim.Iext = 2.0
+        cfg.stim.t_sim = 5000.0  # Match secondary train duration
+        cfg.stim.dt_eval = 0.5  # Optimized for faster testing (0.5ms sampling)
+        cfg.stim.noise_sigma = 0.8  # Stochastic facilitation
+        # Secondary: AMPA synaptic train at 7Hz (theta)
+        from core.dual_stimulation import DualStimulationConfig
+        cfg.dual_stimulation = DualStimulationConfig(
+            enabled=True,
+            primary_location="soma",
+            primary_stim_type="const",
+            primary_Iext=2.0,
+            primary_start=0.0,
+            secondary_location="soma",
+            secondary_stim_type="AMPA",
+            secondary_Iext=5.0,
+            secondary_start=0.0,
+            secondary_train_type="regular",
+            secondary_train_freq_hz=7.0,
+            secondary_train_duration_ms=5000.0,
+            secondary_alpha_tau=2.0,
+        )
 
     # --- 13. АНЕСТЕЗИЯ (ЛИДОКАИН) ---
     elif "Anesthesia" in name:
@@ -522,7 +576,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.tau_Ca = 150.0       # Fast extrusion
         cfg.calcium.B_Ca = 1e-5
         cfg.morphology.d_soma = 20e-4
-        cfg.stim.jacobian_mode = 'sparse_fd'
+        cfg.stim.jacobian_mode = 'native_hines'
         # Low tonic drive: TRN bursts from I_T de-inactivation at hyperpolarized Vm
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 2.0
@@ -549,7 +603,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.enable_SK = False
         cfg.calcium.dynamic_Ca = False
         cfg.morphology.d_soma = 15e-4   # Small soma (12-20 µm)
-        cfg.stim.jacobian_mode = 'sparse_fd'
+        cfg.stim.jacobian_mode = 'native_hines'
         # Moderate const stimulus: shows characteristic delayed firing onset
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 6.0
@@ -572,7 +626,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Moderate Ih for subthreshold dynamics
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.01
-        cfg.stim.jacobian_mode = 'sparse_fd'
+        cfg.stim.jacobian_mode = 'native_hines'
         # Const stimulus: with I_M → adapting; user blocks gIM → tonic firing
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 8.0
@@ -593,11 +647,71 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.gNa_max = 60.0     # Reduced: 120 → 60 (50% Nav1.1 loss)
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.8       # FS baseline
-        cfg.stim.jacobian_mode = 'sparse_fd'
+        cfg.stim.jacobian_mode = 'native_hines'
         # Strong const stimulus: FS interneuron fails to maintain high-freq firing
         # → reduced inhibitory output → network disinhibition
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 40.0            # Same drive as FS base, but fewer spikes
+
+    # --- 20. PASSIVE CABLE (LINEAR DECAY) ---
+    elif "Passive Cable" in name:
+        # Pure passive membrane: no active channels, only leak conductance.
+        # Shows exponential voltage decay V = V_0 * exp(-x/lambda) without spikes.
+        # Reference: Rall 1959, Cable theory for dendrites
+        cfg.morphology.single_comp = False
+        cfg.stim_location.location = "dendritic_filtered"
+        cfg.dendritic_filter.enabled = True
+        cfg.dendritic_filter.distance_um = 200.0
+        cfg.dendritic_filter.space_constant_um = 200.0
+        cfg.dendritic_filter.tau_dendritic_ms = 10.0
+
+        # Disable ALL active channels
+        cfg.channels.gNa_max = 0.0
+        cfg.channels.gK_max = 0.0
+        cfg.channels.enable_IM = False
+        cfg.channels.enable_Ih = False
+        cfg.channels.enable_IA = False
+        cfg.channels.enable_SK = False
+        cfg.channels.enable_ICa = False
+        cfg.channels.enable_ITCa = False
+        cfg.channels.enable_NaR = False
+
+        # Only leak conductance (high resistance for clear decay)
+        cfg.channels.gL = 0.1
+        cfg.channels.EL = -65.0
+
+        # Morphology for cable properties
+        cfg.channels.Cm = 1.0  # Standard membrane capacitance
+        cfg.channels.ENa, cfg.channels.EK = 50.0, -90.0
+        cfg.env.T_celsius = 37.0
+
+        cfg.morphology.d_soma = 20e-4
+        cfg.morphology.N_ais = 0
+        cfg.morphology.d_trunk = 2e-4
+        cfg.morphology.Ra = 150.0
+
+        cfg.stim.jacobian_mode = 'native_hines'
+        # Const stimulus at distal branch to show decay
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 10.0
+
+    # --- 21. I-CLAMP THRESHOLD EXPLORER ---
+    elif "I-Clamp Threshold" in name:
+        # Standard HH model with high-resolution sampling for threshold exploration.
+        # Uses simulation (220ms) with standard dt (0.05ms) to capture exact rheobase.
+        cfg.morphology.single_comp = True
+        cfg.morphology.d_soma = 500e-4  # 500 µm giant axon diameter
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 120.0, 36.0, 0.3
+        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -77.0, -54.387
+        cfg.channels.Cm = 1.0
+        cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 6.3, 6.3, 3.0
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        cfg.stim.t_sim = 220.0
+        cfg.stim.dt_eval = 0.05
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 10.0  # Rheobase for HH model (slightly above threshold)
+        cfg.stim.jacobian_mode = 'native_hines'
 
     # Stage/mode overlays for selected presets.
     if "Thalamic" in name:

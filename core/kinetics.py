@@ -1,5 +1,254 @@
 import numpy as np
-from numba import vectorize, float64
+from numba import vectorize, float64, njit
+
+# =====================================================================
+# LUT (Look-Up Table) Infrastructure for Gate Kinetics
+# =====================================================================
+
+# Voltage range: -120 to 60 mV, 0.1 mV step
+V_MIN = -120.0
+V_MAX = 60.0
+V_STEP = 0.1
+N_V = int((V_MAX - V_MIN) / V_STEP) + 1  # 1801 points
+
+# Pre-computed voltage array for LUT
+_V_LUT = np.linspace(V_MIN, V_MAX, N_V, dtype=np.float64)
+
+# LUT arrays for all gate functions (alpha and beta)
+_am_LUT = np.zeros(N_V, dtype=np.float64)
+_bm_LUT = np.zeros(N_V, dtype=np.float64)
+_ah_LUT = np.zeros(N_V, dtype=np.float64)
+_bh_LUT = np.zeros(N_V, dtype=np.float64)
+_an_LUT = np.zeros(N_V, dtype=np.float64)
+_bn_LUT = np.zeros(N_V, dtype=np.float64)
+
+# Optional channel LUTs
+_ar_Ih_LUT = np.zeros(N_V, dtype=np.float64)
+_br_Ih_LUT = np.zeros(N_V, dtype=np.float64)
+_as_Ca_LUT = np.zeros(N_V, dtype=np.float64)
+_bs_Ca_LUT = np.zeros(N_V, dtype=np.float64)
+_au_Ca_LUT = np.zeros(N_V, dtype=np.float64)
+_bu_Ca_LUT = np.zeros(N_V, dtype=np.float64)
+_aa_IA_LUT = np.zeros(N_V, dtype=np.float64)
+_ba_IA_LUT = np.zeros(N_V, dtype=np.float64)
+_ab_IA_LUT = np.zeros(N_V, dtype=np.float64)
+_bb_IA_LUT = np.zeros(N_V, dtype=np.float64)
+_am_TCa_LUT = np.zeros(N_V, dtype=np.float64)
+_bm_TCa_LUT = np.zeros(N_V, dtype=np.float64)
+_ah_TCa_LUT = np.zeros(N_V, dtype=np.float64)
+_bh_TCa_LUT = np.zeros(N_V, dtype=np.float64)
+_aw_IM_LUT = np.zeros(N_V, dtype=np.float64)
+_bw_IM_LUT = np.zeros(N_V, dtype=np.float64)
+_ax_NaP_LUT = np.zeros(N_V, dtype=np.float64)
+_bx_NaP_LUT = np.zeros(N_V, dtype=np.float64)
+_ay_NaR_LUT = np.zeros(N_V, dtype=np.float64)
+_by_NaR_LUT = np.zeros(N_V, dtype=np.float64)
+_aj_NaR_LUT = np.zeros(N_V, dtype=np.float64)
+_bj_NaR_LUT = np.zeros(N_V, dtype=np.float64)
+
+# Initialize all LUTs
+def _init_luts():
+    """Pre-compute all gate function LUTs at module load."""
+    for i, v in enumerate(_V_LUT):
+        _am_LUT[i] = am(v)
+        _bm_LUT[i] = bm(v)
+        _ah_LUT[i] = ah(v)
+        _bh_LUT[i] = bh(v)
+        _an_LUT[i] = an(v)
+        _bn_LUT[i] = bn(v)
+        _ar_Ih_LUT[i] = ar_Ih(v)
+        _br_Ih_LUT[i] = br_Ih(v)
+        _as_Ca_LUT[i] = as_Ca(v)
+        _bs_Ca_LUT[i] = bs_Ca(v)
+        _au_Ca_LUT[i] = au_Ca(v)
+        _bu_Ca_LUT[i] = bu_Ca(v)
+        _aa_IA_LUT[i] = aa_IA(v)
+        _ba_IA_LUT[i] = ba_IA(v)
+        _ab_IA_LUT[i] = ab_IA(v)
+        _bb_IA_LUT[i] = bb_IA(v)
+        _am_TCa_LUT[i] = am_TCa(v)
+        _bm_TCa_LUT[i] = bm_TCa(v)
+        _ah_TCa_LUT[i] = ah_TCa(v)
+        _bh_TCa_LUT[i] = bh_TCa(v)
+        _aw_IM_LUT[i] = aw_IM(v)
+        _bw_IM_LUT[i] = bw_IM(v)
+        _ax_NaP_LUT[i] = ax_NaP(v)
+        _bx_NaP_LUT[i] = bx_NaP(v)
+        _ay_NaR_LUT[i] = ay_NaR(v)
+        _by_NaR_LUT[i] = by_NaR(v)
+        _aj_NaR_LUT[i] = aj_NaR(v)
+        _bj_NaR_LUT[i] = bj_NaR(v)
+
+@njit(fastmath=True, cache=True)
+def _lut_interp(V, lut):
+    """Linear interpolation from pre-computed LUT.
+    
+    Parameters
+    ----------
+    V : float64
+        Membrane potential (mV)
+    lut : float64[:]
+        Pre-computed LUT array
+        
+    Returns
+    -------
+    float64
+        Interpolated value
+    """
+    # Clamp to LUT range
+    if V <= V_MIN:
+        return lut[0]
+    if V >= V_MAX:
+        return lut[-1]
+    
+    # Compute index and fractional position
+    idx_float = (V - V_MIN) / V_STEP
+    idx = int(idx_float)
+    frac = idx_float - idx
+    
+    # Linear interpolation
+    return lut[idx] + frac * (lut[idx + 1] - lut[idx])
+
+# LUT-based gate functions (fast, no exponential calls)
+@njit(fastmath=True, cache=True)
+def am_lut(V):
+    """Na activation alpha via LUT."""
+    return _lut_interp(V, _am_LUT)
+
+@njit(fastmath=True, cache=True)
+def bm_lut(V):
+    """Na deactivation beta via LUT."""
+    return _lut_interp(V, _bm_LUT)
+
+@njit(fastmath=True, cache=True)
+def ah_lut(V):
+    """Na inactivation alpha via LUT."""
+    return _lut_interp(V, _ah_LUT)
+
+@njit(fastmath=True, cache=True)
+def bh_lut(V):
+    """Na inactivation beta via LUT."""
+    return _lut_interp(V, _bh_LUT)
+
+@njit(fastmath=True, cache=True)
+def an_lut(V):
+    """K activation alpha via LUT."""
+    return _lut_interp(V, _an_LUT)
+
+@njit(fastmath=True, cache=True)
+def bn_lut(V):
+    """K deactivation beta via LUT."""
+    return _lut_interp(V, _bn_LUT)
+
+@njit(fastmath=True, cache=True)
+def ar_Ih_lut(V):
+    """Ih activation alpha via LUT."""
+    return _lut_interp(V, _ar_Ih_LUT)
+
+@njit(fastmath=True, cache=True)
+def br_Ih_lut(V):
+    """Ih activation beta via LUT."""
+    return _lut_interp(V, _br_Ih_LUT)
+
+@njit(fastmath=True, cache=True)
+def as_Ca_lut(V):
+    """ICa activation alpha via LUT."""
+    return _lut_interp(V, _as_Ca_LUT)
+
+@njit(fastmath=True, cache=True)
+def bs_Ca_lut(V):
+    """ICa activation beta via LUT."""
+    return _lut_interp(V, _bs_Ca_LUT)
+
+@njit(fastmath=True, cache=True)
+def au_Ca_lut(V):
+    """ICa inactivation alpha via LUT."""
+    return _lut_interp(V, _au_Ca_LUT)
+
+@njit(fastmath=True, cache=True)
+def bu_Ca_lut(V):
+    """ICa inactivation beta via LUT."""
+    return _lut_interp(V, _bu_Ca_LUT)
+
+@njit(fastmath=True, cache=True)
+def aa_IA_lut(V):
+    """IA activation alpha via LUT."""
+    return _lut_interp(V, _aa_IA_LUT)
+
+@njit(fastmath=True, cache=True)
+def ba_IA_lut(V):
+    """IA activation beta via LUT."""
+    return _lut_interp(V, _ba_IA_LUT)
+
+@njit(fastmath=True, cache=True)
+def ab_IA_lut(V):
+    """IA inactivation alpha via LUT."""
+    return _lut_interp(V, _ab_IA_LUT)
+
+@njit(fastmath=True, cache=True)
+def bb_IA_lut(V):
+    """IA inactivation beta via LUT."""
+    return _lut_interp(V, _bb_IA_LUT)
+
+@njit(fastmath=True, cache=True)
+def am_TCa_lut(V):
+    """I_T activation alpha via LUT."""
+    return _lut_interp(V, _am_TCa_LUT)
+
+@njit(fastmath=True, cache=True)
+def bm_TCa_lut(V):
+    """I_T activation beta via LUT."""
+    return _lut_interp(V, _bm_TCa_LUT)
+
+@njit(fastmath=True, cache=True)
+def ah_TCa_lut(V):
+    """I_T inactivation alpha via LUT."""
+    return _lut_interp(V, _ah_TCa_LUT)
+
+@njit(fastmath=True, cache=True)
+def bh_TCa_lut(V):
+    """I_T inactivation beta via LUT."""
+    return _lut_interp(V, _bh_TCa_LUT)
+
+@njit(fastmath=True, cache=True)
+def aw_IM_lut(V):
+    """I_M activation alpha via LUT."""
+    return _lut_interp(V, _aw_IM_LUT)
+
+@njit(fastmath=True, cache=True)
+def bw_IM_lut(V):
+    """I_M activation beta via LUT."""
+    return _lut_interp(V, _bw_IM_LUT)
+
+@njit(fastmath=True, cache=True)
+def ax_NaP_lut(V):
+    """I_NaP activation alpha via LUT."""
+    return _lut_interp(V, _ax_NaP_LUT)
+
+@njit(fastmath=True, cache=True)
+def bx_NaP_lut(V):
+    """I_NaP activation beta via LUT."""
+    return _lut_interp(V, _bx_NaP_LUT)
+
+@njit(fastmath=True, cache=True)
+def ay_NaR_lut(V):
+    """I_NaR activation alpha via LUT."""
+    return _lut_interp(V, _ay_NaR_LUT)
+
+@njit(fastmath=True, cache=True)
+def by_NaR_lut(V):
+    """I_NaR activation beta via LUT."""
+    return _lut_interp(V, _by_NaR_LUT)
+
+@njit(fastmath=True, cache=True)
+def aj_NaR_lut(V):
+    """I_NaR inactivation alpha via LUT."""
+    return _lut_interp(V, _aj_NaR_LUT)
+
+@njit(fastmath=True, cache=True)
+def bj_NaR_lut(V):
+    """I_NaR inactivation beta via LUT."""
+    return _lut_interp(V, _bj_NaR_LUT)
 
 # =====================================================================
 # Ядро Ходжкина-Хаксли (Na, K) - HH 1952 | Hodgkin-Huxley Core (Na, K) - HH 1952
@@ -135,7 +384,7 @@ def aw_M(V):
     x = V + 35.0
     w_inf = 1.0 / (1.0 + np.exp(-x / 10.0))
     denom = 3.3 * np.exp(x / 20.0) + np.exp(-x / 20.0)
-    tau_w = _IM_TAUMAX_RAW / denom
+    tau_w = _IM_TAUMAX_RAW / max(denom, 1e-12)
     return w_inf / tau_w
 
 @vectorize([float64(float64)], nopython=True, cache=True)
@@ -144,7 +393,7 @@ def bw_M(V):
     x = V + 35.0
     w_inf = 1.0 / (1.0 + np.exp(-x / 10.0))
     denom = 3.3 * np.exp(x / 20.0) + np.exp(-x / 20.0)
-    tau_w = _IM_TAUMAX_RAW / denom
+    tau_w = _IM_TAUMAX_RAW / max(denom, 1e-12)
     return (1.0 - w_inf) / tau_w
 
 
@@ -319,3 +568,7 @@ def bj_NaR(V):
     c = (V + 33.0) / 10.0
     tau_j = 3.0 + 15.0 / (np.exp(c) + np.exp(-c))
     return (1.0 - j_inf) / tau_j
+
+
+# Initialize LUTs at module load (after all gate functions are defined)
+_init_luts()

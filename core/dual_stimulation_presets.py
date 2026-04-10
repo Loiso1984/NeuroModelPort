@@ -19,9 +19,10 @@ def get_dual_preset_names():
     """Return list of available dual stimulation presets."""
     return [
         "Soma Excitation + Dendritic GABA",
-        "AIS Excitation + Dendritic Inhibition", 
+        "AIS Excitation + Dendritic Inhibition",
         "Dual Dendritic Excitation",
         "Theta Burst + Background",
+        "Theta-Gamma Modulation",
         "Spike-Timing Control",
         "Balanced Excitation-Inhibition"
     ]
@@ -201,6 +202,11 @@ def get_preset_description(preset_name: str) -> str:
             "Rhythmic activity: theta-frequency pulse train to soma with "
             "constant dendritic background. Models hippocampal theta rhythms "
             "with ongoing network activity.",
+
+        "Theta-Gamma Modulation":
+            "Cross-frequency coupling: theta (7Hz) and gamma (40Hz) synaptic "
+            "trains to soma. Models hippocampal theta-gamma coupling for "
+            "memory encoding and information processing.",
             
         "Spike-Timing Control":
             "Precise temporal control: two soma inputs with critical timing "

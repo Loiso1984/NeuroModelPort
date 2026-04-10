@@ -1,8 +1,8 @@
 {
   "morphology": {
-    "single_comp": true,
-    "d_soma": 0.002,
-    "N_ais": 3,
+    "single_comp": false,
+    "d_soma": 0.001,
+    "N_ais": 0,
     "d_ais": 0.00015,
     "gNa_ais_mult": 40.0,
     "gK_ais_mult": 5.0,
@@ -10,38 +10,38 @@
     "gCa_ais_mult": 2.0,
     "gA_ais_mult": 3.0,
     "N_trunk": 35,
-    "d_trunk": 0.0002,
+    "d_trunk": 0.00008,
     "gNa_trunk_mult": 1.0,
     "N_b1": 4,
     "d_b1": 0.00015,
     "N_b2": 4,
     "d_b2": 0.0001,
-    "Ra": 150.0,
+    "Ra": 200.0,
     "dx": 0.002
   },
   "channels": {
-    "Cm": 0.75,
-    "gNa_max": 56.0,
-    "gK_max": 6.0,
-    "gL": 0.02,
+    "Cm": 1.0,
+    "gNa_max": 80.0,
+    "gK_max": 10.0,
+    "gL": 0.1,
     "ENa": 50.0,
-    "EK": -90.0,
-    "EL": -70.0,
-    "enable_Ih": true,
-    "gIh_max": 0.01,
+    "EK": -80.0,
+    "EL": -60.0,
+    "enable_Ih": false,
+    "gIh_max": 0.02,
     "E_Ih": -30.0,
-    "enable_ICa": true,
-    "gCa_max": 0.08,
+    "enable_ICa": false,
+    "gCa_max": 1.0,
     "E_Ca": 120.0,
     "enable_IA": false,
     "gA_max": 0.4,
     "E_A": -77.0,
-    "enable_SK": true,
-    "gSK_max": 1.5,
+    "enable_SK": false,
+    "gSK_max": 2.0,
     "tau_SK": 10.0,
     "enable_ITCa": false,
     "gTCa_max": 2.0,
-    "enable_IM": true,
+    "enable_IM": false,
     "gIM_max": 0.5,
     "enable_NaP": false,
     "gNaP_max": 0.1,
@@ -49,11 +49,11 @@
     "gNaR_max": 0.2
   },
   "calcium": {
-    "dynamic_Ca": true,
+    "dynamic_Ca": false,
     "Ca_ext": 2.0,
     "Ca_rest": 0.00005,
     "tau_Ca": 200.0,
-    "B_Ca": 0.00001
+    "B_Ca": 0.001
   },
   "env": {
     "T_celsius": 37.0,
@@ -72,14 +72,14 @@
     "T_dend_offset": 0.0
   },
   "stim": {
-    "t_sim": 300.0,
+    "t_sim": 150.0,
     "dt_eval": 0.05,
     "jacobian_mode": "native_hines",
-    "stim_type": "NMDA",
-    "Iext": 0.8,
+    "stim_type": "alpha",
+    "Iext": 300.0,
     "pulse_start": 10.0,
     "pulse_dur": 1.0,
-    "alpha_tau": 70.0,
+    "alpha_tau": 1.0,
     "zap_f0_hz": 0.5,
     "zap_f1_hz": 40.0,
     "stim_comp": 0,
@@ -93,34 +93,15 @@
     "compute_lyapunov": false
   },
   "stim_location": {
-    "location": "soma"
+    "location": "dendritic_filtered"
   },
   "dendritic_filter": {
-    "enabled": false,
+    "enabled": true,
     "distance_um": 150.0,
     "space_constant_um": 150.0,
     "tau_dendritic_ms": 10.0
   },
-  "dual_stimulation": {
-    "primary_location": "dendritic_filtered",
-    "primary_stim_type": "AMPA",
-    "primary_Iext": 1.5,
-    "primary_start": 10.0,
-    "primary_duration": 5.0,
-    "primary_alpha_tau": 2.0,
-    "primary_event_times": [],
-    "secondary_location": "dendritic_filtered",
-    "secondary_stim_type": "AMPA",
-    "secondary_Iext": 1.2,
-    "secondary_start": 15.0,
-    "secondary_duration": 5.0,
-    "secondary_alpha_tau": 2.0,
-    "secondary_event_times": [],
-    "secondary_distance_um": 200.0,
-    "secondary_space_constant_um": 150.0,
-    "secondary_tau_dendritic_ms": 12.0,
-    "enabled": true
-  },
+  "dual_stimulation": null,
   "analysis": {
     "spike_detect_algorithm": "peak_repolarization",
     "spike_detect_threshold": -20.0,
@@ -163,6 +144,7 @@
   "preset_modes": {
     "k_mode": "baseline",
     "alzheimer_mode": "progressive",
-    "hypoxia_mode": "progressive"
+    "hypoxia_mode": "progressive",
+    "l5_mode": "normal"
   }
 }

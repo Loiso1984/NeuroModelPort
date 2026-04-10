@@ -129,10 +129,15 @@ class OscilloscopeWidget(QWidget):
         self._transient_items: list = []
         # Persistent reference curve — created once, never removed from the plot.
         # ignoreBounds=True prevents it from affecting autoRange.
-        _ref_pen = pg.mkPen(color=(150, 150, 150, 100), width=1.5, style=Qt.PenStyle.DashLine)
+        _ref_pen = pg.mkPen(color=(150, 150, 150, 102), width=1.5, style=Qt.PenStyle.DashLine)  # Opacity 0.4 = 102/255
         self._ref_curve_v = pg.PlotDataItem([], [], pen=_ref_pen, name="Reference")
         self._p_v.addItem(self._ref_curve_v, ignoreBounds=True)
         self._ref_curve_v.setVisible(False)
+        # Reference label
+        self._ref_label = pg.TextItem("", color=(150, 150, 150, 180), anchor=(0, 1))
+        self._ref_label.setPos(0.02, 0.98)
+        self._ref_label.setVisible(False)
+        self._p_v.addItem(self._ref_label, ignoreBounds=True)
 
     # ─────────────────────────────────────────────────────────────────
     def _title_html(self, text: str, color: str) -> str:
@@ -171,9 +176,16 @@ class OscilloscopeWidget(QWidget):
         self.cleanup()
 
     def _build_ui(self):
+        from PySide6.QtWidgets import QSplitter
+        
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(4)
+        root.setSpacing(0)
+        
+        # Use splitter for resizable panels
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
+        splitter.setStyleSheet("QSplitter::handle { background: #45475A; }")
 
         # ── Plot area ─────────────────────────────────────────────────
         self._win = pg.GraphicsLayoutWidget()
@@ -237,12 +249,14 @@ class OscilloscopeWidget(QWidget):
         self._win.ci.layout.setRowStretchFactor(2, 4)
         self._win.ci.layout.setRowStretchFactor(3, 1)
 
-        root.addWidget(self._win, stretch=10)
+        splitter.addWidget(self._win)
+        splitter.setStretchFactor(0, 10)
 
         # ── Scrollable Checkbox panel ─────────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setMaximumWidth(240)
+        scroll.setMinimumWidth(180)
+        scroll.setMaximumWidth(500)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setStyleSheet("QScrollArea { background: #1E1E2E; border: none; }")
@@ -398,7 +412,11 @@ class OscilloscopeWidget(QWidget):
         cb_layout.addStretch()
 
         scroll.setWidget(cb_widget)
-        root.addWidget(scroll, stretch=1)
+        splitter.addWidget(scroll)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([800, 240])  # Initial sizes
+        
+        root.addWidget(splitter)
         self._update_row_visibility()
 
     def _copy_view_state_to(self, other: "OscilloscopeWidget"):
@@ -606,6 +624,7 @@ class OscilloscopeWidget(QWidget):
         # Reference curve is always initialised; just hide it
         self._ref_curve_v.setData([], [])
         self._ref_curve_v.setVisible(False)
+        self._ref_label.setVisible(False)
         
         self._apply_grid_alpha()
         self._set_default_titles()

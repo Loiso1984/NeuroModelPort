@@ -39,7 +39,7 @@ def _build_l5() -> FullModelConfig:
     apply_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
     cfg.stim.t_sim = 220.0
     cfg.stim.dt_eval = 0.2
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
     return cfg
 
 
@@ -49,7 +49,7 @@ def _build_k_activated() -> FullModelConfig:
     apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
     cfg.stim.t_sim = 300.0
     cfg.stim.dt_eval = 0.2
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
     return cfg
 
 

@@ -9,9 +9,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.channels import ChannelRegistry
-from core.jacobian import analytic_sparse_jacobian
+from core.jacobian import build_jacobian_sparsity, make_analytic_jacobian
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
+from core.physics_params import create_physics_params
 from core.presets import apply_preset
 from core.rhs import rhs_multicompartment
 from core.solver import NeuronSolver
@@ -113,13 +114,13 @@ def _solver_args_from_cfg(cfg: FullModelConfig):
             0, 0, 0, 1.0, 0.0,
         ], dtype=np.float64),
     }
-    # pack_rhs_args removed (rhs_contract.py deleted in v11.0).
-    # This helper and its callers are skipped until rewritten for PhysicsParams API.
+    # Create PhysicsParams from rhs_values dictionary
+    physics_params = create_physics_params(**rhs_values)
     dydt_buf = np.empty(len(y0), dtype=np.float64)
-    return y0, (), dydt_buf
+    return y0, physics_params, dydt_buf
 
 
-@pytest.mark.skip(reason="rhs_contract.py positional-args interface removed in v11.0; rewrite pending")
+@pytest.mark.skip(reason="Test rewrite pending: needs sparsity construction from config")
 def test_analytic_sparse_jacobian_matches_fd_on_single_comp():
     cfg = FullModelConfig()
     cfg.morphology.single_comp = True
@@ -133,11 +134,33 @@ def test_analytic_sparse_jacobian_matches_fd_on_single_comp():
     cfg.stim.stim_type = "const"
     cfg.stim.Iext = 8.0
 
-    y0, args, dydt_buf = _solver_args_from_cfg(cfg)
+    y0, physics_params, dydt_buf = _solver_args_from_cfg(cfg)
+    morph = MorphologyBuilder.build(cfg)
+    
+    # Build sparsity pattern
+    sparsity = build_jacobian_sparsity(
+        n_comp=physics_params.n_comp,
+        en_ih=physics_params.en_ih,
+        en_ica=physics_params.en_ica,
+        en_ia=physics_params.en_ia,
+        en_sk=physics_params.en_sk,
+        dyn_ca=physics_params.dyn_ca,
+        l_indices=physics_params.l_indices,
+        l_indptr=physics_params.l_indptr,
+        use_dfilter_primary=physics_params.use_dfilter_primary,
+        use_dfilter_secondary=physics_params.use_dfilter_secondary,
+        en_itca=physics_params.en_itca,
+        en_im=physics_params.en_im,
+        en_nap=physics_params.en_nap,
+        en_nar=physics_params.en_nar,
+    )
+    
+    # Create Jacobian function
+    jac_fn = make_analytic_jacobian(sparsity)
 
     # JIT warmup for RHS before finite-difference loop.
-    rhs_multicompartment(0.0, y0, *args, dydt_buf)
-    j_an = analytic_sparse_jacobian(0.0, y0, *args).toarray()
+    rhs_multicompartment(0.0, y0, physics_params, dydt_buf)
+    j_an = jac_fn(0.0, y0, physics_params).toarray()
 
     eps = 1e-6
     n_state = len(y0)
@@ -147,8 +170,8 @@ def test_analytic_sparse_jacobian_matches_fd_on_single_comp():
         ym = y0.copy()
         yp[col] += eps
         ym[col] -= eps
-        fp = rhs_multicompartment(0.0, yp, *args, dydt_buf).copy()
-        fm = rhs_multicompartment(0.0, ym, *args, dydt_buf).copy()
+        fp = rhs_multicompartment(0.0, yp, physics_params, dydt_buf).copy()
+        fm = rhs_multicompartment(0.0, ym, physics_params, dydt_buf).copy()
         j_fd[:, col] = (fp - fm) / (2.0 * eps)
 
     rel_err = np.linalg.norm(j_an - j_fd) / max(np.linalg.norm(j_fd), 1e-12)

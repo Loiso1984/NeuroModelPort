@@ -37,7 +37,7 @@ def _run_profile(preset: str, t_sim: float = 220.0, dt_eval: float = 0.2) -> dic
     apply_preset(cfg, preset)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     res = NeuronSolver(cfg).run_single()
     st = _spike_times(res.v_soma, res.t)
@@ -63,7 +63,7 @@ def _run_profile_scaled(
     cfg.stim.Iext = float(cfg.stim.Iext * i_scale)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
     res = NeuronSolver(cfg).run_single()
     st = _spike_times(res.v_soma, res.t)
     return {

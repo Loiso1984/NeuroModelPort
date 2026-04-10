@@ -58,12 +58,34 @@ def _mpl_fig(nrows=1, ncols=1, tight=True, **kwargs) -> tuple:
     return fig, canvas
 
 
-def _tab_with_toolbar(canvas) -> QWidget:
-    """Wrap a canvas in a QWidget with a matplotlib navigation toolbar."""
+def _tab_with_toolbar(canvas, fullscreen_callback=None) -> QWidget:
+    """Wrap a canvas in a QWidget with a matplotlib navigation toolbar.
+    
+    Args:
+        canvas: matplotlib FigureCanvas
+        fullscreen_callback: Optional callback for fullscreen button
+    """
     w = QWidget()
     lay = QVBoxLayout(w)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.addWidget(NavToolbar(canvas, w))
+    
+    # Toolbar row with fullscreen button
+    toolbar_row = QHBoxLayout()
+    toolbar_row.setContentsMargins(0, 0, 0, 0)
+    toolbar_row.setSpacing(4)
+    
+    toolbar = NavToolbar(canvas, w)
+    toolbar_row.addWidget(toolbar)
+    
+    if fullscreen_callback is not None:
+        btn_fullscreen = QPushButton("⛶ Fullscreen")
+        btn_fullscreen.setToolTip("Open plot in fullscreen window with crosshair")
+        btn_fullscreen.setMaximumWidth(120)
+        btn_fullscreen.clicked.connect(fullscreen_callback)
+        toolbar_row.addWidget(btn_fullscreen)
+    
+    toolbar_row.addStretch()
+    lay.addLayout(toolbar_row)
     lay.addWidget(canvas)
     return w
 
@@ -158,6 +180,98 @@ class _LazyPlaceholder(QWidget):
         lay.addWidget(lbl)
 
 
+class FullscreenPlotViewer(QMainWindow):
+    """Fullscreen matplotlib plot viewer with crosshair functionality.
+    
+    Provides detailed analysis view with:
+    - Crosshair cursor showing coordinates
+    - Interactive zoom/pan
+    - Copy data to clipboard
+    """
+    
+    def __init__(self, fig: Figure, title: str = "Plot Viewer", parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setWindowTitle(f"NeuroModelPort — {title}")
+        self.fig = fig
+        self.canvas = FigureCanvas(fig)
+        self.crosshair_lines = []
+        self.crosshair_text = None
+        
+        self._build_ui()
+        self._setup_crosshair()
+        
+    def _build_ui(self):
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Toolbar
+        toolbar = NavToolbar(self.canvas, central)
+        layout.addWidget(toolbar)
+        
+        # Canvas
+        layout.addWidget(self.canvas)
+        
+        self.setCentralWidget(central)
+        self.showMaximized()
+        
+    def _setup_crosshair(self):
+        """Setup crosshair cursor on all axes."""
+        for ax in self.fig.axes:
+            # Create crosshair lines
+            v_line = ax.axvline(color='#A6ADC8', linestyle='--', linewidth=1, alpha=0.7)
+            h_line = ax.axhline(color='#A6ADC8', linestyle='--', linewidth=1, alpha=0.7)
+            self.crosshair_lines.append((ax, v_line, h_line))
+        
+        # Connect mouse events
+        self.canvas.mpl_connect('motion_notify_event', self._on_mouse_move)
+        self.canvas.mpl_connect('button_press_event', self._on_click)
+        
+    def _on_mouse_move(self, event):
+        """Handle mouse movement for crosshair display."""
+        if event.inaxes is None:
+            return
+        
+        ax = event.inaxes
+        x, y = event.xdata, event.ydata
+        
+        # Update crosshair lines for this axis
+        for axis, v_line, h_line in self.crosshair_lines:
+            if axis == ax:
+                v_line.set_xdata([x, x])
+                h_line.set_ydata([y, y])
+            else:
+                # Hide crosshair on other axes
+                v_line.set_xdata([])
+                h_line.set_ydata([])
+        
+        # Update title with coordinates
+        xlabel = ax.get_xlabel()
+        ylabel = ax.get_ylabel()
+        title = f"{xlabel}={x:.3f}, {ylabel}={y:.3f}"
+        ax.set_title(title, fontsize=10, color='#CBA6F7', pad=5)
+        
+        self.canvas.draw_idle()
+        
+    def _on_click(self, event):
+        """Handle click to copy coordinates to clipboard."""
+        if event.inaxes is None:
+            return
+        if event.button == 1:  # Left click
+            x, y = event.xdata, event.ydata
+            from PySide6.QtGui import QClipboard
+            from PySide6.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText(f"{x:.6f}, {y:.6f}")
+            
+    def closeEvent(self, event):
+        """Cleanup on close."""
+        self.canvas.mpl_disconnect('motion_notify_event')
+        self.canvas.mpl_disconnect('button_press_event')
+        super().closeEvent(event)
+
+
 # ════════════════════════════════════════════════════════════════════
 class AnalyticsWidget(QTabWidget):
     """Main analytics widget — updated by MainWindow after each run."""
@@ -182,11 +296,41 @@ class AnalyticsWidget(QTabWidget):
             12: 'Physics', 13: 'Physics', 14: 'Physics', 15: 'Physics',
         }
         self._all_tab_specs = {}  # Store all tab specs for rebuilding
+        self._tab_figures = {}  # Store figures for fullscreen access
         self._build_tabs()
 
     # ─────────────────────────────────────────────────────────────────
     #  TAB CONSTRUCTION
     # ─────────────────────────────────────────────────────────────────
+    def _open_fullscreen_plot(self, tab_name: str):
+        """Open a fullscreen viewer for the specified tab's plot."""
+        if tab_name not in self._tab_figures:
+            return
+
+        fig = self._tab_figures[tab_name]
+        if fig is None:
+            return
+
+        # Copy figure to avoid shared reference conflicts
+        import pickle
+        import io
+        try:
+            buf = io.BytesIO()
+            pickle.dump(fig, buf)
+            buf.seek(0)
+            fig_copy = pickle.load(buf)
+        except Exception:
+            # Fallback: if pickle fails, use original (may have conflicts)
+            fig_copy = fig
+
+        viewer = FullscreenPlotViewer(fig_copy, title=f"Analytics — {tab_name}", parent=self)
+        self._fullscreen_windows.append(viewer)
+        
+        def _cleanup(*_):
+            self._fullscreen_windows = [w for w in self._fullscreen_windows if w is not viewer]
+        
+        viewer.destroyed.connect(_cleanup)
+    
     def _build_tabs(self):
         # Corner widget with category filter buttons and actions
         corner = QWidget()
@@ -230,6 +374,7 @@ class AnalyticsWidget(QTabWidget):
         self.passport_view = QTextEdit()
         self.passport_view.setReadOnly(True)
         self.passport_view.setFont(QFont("Consolas", 10))
+        self.passport_view.setMinimumWidth(400)
         self.passport_view.setStyleSheet(
             "background:#0D1117; color:#C9D1D9; border:none;"
         )
@@ -336,6 +481,7 @@ class AnalyticsWidget(QTabWidget):
         self._gates_max_rows = 10
         self.fig_gates, cvs = _mpl_fig(self._gates_max_rows, 1)
         self.cvs_gates = cvs
+        self._tab_figures['Gate Dynamics'] = self.fig_gates
         self._gates_n_rows: int | None = None
         self._gates_axes: list = [
             self.fig_gates.add_subplot(self._gates_max_rows, 1, k)
@@ -346,56 +492,40 @@ class AnalyticsWidget(QTabWidget):
         self._gates_line_v = None
         self._gates_lines: dict[str, object] = {}
         self._gates_signature: tuple[str, ...] = ()
-        return _tab_with_toolbar(cvs)
-
-    def _build_tab_currents(self) -> QWidget:
-        self._currents_max_plots = 12
-        # Use 4x3 grid layout instead of 12x1 to make graphs larger
-        self.fig_currents, cvs = _mpl_fig(4, 3)
-        self.cvs_currents = cvs
-        self._currents_n_plots: int | None = None
-        self._currents_axes: list = [
-            self.fig_currents.add_subplot(4, 3, k)
-            for k in range(1, 13)
-        ]
-        for ax in self._currents_axes:
-            ax.set_visible(False)
-        self._currents_line_v = None
-        self._currents_lines: dict[str, object] = {}
-        self._currents_zero_lines: dict[str, object] = {}
-        self._currents_signature: tuple[str, ...] = ()
-        self.fig_currents.set_tight_layout({'pad': 3.0, 'w_pad': 1.5, 'h_pad': 1.5})
-        return _tab_with_toolbar(cvs)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Gate Dynamics'))
 
     def _build_tab_spike_mech(self) -> QWidget:
         self.fig_spike_mech, cvs = _mpl_fig(2, 1)
         self.ax_spike_mech = [self.fig_spike_mech.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_spike_mech.set_tight_layout({'pad': 2.5})
         self.cvs_spike_mech = cvs
+        self._tab_figures['Spike Mechanism'] = self.fig_spike_mech
         self._spike_mech_init_done = False
         self._spike_mech_lines: dict[str, object] = {}
         self._spike_mech_curr_lines: dict[str, object] = {}
         self._spike_mech_norm_lines: dict[str, object] = {}
         self._spike_mech_texts: dict[str, object] = {}
         self._spike_mech_ax2b = None
-        return _tab_with_toolbar(cvs)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Mechanism'))
 
     def _build_tab_equil(self) -> QWidget:
         self.fig_equil, cvs = _mpl_fig(2, 2)
         self.ax_equil = [self.fig_equil.add_subplot(2, 2, k) for k in range(1, 5)]
         self.fig_equil.set_tight_layout({'pad': 3.0})
         self.cvs_equil = cvs
+        self._tab_figures['Equilibrium Curves'] = self.fig_equil
         self._equil_init_done = False
         self._equil_lines: dict[str, object] = {}
-        return _tab_with_toolbar(cvs)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Equilibrium Curves'))
 
     def _build_tab_phase(self) -> QWidget:
         self.fig_phase, cvs = _mpl_fig(1, 1)
         self.ax_phase = self.fig_phase.add_subplot(1, 1, 1)
         self.cvs_phase = cvs
+        self._tab_figures['Phase Plane'] = self.fig_phase
         self._phase_lines: dict[str, object] = {}
         self._phase_warning_text = None
-        return _tab_with_toolbar(cvs)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase Plane'))
 
     def _build_tab_kymo(self) -> QWidget:
         self.fig_kymo, cvs = _mpl_fig(2, 1)
@@ -407,21 +537,34 @@ class AnalyticsWidget(QTabWidget):
         self._kymo_im2 = None
         self._kymo_empty_text = None
         self.cvs_kymo = cvs
-        return _tab_with_toolbar(cvs)
+        self._tab_figures['Kymograph'] = self.fig_kymo
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Kymograph'))
 
     def _build_tab_energy_balance(self) -> QWidget:
-        self.fig_energy, cvs = _mpl_fig(3, 1)
-        self.ax_energy = [self.fig_energy.add_subplot(3, 1, k) for k in range(1, 4)]
+        import matplotlib.gridspec as gridspec
+        self.fig_energy, cvs = _mpl_fig(1, 1)
+        # v12.0: Use gridspec to allocate 30% width to pie chart (right column)
+        gs = gridspec.GridSpec(4, 2, width_ratios=[7, 3], figure=self.fig_energy)
+        # Time-series plots in left column (rows 0-2, col 0)
+        self.ax_energy = [
+            self.fig_energy.add_subplot(gs[0, 0]),  # Balance Error
+            self.fig_energy.add_subplot(gs[1, 0]),  # Cumulative Charge
+            self.fig_energy.add_subplot(gs[2, 0]),  # Power
+            self.fig_energy.add_subplot(gs[3, :]),  # Pie chart spans bottom row
+        ]
         self.cvs_energy = cvs
+        self._tab_figures['Energy & Balance'] = self.fig_energy
         self._energy_lines: dict[str, object] = {}
         self._balance_lines: dict[str, object] = {}
-        return _tab_with_toolbar(cvs)
+        self._pie_chart = None
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Energy & Balance'))
 
     def _build_tab_bif(self) -> QWidget:
         self.fig_bif, cvs = _mpl_fig(2, 2)
         self.ax_bif = [self.fig_bif.add_subplot(2, 2, k) for k in range(1, 5)]
-        self.tab_bif = _tab_with_toolbar(cvs)
+        self.tab_bif = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Bifurcation'))
         self.cvs_bif = cvs
+        self._tab_figures['Bifurcation'] = self.fig_bif
         self._bif_lines: dict[str, object] = {}
         self._bif_peak_scatter = None
         return self.tab_bif
@@ -429,8 +572,9 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_sweep(self) -> QWidget:
         self.fig_sweep, cvs = _mpl_fig(2, 2)
         self.ax_sweep = [self.fig_sweep.add_subplot(2, 2, k) for k in range(1, 5)]
-        self.tab_sweep = _tab_with_toolbar(cvs)
+        self.tab_sweep = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Sweep'))
         self.cvs_sweep = cvs
+        self._tab_figures['Sweep'] = self.fig_sweep
         self._sweep_cbar = None
         self._sweep_trace_lines: list = []
         self._sweep_trace_max = 64
@@ -440,16 +584,18 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_sd(self) -> QWidget:
         self.fig_sd, cvs = _mpl_fig(1, 2)
         self.ax_sd = [self.fig_sd.add_subplot(1, 2, k) for k in range(1, 3)]
-        self.tab_sd = _tab_with_toolbar(cvs)
+        self.tab_sd = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('S-D Curve'))
         self.cvs_sd = cvs
+        self._tab_figures['S-D Curve'] = self.fig_sd
         self._sd_lines: dict[str, object] = {}
         return self.tab_sd
 
     def _build_tab_excmap(self) -> QWidget:
         self.fig_excmap, cvs = _mpl_fig(1, 2)
         self.ax_excmap = [self.fig_excmap.add_subplot(1, 2, k) for k in range(1, 3)]
-        self.tab_excmap = _tab_with_toolbar(cvs)
+        self.tab_excmap = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Excitability Map'))
         self.cvs_excmap = cvs
+        self._tab_figures['Excitability Map'] = self.fig_excmap
         self._excmap_mesh = {"spikes": None, "freq": None}
         self._excmap_cbar = {"spikes": None, "freq": None}
         return self.tab_excmap
@@ -459,37 +605,46 @@ class AnalyticsWidget(QTabWidget):
         self.ax_spectro = [self.fig_spectro.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_spectro.set_tight_layout({'pad': 2.5})
         self.cvs_spectro = cvs
+        self._tab_figures['Spectrogram'] = self.fig_spectro
         self._spectro_cbar = None
         self._spectro_vm_line = None
         self._spectro_mesh = None
         self._spectro_fail_text = None
-        return _tab_with_toolbar(cvs)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Spectrogram'))
 
     def _build_tab_impedance(self) -> QWidget:
         self.fig_impedance, cvs = _mpl_fig(2, 1)
         self.ax_impedance = [self.fig_impedance.add_subplot(2, 1, k) for k in range(1, 3)]
         self.fig_impedance.set_tight_layout({'pad': 2.5})
         self.cvs_impedance = cvs
+        self._tab_figures['Impedance'] = self.fig_impedance
         self._impedance_lines: dict[str, object] = {}
         self._impedance_texts: dict[str, object] = {}
-        return _tab_with_toolbar(cvs)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Impedance'))
 
     def _build_tab_chaos(self) -> QWidget:
         self.fig_chaos, cvs = _mpl_fig(1, 1)
         self.ax_chaos = self.fig_chaos.add_subplot(1, 1, 1)
         self.cvs_chaos = cvs
+        self._tab_figures['Chaos & LLE'] = self.fig_chaos
         self._chaos_lines = {}
         self._chaos_texts = {}
-        return _tab_with_toolbar(cvs)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Chaos & LLE'))
 
     def _build_tab_modulation(self) -> QWidget:
         self.fig_mod, cvs = _mpl_fig(1, 1)
         # Use polar projection for phase-locking
         self.ax_mod = self.fig_mod.add_subplot(1, 1, 1, polar=True)
         self.cvs_mod = cvs
-        self._mod_bars = None
-        self._mod_vec = None
-        return _tab_with_toolbar(cvs)
+        self._tab_figures['Phase-Locking'] = self.fig_mod
+        # Initialize bar stubs with default 18 bins (will be updated dynamically based on config)
+        self._mod_bars = self.ax_mod.bar(np.zeros(18), np.zeros(18), width=0.1, alpha=0.7, color='#89B4FA', edgecolor='#74C7EC')
+        # Initialize PLV vector line
+        self._mod_vec, = self.ax_mod.plot([], [], color='#F38BA8', lw=3)
+        # Initialize error text
+        self._mod_error_text = self.ax_mod.text(0.5, 0.5, '', ha='center', va='center', 
+                                                 transform=self.ax_mod.transAxes, fontsize=12, color='#666666', visible=False)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
 
     # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
@@ -923,32 +1078,57 @@ class AnalyticsWidget(QTabWidget):
         """Update Phase-Locking (Modulation) tab with polar plot."""
         if not hasattr(self, 'fig_mod'):
             return  # tab not yet visited
-
         centers = stats.get('modulation_phase_bin_centers_rad', [])
         rates = stats.get('modulation_phase_rate_hz', [])
         plv = stats.get('modulation_plv', np.nan)
 
+        # Reset error text visibility to clean state
+        self._mod_error_text.set_visible(False)
+
         # Handle invalid state
         if not stats.get('modulation_valid', False) or len(centers) == 0 or len(rates) == 0:
-            self.ax_mod.clear()
-            self.ax_mod.text(0.5, 0.5, "Modulation analysis disabled or insufficient spikes.",
-                           ha='center', va='center', transform=self.ax_mod.transAxes,
-                           fontsize=12, color='#666666')
+            # Hide bars and vector, show error text
+            for bar in self._mod_bars:
+                bar.set_height(0.0)
+            self._mod_vec.set_data([], [])
+            self._mod_error_text.set_text("Modulation analysis disabled or insufficient spikes.")
+            self._mod_error_text.set_visible(True)
             self.cvs_mod.draw_idle()
             return
 
-        # Clear and plot polar bar chart
-        self.ax_mod.clear()
-        width = 2 * np.pi / len(centers) if len(centers) > 0 else 0.1
-        self.ax_mod.bar(centers, rates, width=width, alpha=0.7, color='#89B4FA', edgecolor='#74C7EC')
+        # Hide error text
+        self._mod_error_text.set_visible(False)
 
-        # Plot mean vector (PLV)
+        # Rebuild bars if count changed (dynamic bin count from config)
+        n_expected = len(centers)
+        if len(self._mod_bars) != n_expected:
+            # Remove old bars
+            for bar in self._mod_bars:
+                bar.remove()
+            # Create new bars with correct count
+            width = 2 * np.pi / n_expected if n_expected > 0 else 0.1
+            self._mod_bars = self.ax_mod.bar(np.zeros(n_expected), np.zeros(n_expected), width=width, alpha=0.7, color='#89B4FA', edgecolor='#74C7EC')
+        else:
+            width = 2 * np.pi / n_expected if n_expected > 0 else 0.1
+
+        # Update bar positions and heights
+        for i, bar in enumerate(self._mod_bars):
+            if i < len(centers):
+                bar.set_x(centers[i] - width / 2)
+                bar.set_width(width)
+                bar.set_height(rates[i])
+
+        # Update PLV vector line
         if np.isfinite(plv) and 'modulation_preferred_phase_rad' in stats:
             preferred_phase = stats['modulation_preferred_phase_rad']
             max_rate = np.max(rates) if len(rates) > 0 else 1.0
-            self.ax_mod.plot([0, preferred_phase], [0, max_rate * plv], color='#F38BA8', lw=3,
-                           label=f"PLV: {plv:.3f}")
+            self._mod_vec.set_data([0, preferred_phase], [0, max_rate * plv])
+            self._mod_vec.set_label(f"PLV: {plv:.3f}")
+            # Clear previous legend to prevent accumulation
+            self.ax_mod.legend_.remove() if self.ax_mod.legend_ is not None else None
             self.ax_mod.legend(loc='upper right', fontsize=8, bbox_to_anchor=(1.3, 1.1))
+        else:
+            self._mod_vec.set_data([], [])
 
         self.ax_mod.set_title("Spike Phase-Locking (Firing Rate vs LFP Phase)", fontsize=11, fontweight='bold', pad=15)
         self.cvs_mod.draw_idle()
@@ -1107,6 +1287,11 @@ class AnalyticsWidget(QTabWidget):
             0.01, 0.02, "", transform=ax2.transAxes, fontsize=8.5, color="#333333",
             bbox=dict(boxstyle="round,pad=0.25", facecolor="#F8F8F8", edgecolor="#CCCCCC", alpha=0.9),
         )
+        # Initialize centered error text for ax2
+        self._spike_mech_texts["ax2_error"] = ax2.text(
+            0.5, 0.5, "", ha='center', va='center', transform=ax2.transAxes, fontsize=12,
+            visible=False
+        )
         
         self._spike_mech_init_done = True
 
@@ -1164,12 +1349,12 @@ class AnalyticsWidget(QTabWidget):
 
         # Row 2: Channel activity with explanation
         if n_sp < 2:
-            self._spike_mech_texts["ax2_reasons"].set_text("Need at least 2 spikes for attenuation diagnostics.")
-            ax2.clear()
-            ax2.text(0.5, 0.5, "Need at least 2 spikes for attenuation diagnostics.", 
-                    ha='center', va='center', transform=ax2.transAxes, fontsize=12)
-            self.cvs_spike_mech.draw_idle()
-            return
+            self._spike_mech_texts["ax2_reasons"].set_text("Channel activity shown below.\n(Attenuation analysis requires ≥2 spikes)")
+            self._spike_mech_texts["ax2_error"].set_visible(False)
+            # Continue to plot channel activity even with < 2 spikes
+
+        # Hide error text when we have enough spikes
+        self._spike_mech_texts["ax2_error"].set_visible(False)
 
         # Time-resolved channel activity to explain attenuation causes
         dt = float(np.mean(np.diff(t))) if len(t) > 1 else 0.1
@@ -1218,12 +1403,24 @@ class AnalyticsWidget(QTabWidget):
             show_legend=True,
         )
 
-        # Add explanation text
-        explanation = ("Spike attenuation mechanisms:\n"
-                      "1. Na+ inactivation reduces available current\n"
-                      "2. K+ activation increases outward current\n"
-                      "3. Ca²+ accumulation activates SK channels (hyperpolarization)\n"
-                      "4. A-type K+ channels provide frequency-dependent adaptation")
+        # Add explanation text - data-driven based on actual channels
+        active_channels = list(traces.keys())
+        if n_sp >= 2:
+            # Compare first vs last spike
+            v_first_peak = v[peak_idx[0]]
+            v_last_peak = v[peak_idx[-1]]
+            attenuation_pct = 100.0 * (v_first_peak - v_last_peak) / abs(v_first_peak) if v_first_peak != 0 else 0.0
+            explanation = (f"Spike attenuation: {attenuation_pct:.1f}% (first={v_first_peak:.1f}mV, last={v_last_peak:.1f}mV)\n"
+                          f"Active channels: {', '.join(active_channels)}\n"
+                          f"Attenuation mechanisms: Na+ inactivation, K+ activation")
+            if 'ICa' in active_channels or 'SK' in active_channels:
+                explanation += ", Ca²+-dependent SK"
+            if 'IA' in active_channels:
+                explanation += ", A-type K+ adaptation"
+        else:
+            explanation = (f"Single spike detected ({n_sp} spike).\n"
+                          f"Active channels: {', '.join(active_channels)}\n"
+                          f"Run longer simulation for attenuation analysis.")
         self._spike_mech_texts["ax2_reasons"].set_text(explanation)
 
         self.cvs_spike_mech.draw_idle()
@@ -1339,40 +1536,64 @@ class AnalyticsWidget(QTabWidget):
         cfg   = result.config
         I_stm = cfg.stim.Iext if cfg.stim.stim_type == 'const' else 0.0
 
-        # Limit to last 300ms for better readability
-        max_time_ms = 300.0
-        if len(t) > 0 and t[-1] > max_time_ms:
-            start_idx = np.searchsorted(t, t[-1] - max_time_ms)
-            V_plot = V[start_idx:]
-            n_plot = n_t[start_idx:]
-            t_plot = t[start_idx:]
-        else:
-            V_plot = V
-            n_plot = n_t
-            t_plot = t
-
+        # v12.0: Plot 3 distinct segments to visualize trajectory collapse during adaptation
         V_rng               = np.linspace(-100, 60, 500)
         n_V_null, n_n_null  = compute_nullclines(V_rng, cfg, I_stm)
 
         ax = self.ax_phase
         if not self._phase_lines:
-            self._phase_lines["traj"] = ax.plot([], [], color='#F0B020', lw=1.5, zorder=3, label='AP trajectory (last 300ms)')[0]
+            self._phase_lines["traj_initial"] = ax.plot([], [], color='#2060CC', lw=1.5, zorder=3, label='Initial Spike (blue)')[0]
+            self._phase_lines["traj_middle"] = ax.plot([], [], color='#888888', lw=1.5, zorder=3, label='Middle (gray)')[0]
+            self._phase_lines["traj_final"] = ax.plot([], [], color='#DC5A10', lw=1.5, zorder=3, label='Final Spike (red)')[0]
             self._phase_lines["rest"] = ax.plot([], [], 'go', ms=8, zorder=5, label='Resting state')[0]
             self._phase_lines["spikes"] = ax.plot([], [], 'r*', ms=12, zorder=6, label='Spike peaks')[0]
             self._phase_lines["n_null"] = ax.plot([], [], color='#40CC40', lw=2, ls='--', label='dn/dt = 0  (n\u221e)')[0]
             self._phase_lines["v_null"] = ax.plot([], [], color='#CC4040', lw=2, ls='--', label='dV/dt = 0')[0]
 
-        # Trajectory (limited to last 300ms)
-        self._phase_lines["traj"].set_data(V_plot, n_plot)
-        self._phase_lines["rest"].set_data([V_plot[0]], [n_plot[0]])
+        # Divide trajectory into 3 segments based on time
+        if len(t) > 0 and t[-1] > 100:
+            # Initial segment: first 100ms or first third
+            t_end_initial = min(100, t[-1] / 3)
+            idx_initial = np.searchsorted(t, t_end_initial)
+            V_initial = V[:idx_initial]
+            n_initial = n_t[:idx_initial]
 
-        # Spike detection markers (limited to last 300ms)
+            # Middle segment: middle third
+            t_start_middle = t_end_initial
+            t_end_middle = t_start_middle + (t[-1] - t_start_middle) / 3
+            idx_start_middle = np.searchsorted(t, t_start_middle)
+            idx_end_middle = np.searchsorted(t, t_end_middle)
+            V_middle = V[idx_start_middle:idx_end_middle]
+            n_middle = n_t[idx_start_middle:idx_end_middle]
+
+            # Final segment: last third
+            idx_final = idx_end_middle
+            V_final = V[idx_final:]
+            n_final = n_t[idx_final:]
+        else:
+            # Short simulation: just plot all as initial, hide middle/final lines
+            V_initial, n_initial = V, n_t
+            self._phase_lines["traj_middle"].set_visible(False)
+            self._phase_lines["traj_final"].set_visible(False)
+            V_middle, n_middle = V[0:0], n_t[0:0]
+            V_final, n_final = V[0:0], n_t[0:0]
+
+        # Plot the three segments
+        self._phase_lines["traj_initial"].set_data(V_initial, n_initial)
+        self._phase_lines["traj_middle"].set_data(V_middle, n_middle)
+        self._phase_lines["traj_final"].set_data(V_final, n_final)
+        self._phase_lines["rest"].set_data([V[0]], [n_t[0]])
+
+        # Ensure middle/final lines are visible for long simulations
+        if len(t) > 0 and t[-1] > 100:
+            self._phase_lines["traj_middle"].set_visible(True)
+            self._phase_lines["traj_final"].set_visible(True)
+
+        # Spike detection markers (all spikes)
         if stats['n_spikes'] > 0:
             from core.analysis import detect_spikes
             pk_idx, _, _ = detect_spikes(V, t, **_spike_detect_kwargs_from_stats(stats))
-            # Filter spikes to only those in the last 300ms
-            recent_spikes = pk_idx[pk_idx >= start_idx] if len(t) > 0 and t[-1] > max_time_ms else pk_idx
-            self._phase_lines["spikes"].set_data(V[recent_spikes], n_t[recent_spikes])
+            self._phase_lines["spikes"].set_data(V[pk_idx], n_t[pk_idx])
         else:
             self._phase_lines["spikes"].set_data([], [])
 
@@ -1383,7 +1604,7 @@ class AnalyticsWidget(QTabWidget):
 
         ax.set_xlabel('V (mV)',  fontsize=11)
         ax.set_ylabel('n  [K\u207a activation]', fontsize=11)
-        ax.set_title(f'Phase Plane (V\u2013n) - Last {max_time_ms:.0f}ms', fontsize=12)
+        ax.set_title(f'Phase Plane (V\u2013n) - Trajectory Evolution (Initial/Middle/Final)', fontsize=12)
         ax.legend(fontsize=9)
         ax.grid(alpha=0.3)
         ax.set_xlim(-100, 60);  ax.set_ylim(-0.05, 1.05)
@@ -1493,13 +1714,13 @@ class AnalyticsWidget(QTabWidget):
     #  6 — CURRENT BALANCE
     # ─────────────────────────────────────────────────────────────────
     def _update_energy_balance(self, result):
-        """Combined Energy & Balance tab with 3 rows: Balance Error, Cumulative Charge, Power."""
+        """Combined Energy & Balance tab with 4 rows: Balance Error, Cumulative Charge, Power, ATP Pie Chart."""
         if not hasattr(self, 'fig_energy'):
             return  # tab not yet visited
         t   = result.t
         dt  = float(t[1] - t[0]) if len(t) > 1 else 0.05
 
-        ax1, ax2, ax3 = self.ax_energy
+        ax1, ax2, ax3, ax4 = self.ax_energy
 
         # ── Row 1: Current Balance Error (semilog) ─────────────────────
         from core.analysis import compute_current_balance
@@ -1574,6 +1795,41 @@ class AnalyticsWidget(QTabWidget):
         ax3.grid(alpha=0.3)
         ax3.relim()
         ax3.autoscale_view()
+
+        # ── Row 4: ATP Breakdown Pie Chart (spans full width at bottom) ───────
+        atp_bd = getattr(result, 'atp_breakdown', None)
+        if atp_bd is None or not isinstance(atp_bd, dict):
+            atp_bd = {}
+        na_pump = atp_bd.get('Na_pump', 0.0)
+        ca_pump = atp_bd.get('Ca_pump', 0.0)
+        baseline = atp_bd.get('baseline', 0.0)
+        total = atp_bd.get('total', 0.0)
+
+        # Use standard channel colors, highlight Ca_pump in red if > 30% (metabolic stress)
+        ca_ratio = ca_pump / total if total > 0 else 0.0
+        if ca_ratio > 0.3:
+            # Metabolic stress: highlight Ca2+ pump in bright red
+            colors = [CHAN_COLORS.get('Na', '#FF6B6B'), '#FF0000', '#888888']
+        else:
+            colors = [CHAN_COLORS.get('Na', '#FF6B6B'), CHAN_COLORS.get('Ca', '#4ECDC4'), '#888888']
+        labels = ['Na+ Pump', 'Ca2+ Pump', 'Resting Leakage']
+        sizes = [na_pump, ca_pump, baseline]
+
+        # Clear previous pie chart
+        if self._pie_chart is not None:
+            self._pie_chart.remove()
+            self._pie_chart = None
+
+        # Create new pie chart in bottom row (spans both columns)
+        if total > 0:
+            title_suffix = ' (METABOLIC STRESS)' if ca_ratio > 0.3 else ''
+            self._pie_chart = ax4.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%',
+                                      startangle=90, textprops={'fontsize': 9})[0]
+        else:
+            ax4.text(0.5, 0.5, 'No ATP data', ha='center', va='center', transform=ax4.transAxes)
+
+        ax4.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cm²){title_suffix}', fontsize=10)
+        ax4.axis('equal')
 
         self.fig_energy.tight_layout()
         self.cvs_energy.draw_idle()

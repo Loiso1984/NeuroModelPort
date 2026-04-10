@@ -126,6 +126,12 @@ class Translator:
             'excmap_D_max': 'Excitability map: maximum pulse duration (ms).',
             'excmap_ND':    'Excitability map: number of duration steps.',
 
+            # ── Preset Mode Labels ─────────────────────────────────
+            'k_mode_sleep': 'Sleep (Bursts)',
+            'k_mode_awake': 'Awake (Relay)',
+            'l5_mode_normal': 'Standard',
+            'l5_mode_ach': 'Attention (ACh ON)',
+
             # ── Core Function Translations ───────────────────────────
             'func_gax': 'Axial conductance of uniform cylinder (mS).',
             'func_gax_pair': 'Conductance at junction of two compartments of different diameters (soma->axon).',
@@ -244,19 +250,25 @@ class Translator:
             'bif_min':      'Начало диапазона бифуркации.',
             'bif_max':      'Конец диапазона бифуркации.',
             'bif_steps':    'Количество точек бифуркации.',
-            'run_sweep':    'Включить параметрический перебор (кнопка ↔ ПЕРЕБОР).',
-            'sweep_param':  'Перебираемый параметр: Iext, gNa_max, gK_max, T_celsius…',
+            'run_sweep':    'Включить параметрический перебор (кнопка ↔).',
+            'sweep_param':  'Перебираемый параметр: Iext, gNa_max, gK_max, T_celsius, …',
             'sweep_min':    'Начальное значение перебора.',
             'sweep_max':    'Конечное значение перебора.',
-            'sweep_steps':  'Число точек перебора.',
-            'run_sd_curve': 'Кривая сила-длительность (кнопка ⏱ C-Д).',
-            'run_excmap':   'Карта возбудимости 2D (кнопка 🗺).',
-            'excmap_I_min': 'Мин. ток для карты (мкА/см²).',
-            'excmap_I_max': 'Макс. ток для карты (мкА/см²).',
-            'excmap_NI':    'Шагов по току.',
-            'excmap_D_min': 'Мин. длительность импульса (мс).',
-            'excmap_D_max': 'Макс. длительность импульса (мс).',
-            'excmap_ND':    'Шагов по длительности.',
+            'sweep_steps':  'Количество точек перебора.',
+            'run_sd_curve': 'Кривая Сила-Длительность (кнопка ⏱).',
+            'run_excmap':   'Карта возбудимости 2-D (кнопка 🗺).',
+            'excmap_I_min': 'Карта: мин. ток (мкА/см²).',
+            'excmap_I_max': 'Карта: макс. ток (мкА/см²).',
+            'excmap_NI':    'Карта: число шагов по току.',
+            'excmap_D_min': 'Карта: мин. длительность (мс).',
+            'excmap_D_max': 'Карта: макс. длительность (мс).',
+            'excmap_ND':    'Карта: число шагов по длительности.',
+
+            # ── Метки режимов пресетов ───────────────────────────────
+            'k_mode_sleep': 'Сон (Всплески)',
+            'k_mode_awake': 'Бодрствование (Реле)',
+            'l5_mode_normal': 'Стандарт',
+            'l5_mode_ach': 'Внимание (АCh ВКЛ)',
 
             # ── Перевод основных функций ───────────────────────────
             'func_gax': 'Аксиальная проводимость однородного цилиндра (мСм).',

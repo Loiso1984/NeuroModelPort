@@ -65,7 +65,7 @@ def test_stress_ih_ica_interaction():
                 cfg.morphology.single_comp = True
                 cfg.stim_location.location = "soma"
                 cfg.dendritic_filter.enabled = False
-                cfg.stim.jacobian_mode = "sparse_fd"
+                cfg.stim.jacobian_mode = "native_hines"
                 cfg.stim.stim_type = "const"
                 cfg.stim.Iext = iext
                 cfg.stim.t_sim = 180.0
@@ -97,7 +97,7 @@ def test_stress_ia_sk_interaction():
                 cfg.morphology.single_comp = True
                 cfg.stim_location.location = "soma"
                 cfg.dendritic_filter.enabled = False
-                cfg.stim.jacobian_mode = "sparse_fd"
+                cfg.stim.jacobian_mode = "native_hines"
                 cfg.stim.stim_type = "const"
                 cfg.stim.Iext = iext
                 cfg.stim.t_sim = 200.0
@@ -129,7 +129,7 @@ def test_stress_all_channels_enabled():
             cfg.morphology.single_comp = True
             cfg.stim_location.location = "soma"
             cfg.dendritic_filter.enabled = False
-            cfg.stim.jacobian_mode = "sparse_fd"
+            cfg.stim.jacobian_mode = "native_hines"
             cfg.stim.stim_type = "const"
             cfg.stim.Iext = iext
             cfg.stim.t_sim = 180.0

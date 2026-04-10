@@ -207,7 +207,8 @@ def run_excitability_map(config: FullModelConfig,
                 n_sp = len(pks)
                 spike_matrix[ii, di] = n_sp
                 if n_sp > 1:
-                    freq_matrix[ii, di] = 1000.0 / float(np.mean(np.diff(sp_t)))
+                    isi_mean = float(np.mean(np.diff(sp_t)))
+                    freq_matrix[ii, di] = 1000.0 / isi_mean if isi_mean > 0 else 0.0
             except Exception:
                 pass
 
@@ -432,8 +433,9 @@ def run_euler_maruyama(config: FullModelConfig,
         if stoch:
             g_start = n_comp
             def _add_noise(offset, alpha_v, beta_v, gate_v, N_ch, phi_gate_v):
+                N_ch_safe = np.maximum(N_ch, 1.0)  # Guard against zero channel count
                 sigma = np.sqrt(
-                    np.maximum(0.0, alpha_v * (1.0 - gate_v) + beta_v * gate_v) / N_ch
+                    np.maximum(0.0, alpha_v * (1.0 - gate_v) + beta_v * gate_v) / N_ch_safe
                 ) * phi_gate_v
                 y_new[offset:offset + n_comp] += sigma * np.random.randn(n_comp) * sqrt_dt
 

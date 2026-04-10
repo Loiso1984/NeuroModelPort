@@ -32,10 +32,122 @@ from .rhs import (
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
 from .hines import hines_solve, update_gates_analytic
-from .kinetics import am, bm, ah, bh, an, bn
+from .kinetics import am_lut, bm_lut, ah_lut, bh_lut, an_lut, bn_lut
 
 
-@njit(cache=True)
+@njit(fastmath=True, cache=True)
+def _compute_ionic_currents_vectorized(
+    v_arr, m_arr, h_arr, n_arr,
+    r_arr, s_arr, u_arr, a_arr, b_arr, p_arr, q_arr, w_arr, x_arr, y_arr, j_arr, z_arr,
+    ca_arr,
+    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
+    ena, ek, el, eih, ea,
+    en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+    ca_ext, t_kelvin, ca_rest,
+    n_comp,
+):
+    """Vectorized computation of ionic currents for all compartments.
+    
+    Returns arrays:
+    - g_total: total membrane conductance per compartment
+    - e_eff: effective reversal potential per compartment
+    - i_ca_influx: calcium influx per compartment
+    """
+    g_total = np.empty(n_comp, dtype=np.float64)
+    e_eff = np.empty(n_comp, dtype=np.float64)
+    i_ca_influx = np.zeros(n_comp, dtype=np.float64)
+    
+    for i in range(n_comp):
+        vi = v_arr[i]
+        mi = m_arr[i]
+        hi = h_arr[i]
+        ni = n_arr[i]
+        ri = r_arr[i] if en_ih else 0.0
+        si = s_arr[i] if en_ica else 0.0
+        ui = u_arr[i] if en_ica else 0.0
+        ai = a_arr[i] if en_ia else 0.0
+        bi = b_arr[i] if en_ia else 0.0
+        pi = p_arr[i] if en_itca else 0.0
+        qi = q_arr[i] if en_itca else 0.0
+        wi = w_arr[i] if en_im else 0.0
+        xi = x_arr[i] if en_nap else 0.0
+        yi = y_arr[i] if en_nar else 0.0
+        ji = j_arr[i] if en_nar else 0.0
+        zi = z_arr[i] if en_sk else 0.0
+        ca_i_val = ca_arr[i] if dyn_ca else ca_rest
+        
+        # Compute Nernst potential for calcium if dynamic
+        if dyn_ca:
+            ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
+            eca_i = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
+        else:
+            eca_i = 120.0
+        
+        # Conductance-weighted sum: g_total and e_eff = Σ g_ch * E_ch
+        g_tot = gl_v[i]
+        e_eff_i = gl_v[i] * el
+        
+        g_na = gna_v[i] * (mi ** 3) * hi
+        g_tot += g_na
+        e_eff_i += g_na * ena
+        
+        g_k_dr = gk_v[i] * (ni ** 4)
+        g_tot += g_k_dr
+        e_eff_i += g_k_dr * ek
+        
+        if en_ih:
+            g_ih = gih_v[i] * ri
+            g_tot += g_ih
+            e_eff_i += g_ih * eih
+        
+        if en_ica:
+            g_ca = gca_v[i] * (si ** 2) * ui
+            g_tot += g_ca
+            e_eff_i += g_ca * eca_i
+            i_ca = g_ca * (vi - eca_i)
+            if i_ca < 0.0:
+                i_ca_influx[i] += -i_ca
+        
+        if en_ia:
+            g_ia = ga_v[i] * ai * bi
+            g_tot += g_ia
+            e_eff_i += g_ia * ea
+        
+        if en_itca:
+            g_tca = gtca_v[i] * (pi ** 2) * qi
+            g_tot += g_tca
+            e_eff_i += g_tca * eca_i
+            i_tca = g_tca * (vi - eca_i)
+            if i_tca < 0.0:
+                i_ca_influx[i] += -i_tca
+        
+        if en_sk:
+            g_sk = gsk_v[i] * zi
+            g_tot += g_sk
+            e_eff_i += g_sk * ek
+        
+        if en_im:
+            g_im = gim_v[i] * wi
+            g_tot += g_im
+            e_eff_i += g_im * ek
+        
+        if en_nap:
+            g_nap = gnap_v[i] * xi
+            g_tot += g_nap
+            e_eff_i += g_nap * ena
+        
+        if en_nar:
+            g_nar = gnar_v[i] * yi * ji
+            g_tot += g_nar
+            e_eff_i += g_nar * ena
+        
+        g_total[i] = g_tot
+        e_eff[i] = e_eff_i
+    
+    return g_total, e_eff, i_ca_influx
+
+
+@njit(fastmath=True, cache=True)
 def run_native_loop(
     y0,       # float64[N_state]   — initial state vector
     t_sim,    # float64            — simulation duration (ms)
@@ -81,8 +193,8 @@ def run_native_loop(
     dyn_ca  = physics.dyn_ca
 
     # ── Channel counts for Langevin noise (approximate, proportional to conductance) ──
-    N_Na = np.maximum(50.0, 1000.0 * gna_v / physics.gna_max)
-    N_K  = np.maximum(50.0, 1000.0 * gk_v / physics.gk_max)
+    N_Na = np.maximum(50.0, 1000.0 * gna_v / max(physics.gna_max, 1e-12))
+    N_K  = np.maximum(50.0, 1000.0 * gk_v / max(physics.gk_max, 1e-12))
     sqrt_dt = np.sqrt(dt)
 
     # ── Reversal potentials ──
@@ -177,6 +289,21 @@ def run_native_loop(
     rhs   = np.empty(n_comp, dtype=np.float64)
     v_new = np.empty(n_comp, dtype=np.float64)
     i_ca_influx_v = np.zeros(n_comp, dtype=np.float64)
+    
+    # ── Gate array buffers for vectorized computation (pre-allocated, reused every step) ──
+    r_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    s_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    u_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    a_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    b_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    p_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    q_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    w_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    x_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    y_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    j_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    z_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    ca_arr_buf = np.zeros(n_comp, dtype=np.float64)
 
     # ── Stimulus flags (computed once) ──
     is_cond   = (physics.stype >= 4)
@@ -188,6 +315,7 @@ def run_native_loop(
 
     out_idx = 0
     t = 0.0
+    diverged = 0  # Initialize divergence flag
 
     for step in range(n_steps):
         # ── Record output ──
@@ -200,30 +328,60 @@ def run_native_loop(
         # ─────────────────────────────────────────────────────────────
         # 1. Compute Ca²⁺ influx at V_n  (needed by update_gates_analytic)
         # ─────────────────────────────────────────────────────────────
-        for i in range(n_comp):
-            vi       = y[i]
-            si       = y[off_s + i] if en_ica  else 0.0
-            ui       = y[off_u + i] if en_ica  else 0.0
-            pi       = y[off_p + i] if en_itca else 0.0
-            qi       = y[off_q + i] if en_itca else 0.0
-            ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
-
-            influx = 0.0
-            if dyn_ca:
-                ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
-                eca_i   = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
-            else:
-                eca_i = 120.0
-
-            if en_ica:
-                i_ca = gca_v[i] * (si * si) * ui * (vi - eca_i)
-                if i_ca < 0.0:
-                    influx += -i_ca
-            if en_itca:
-                i_tca = gtca_v[i] * (pi * pi) * qi * (vi - eca_i)
-                if i_tca < 0.0:
-                    influx += -i_tca
-            i_ca_influx_v[i] = influx
+        # Extract gate arrays for vectorized computation (slicing creates views, no allocation)
+        v_arr = y[:n_comp]
+        m_arr = y[off_m:off_m + n_comp]
+        h_arr = y[off_h:off_h + n_comp]
+        n_arr = y[off_n:off_n + n_comp]
+        
+        # Fill pre-allocated buffers based on channel flags
+        if en_ih:
+            for i in range(n_comp):
+                r_arr_buf[i] = y[off_r + i]
+        if en_ica:
+            for i in range(n_comp):
+                s_arr_buf[i] = y[off_s + i]
+                u_arr_buf[i] = y[off_u + i]
+        if en_ia:
+            for i in range(n_comp):
+                a_arr_buf[i] = y[off_a + i]
+                b_arr_buf[i] = y[off_b + i]
+        if en_itca:
+            for i in range(n_comp):
+                p_arr_buf[i] = y[off_p + i]
+                q_arr_buf[i] = y[off_q + i]
+        if en_im:
+            for i in range(n_comp):
+                w_arr_buf[i] = y[off_w + i]
+        if en_nap:
+            for i in range(n_comp):
+                x_arr_buf[i] = y[off_x + i]
+        if en_nar:
+            for i in range(n_comp):
+                y_arr_buf[i] = y[off_y + i]
+                j_arr_buf[i] = y[off_j + i]
+        if en_sk:
+            for i in range(n_comp):
+                z_arr_buf[i] = y[off_zsk + i]
+        if dyn_ca:
+            for i in range(n_comp):
+                ca_arr_buf[i] = y[off_ca + i]
+        else:
+            for i in range(n_comp):
+                ca_arr_buf[i] = ca_rest
+        
+        # Compute calcium influx using vectorized function
+        _, _, i_ca_influx_v = _compute_ionic_currents_vectorized(
+            v_arr, m_arr, h_arr, n_arr,
+            r_arr_buf, s_arr_buf, u_arr_buf, a_arr_buf, b_arr_buf, p_arr_buf, q_arr_buf,
+            w_arr_buf, x_arr_buf, y_arr_buf, j_arr_buf, z_arr_buf,
+            ca_arr_buf,
+            gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
+            ena, ek, el, eih, ea,
+            en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+            ca_ext, t_kelvin, ca_rest,
+            n_comp,
+        )
 
         # ─────────────────────────────────────────────────────────────
         # 2. Update gating variables analytically at V_n (exact exponential)
@@ -234,7 +392,7 @@ def run_native_loop(
             off_m, off_h, off_n,
             off_r, off_s, off_u, off_a, off_b,
             off_p, off_q, off_w, off_x, off_y, off_j, off_zsk, off_ca,
-            phi_na, phi_k, phi_ih, phi_ca, phi_k,   # phi_k used as phi_k2 for IA/IM
+            phi_na, phi_k, phi_ih, phi_ca, _phi_ia,   # _phi_ia used as phi_k2 for IA/IM
             ca_rest, tau_ca, tau_sk, b_ca,
             i_ca_influx_v,
         )
@@ -248,19 +406,19 @@ def run_native_loop(
             for i in range(n_comp):
                 vi = y[i]
                 # Na m-gate noise
-                am_v, bm_v = am(vi), bm(vi)
+                am_v, bm_v = am_lut(vi), bm_lut(vi)
                 m_val = y[off_m + i]
                 var_m = max(0.0, am_v * (1.0 - m_val) + bm_v * m_val) / N_Na[i]
                 y[off_m + i] += np.sqrt(var_m) * phi_na[i] * np.random.randn() * sqrt_dt
                 
                 # Na h-gate noise
-                ah_v, bh_v = ah(vi), bh(vi)
+                ah_v, bh_v = ah_lut(vi), bh_lut(vi)
                 h_val = y[off_h + i]
                 var_h = max(0.0, ah_v * (1.0 - h_val) + bh_v * h_val) / N_Na[i]
                 y[off_h + i] += np.sqrt(var_h) * phi_na[i] * np.random.randn() * sqrt_dt
                 
                 # K n-gate noise
-                an_v, bn_v = an(vi), bn(vi)
+                an_v, bn_v = an_lut(vi), bn_lut(vi)
                 n_val = y[off_n + i]
                 var_n = max(0.0, an_v * (1.0 - n_val) + bn_v * n_val) / N_K[i]
                 y[off_n + i] += np.sqrt(var_n) * phi_k[i] * np.random.randn() * sqrt_dt
@@ -302,80 +460,65 @@ def run_native_loop(
         # 4. Build Hines linear system at V_n, gates at n+1
         #    Row i: d[i]*V[i] - a[i]*V[parent] - Σ b[c]*V[c] = rhs[i]
         # ─────────────────────────────────────────────────────────────
+        # Re-fill gate buffers with updated gate values (after analytic update)
+        if en_ih:
+            for i in range(n_comp):
+                r_arr_buf[i] = y[off_r + i]
+        if en_ica:
+            for i in range(n_comp):
+                s_arr_buf[i] = y[off_s + i]
+                u_arr_buf[i] = y[off_u + i]
+        if en_ia:
+            for i in range(n_comp):
+                a_arr_buf[i] = y[off_a + i]
+                b_arr_buf[i] = y[off_b + i]
+        if en_itca:
+            for i in range(n_comp):
+                p_arr_buf[i] = y[off_p + i]
+                q_arr_buf[i] = y[off_q + i]
+        if en_im:
+            for i in range(n_comp):
+                w_arr_buf[i] = y[off_w + i]
+        if en_nap:
+            for i in range(n_comp):
+                x_arr_buf[i] = y[off_x + i]
+        if en_nar:
+            for i in range(n_comp):
+                y_arr_buf[i] = y[off_y + i]
+                j_arr_buf[i] = y[off_j + i]
+        if en_sk:
+            for i in range(n_comp):
+                z_arr_buf[i] = y[off_zsk + i]
+        if dyn_ca:
+            for i in range(n_comp):
+                ca_arr_buf[i] = y[off_ca + i]
+        else:
+            for i in range(n_comp):
+                ca_arr_buf[i] = ca_rest
+        
+        # Compute g_total and e_eff using vectorized function
+        g_total_arr, e_eff_arr, _ = _compute_ionic_currents_vectorized(
+            v_arr, m_arr, h_arr, n_arr,
+            r_arr_buf, s_arr_buf, u_arr_buf, a_arr_buf, b_arr_buf, p_arr_buf, q_arr_buf,
+            w_arr_buf, x_arr_buf, y_arr_buf, j_arr_buf, z_arr_buf,
+            ca_arr_buf,
+            gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
+            ena, ek, el, eih, ea,
+            en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+            ca_ext, t_kelvin, ca_rest,
+            n_comp,
+        )
+        
+        # Build Hines system using pre-computed g_total and e_eff
         for i in range(n_comp):
             vi = y[i]   # V_n
-
-            mi   = y[off_m   + i]
-            hi   = y[off_h   + i]
-            ni   = y[off_n   + i]
-            ri   = y[off_r   + i] if en_ih   else 0.0
-            si   = y[off_s   + i] if en_ica  else 0.0
-            ui   = y[off_u   + i] if en_ica  else 0.0
-            ai_g = y[off_a   + i] if en_ia   else 0.0
-            bi_g = y[off_b   + i] if en_ia   else 0.0
-            pi   = y[off_p   + i] if en_itca else 0.0
-            qi   = y[off_q   + i] if en_itca else 0.0
-            wi   = y[off_w   + i] if en_im   else 0.0
-            xi   = y[off_x   + i] if en_nap  else 0.0
-            yi   = y[off_y   + i] if en_nar  else 0.0
-            ji   = y[off_j   + i] if en_nar  else 0.0
-            zi   = y[off_zsk + i] if en_sk   else 0.0
-            ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
-
-            # Conductance-weighted sum: g_total and e_eff = Σ g_ch * E_ch
-            g_total = gl_v[i]
-            e_eff   = gl_v[i] * el
-
-            g_na = gna_v[i] * (mi ** 3) * hi
-            g_total += g_na;  e_eff += g_na * ena
-
-            g_k_dr = gk_v[i] * (ni ** 4)
-            g_total += g_k_dr;  e_eff += g_k_dr * ek
-
-            if en_ih:
-                g_ih = gih_v[i] * ri
-                g_total += g_ih;  e_eff += g_ih * eih
-
-            if dyn_ca:
-                ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
-                eca_i   = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
-            else:
-                eca_i = 120.0
-
-            if en_ica:
-                g_ca = gca_v[i] * (si ** 2) * ui
-                g_total += g_ca;  e_eff += g_ca * eca_i
-
-            if en_ia:
-                g_ia = ga_v[i] * ai_g * bi_g
-                g_total += g_ia;  e_eff += g_ia * ea
-
-            if en_itca:
-                g_tca = gtca_v[i] * (pi ** 2) * qi
-                g_total += g_tca;  e_eff += g_tca * eca_i
-
-            if en_sk:
-                g_sk = gsk_v[i] * zi
-                g_total += g_sk;  e_eff += g_sk * ek
-
-            if en_im:
-                g_im = gim_v[i] * wi
-                g_total += g_im;  e_eff += g_im * ek
-
-            if en_nap:
-                g_nap = gnap_v[i] * xi
-                g_total += g_nap;  e_eff += g_nap * ena
-
-            if en_nar:
-                g_nar = gnar_v[i] * yi * ji
-                g_total += g_nar;  e_eff += g_nar * ena
-
+            
             # Hines diagonal: Cm/dt + g_ion - L_diag[i]   (L_diag[i] < 0)
             cm_over_dt = physics.cm_v[i] / dt
-            d[i]     = cm_over_dt + g_total - l_diag[i]
+            d[i]     = cm_over_dt + g_total_arr[i] - l_diag[i]
             a_vec[i] = g_axial_to_parent[i]        # positive: child→parent coupling
             b_vec[i] = g_axial_parent_to_child[i]  # positive: parent←child coupling
-
+            
             # ── Primary stimulus contribution at compartment i ──
             i_stim_p = distributed_stimulus_current_for_comp(
                 i, n_comp, base_current,
@@ -393,6 +536,8 @@ def run_native_loop(
                 if is_nmda:
                     g_syn *= nmda_mg_block(vi, mg_ext)
                 i_stim_eff = -g_syn * (vi - e_syn)   # inward ⟹ positive contribution
+                # Add g_syn to diagonal for fully implicit treatment of fast synaptic events
+                d[i] += g_syn
             else:
                 i_stim_eff = i_stim_p
 
@@ -409,10 +554,12 @@ def run_native_loop(
                     if is_nmda_2:
                         g2 *= nmda_mg_block(vi, mg_ext)
                     i_stim_eff += -g2 * (vi - e_syn_2)
+                    # Add g2 to diagonal for fully implicit treatment of fast synaptic events
+                    d[i] += g2
                 else:
                     i_stim_eff += i_stim_s
 
-            rhs[i] = cm_over_dt * vi + e_eff + i_stim_eff
+            rhs[i] = cm_over_dt * vi + e_eff_arr[i] + i_stim_eff
 
             # ── Additive membrane noise if enabled ──
             if physics.noise_sigma > 0.0:
@@ -424,18 +571,26 @@ def run_native_loop(
         hines_solve(d, a_vec, b_vec, parent_idx, hines_order, rhs, v_new)
 
         for i in range(n_comp):
+            # Check for divergence: NaN or extreme rate of change (>100mV/step)
+            # Rate-based detection is more physiologically meaningful than absolute threshold
+            if np.isnan(v_new[i]) or abs(v_new[i] - y[i]) > 100.0:
+                diverged = 1
+                break
             y[i] = v_new[i]
+
+        if diverged == 1:
+            break
 
         # ─────────────────────────────────────────────────────────────
         # 6. Dendritic filter states — Backward Euler
         # ─────────────────────────────────────────────────────────────
         if physics.use_dfilter_primary == 1 and physics.dfilter_tau_ms > 0.0:
-            factor = dt / physics.dfilter_tau_ms
+            factor = dt / max(physics.dfilter_tau_ms, 1e-12)
             i_att  = base_current * physics.dfilter_attenuation
             y[off_vfilt_primary] = (y[off_vfilt_primary] + factor * i_att) / (1.0 + factor)
 
         if physics.use_dfilter_secondary == 1 and physics.dfilter_tau_ms_2 > 0.0:
-            factor_2 = dt / physics.dfilter_tau_ms_2
+            factor_2 = dt / max(physics.dfilter_tau_ms_2, 1e-12)
             i_att_2  = base_current_2 * physics.dfilter_attenuation_2
             y[off_vfilt_secondary] = (y[off_vfilt_secondary] + factor_2 * i_att_2) / (1.0 + factor_2)
 
@@ -448,4 +603,4 @@ def run_native_loop(
             y_out[s, out_idx] = y[s]
         out_idx += 1
 
-    return t_out[:out_idx], y_out[:, :out_idx]
+    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged)

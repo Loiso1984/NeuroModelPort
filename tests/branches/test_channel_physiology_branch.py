@@ -26,7 +26,7 @@ from core.analysis import detect_spikes
 def _build_hcn_pulse_config(enable_hcn: bool) -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.morphology.single_comp = True
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     # Disable spike-generating channels to isolate passive+Ih behavior.
     cfg.channels.gNa_max = 0.0
@@ -54,7 +54,7 @@ def _build_hcn_pulse_config(enable_hcn: bool) -> FullModelConfig:
 def _build_ia_probe_config() -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.morphology.single_comp = True
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     cfg.channels.gNa_max = 120.0
     cfg.channels.gK_max = 36.0
@@ -83,7 +83,7 @@ def _build_ia_probe_config() -> FullModelConfig:
 def _build_calcium_probe_config() -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.morphology.single_comp = True
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     cfg.channels.gNa_max = 0.0
     cfg.channels.gK_max = 0.0
@@ -288,7 +288,11 @@ def test_double_stimulation_disabled_by_default_for_all_presets():
         if cfg.dual_stimulation is None:
             continue
         enabled = getattr(cfg.dual_stimulation, "enabled", False)
-        assert not enabled, f"Preset '{preset}' must have dual stimulation disabled by default"
+        # CA1 is allowed to have dual stimulation enabled by default for theta rhythm
+        if "Hippocampal CA1" in preset:
+            assert enabled, f"Preset '{preset}' must have dual stimulation enabled for theta rhythm"
+        else:
+            assert not enabled, f"Preset '{preset}' must have dual stimulation disabled by default"
 
 
 def test_hcn_presets_have_stable_rest_without_stimulus():
@@ -299,7 +303,7 @@ def test_hcn_presets_have_stable_rest_without_stimulus():
         cfg.stim.stim_type = "const"
         cfg.stim.t_sim = 300.0
         cfg.stim.dt_eval = 0.2
-        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.jacobian_mode = "native_hines"
 
         res = NeuronSolver(cfg).run_single()
         tail = res.v_soma[-100:]
@@ -316,7 +320,7 @@ def test_hcn_presets_remain_excitable_with_default_stimulus():
         apply_preset(cfg, preset)
         cfg.stim.t_sim = 200.0
         cfg.stim.dt_eval = 0.2
-        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.jacobian_mode = "native_hines"
 
         res = NeuronSolver(cfg).run_single()
         peaks, spike_times, _ = detect_spikes(res.v_soma, res.t, threshold=-20.0, baseline_threshold=-50.0)
@@ -329,7 +333,7 @@ def test_ca1_theta_preset_has_theta_band_rate():
     apply_preset(cfg, "L: Hippocampal CA1 (Theta rhythm)")
     cfg.stim.t_sim = 500.0
     cfg.stim.dt_eval = 0.2
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     res = NeuronSolver(cfg).run_single()
     _, spike_times, _ = detect_spikes(res.v_soma, res.t, threshold=-20.0, baseline_threshold=-50.0)
@@ -350,7 +354,7 @@ def test_dynamic_calcium_presets_have_bounded_calcium_range():
         cfg = FullModelConfig()
         apply_preset(cfg, preset)
         assert cfg.calcium.dynamic_Ca, f"{preset}: expected dynamic calcium enabled"
-        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.jacobian_mode = "native_hines"
 
         res = NeuronSolver(cfg).run_single()
         ca = res.ca_i[0, :] * 1e6  # mM -> nM
@@ -372,7 +376,7 @@ def test_dynamic_calcium_presets_have_physiological_eca_and_temp_behavior():
     for preset in presets:
         cfg = FullModelConfig()
         apply_preset(cfg, preset)
-        cfg.stim.jacobian_mode = "sparse_fd"
+        cfg.stim.jacobian_mode = "native_hines"
         cfg.stim.t_sim = 180.0
         cfg.stim.dt_eval = 0.25
         assert cfg.calcium.dynamic_Ca, f"{preset}: expected dynamic calcium enabled"
