@@ -29,6 +29,31 @@ class SimulationResult:
     """Complete scientific dataset after a simulation run."""
 
     def __init__(self, t, y, n_comp, config: FullModelConfig):
+        """
+        Initialize a SimulationResult container and extract commonly used state projections.
+        
+        Parameters:
+            t (ndarray): Time vector for the simulation.
+            y (ndarray): State matrix with shape (n_states, n_timepoints).
+            n_comp (int): Number of compartments in the morphology.
+            config (FullModelConfig): Simulation configuration that determines state layout and feature flags.
+        
+        Notes:
+            - Sets attributes: t, y, config, n_comp, and diverged (initialized False).
+            - Extracts membrane voltages:
+                - v_all: first `n_comp` rows of `y`.
+                - v_soma: soma voltage (row 0 of v_all).
+            - Detects presence of dendritic-filter state(s) from `config.stim_location`, `config.dendritic_filter`,
+              and `config.dual_stimulation` and slices `y` to populate:
+                - v_dendritic_filtered (primary) and v_dendritic_filtered_secondary (secondary) when present.
+            - Extracts intracellular calcium `ca_i` when `config.calcium.dynamic_Ca`:
+                - If filter state(s) exist, reads the `n_comp` rows immediately preceding the filter states.
+                - Otherwise reads the final `n_comp` rows of `y`.
+            - Initializes:
+                - currents (dict) for reconstructed ion currents,
+                - atp_estimate (float) and atp_breakdown (dict) for metabolic bookkeeping,
+                - morph (dict) reserved for morphology-derived parameters used in post-processing.
+        """
         self.t      = t
         self.y      = y
         self.config = config
@@ -82,18 +107,19 @@ class SimulationResult:
 
 
 def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms: float, t_start: float, manual_times: list, seed_hash: int = None) -> np.ndarray:
-    """Generates an ephemeral array of event times without mutating the base config.
+    """
+    Create an array of synaptic event times (in milliseconds) for a stimulus train without modifying config.
     
-    Args:
-        train_type: Type of train ('none', 'regular', 'poisson')
-        freq_hz: Frequency in Hz for auto-generated trains
-        duration_ms: Duration in ms for auto-generated trains
-        t_start: Start time in ms
-        manual_times: Manual event times list
-        seed_hash: Optional seed hash for deterministic Poisson generation (for previewer stability)
-        
+    Parameters:
+        train_type (str): One of 'none', 'regular', or 'poisson'. Unknown values are treated as 'none'.
+        freq_hz (float): Event frequency in hertz used for generated trains; ignored when `train_type` is 'none' or manual times are used.
+        duration_ms (float): Duration of the generated train in milliseconds; ignored when `train_type` is 'none' or manual times are used.
+        t_start (float): Start time of the train in milliseconds.
+        manual_times (list): Explicit event times to return when `train_type` is 'none'.
+        seed_hash (int, optional): Deterministic seed for Poisson interval sampling; when provided, identical inputs produce identical Poisson trains.
+    
     Returns:
-        Array of event times
+        event_times (np.ndarray): 1-D array of event times in milliseconds (dtype float64). For 'none' this contains the provided manual times (or is empty); for 'regular' contains evenly spaced times; for 'poisson' contains exponentially spaced times truncated to the specified duration.
     """
     import numpy as np
     
@@ -181,10 +207,17 @@ class NeuronSolver:
 
     # ─────────────────────────────────────────────────────────────────
     def run_single(self, custom_config: FullModelConfig = None) -> SimulationResult:
-        """Run a single deterministic simulation.
+        """
+        Run a single deterministic simulation using the current (or provided) configuration.
         
-        Dispatches to run_native() when jacobian_mode='native_hines',
-        otherwise uses SciPy BDF integrator.
+        Parameters:
+            custom_config (FullModelConfig | None): Optional config to use for this run; if omitted, uses the solver's stored config.
+        
+        Returns:
+            SimulationResult: Container with time vector, state matrix, compartment count, and derived outputs.
+        
+        Raises:
+            RuntimeError: If both primary and fallback ODE integrators fail to produce a successful solution.
         """
         cfg = custom_config or self.config
         if cfg.stim.jacobian_mode == "native_hines":
@@ -551,7 +584,15 @@ class NeuronSolver:
 
     # ─────────────────────────────────────────────────────────────────
     def _post_process_physics(self, res: SimulationResult, morph: dict):
-        """Reconstruct ion-channel current densities and ATP estimate for ALL compartments."""
+        """
+        Reconstruct ion-channel current density arrays for every compartment and compute a compartment-normalized ATP consumption estimate.
+        
+        This populates SimulationResult.currents with per-channel current density arrays (keys include 'Na', 'K', 'Leak' and any enabled channels such as 'Ih', 'ICa', 'IA', 'ITCa', 'IM', 'NaP', 'NaR', 'SK', and 'KATP' when applicable) and fills SimulationResult.atp_estimate and SimulationResult.atp_breakdown with nmol/cm² estimates for Na-pump, Ca-pump, baseline, and total ATP consumption over the simulated interval. When dynamic calcium is enabled and intracellular Ca is available, calcium reversal potentials are computed from Nernst; KATP is computed when metabolism.dynamic ATP is enabled using the ATP state from the end of the state vector. Warnings are emitted if channels are enabled in the config but required morph keys are missing.
+        
+        Parameters:
+            res (SimulationResult): Simulation output container whose state vector and config are used; mutated to add reconstructed currents and ATP estimates.
+            morph (dict): Morphology-derived per-compartment conductance vectors required for current reconstruction (must contain 'gNa_v', 'gK_v', 'gL_v'; additional keys used if corresponding channels are enabled).
+        """
         y, n, cfg = res.y, res.n_comp, res.config
         v  = y[0:n, :]
         m  = y[n   :2*n, :]
@@ -713,11 +754,18 @@ class NeuronSolver:
 
     # ─────────────────────────────────────────────────────────────────
     def run_native(self, custom_config: "FullModelConfig | None" = None) -> SimulationResult:
-        """Run simulation with the native Hines solver (v11.0).
-
-        Uses a fixed-step Backward-Euler integrator with the O(N) Hines
-        tree solver instead of SciPy BDF.  Requires jacobian_mode='native_hines'.
-        Returns a standard SimulationResult compatible with the GUI and analytics.
+        """
+        Run the model simulation using the native Hines fixed-step solver.
+        
+        Performs a simulation using the O(N) Hines tree solver (Backward-Euler integration)
+        and returns a SimulationResult compatible with the rest of the analysis pipeline.
+        Requires the solver mode to be configured for native Hines execution.
+        
+        Returns:
+            SimulationResult: Container with time vector, state matrix, extracted voltages,
+            reconstructed currents, ATP estimates, and morphology. If the native solver
+            detects numerical divergence the returned result contains the partial output
+            and has `res.diverged = True`.
         """
         from core.native_loop import run_native_loop
 

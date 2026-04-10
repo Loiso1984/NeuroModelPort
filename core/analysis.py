@@ -857,9 +857,33 @@ def _compute_stim_array(
     e_rev_secondary: float,
 ) -> np.ndarray:
     """
-    JIT-compiled helper to compute stimulus array for a single stimulus source.
+    Compute a time-series stimulus current proxy for a single stimulus source.
     
-    This replaces slow Python loops in _reconstruct_stimulus_proxy.
+    This produces a 1-D array of stimulus current (same time base as `t`) for either
+    event-driven synaptic types or deterministic non-synaptic waveforms. When
+    `mode == 2` and `tau_dend > 0`, a first-order dendritic low-pass filter is
+    applied and the result is scaled by `attenuation`.
+    
+    Parameters:
+        t (np.ndarray): 1-D time array (ms).
+        stype (int): Stimulus type code. Synaptic types are 4–9; non-synaptic
+            types include 0=const, 1=pulse, 2=alpha, 3=ou_noise (treated as const),
+            10=zap.
+        iext (float): Amplitude parameter for the stimulus (signed).
+        t0 (float): Stimulus start time (ms) for non-synaptic waveforms and pulse/alpha.
+        td (float): Duration (ms) for non-synaptic waveforms (pulse/alpha/zap).
+        atau (float): Time constant (ms) used by alpha-shaped waveforms or synaptic alpha.
+        zap_f0 (float): Start frequency (Hz) for zap (chirp) waveform.
+        zap_f1 (float): End frequency (Hz) for zap (chirp) waveform.
+        event_times (np.ndarray): 1-D array of synaptic event times (ms).
+        n_events (int): Number of valid entries in `event_times` to consider.
+        mode (int): Location/mode flag (0=soma, 1=ais, 2=dendritic_filtered).
+        attenuation (float): Multiplicative attenuation factor applied before filtering.
+        tau_dend (float): Dendritic filtering time constant (ms); when <= 0, no filtering applied.
+        el (float): Local reversal/holding potential (mV) used to convert synaptic conductance to current.
+    
+    Returns:
+        np.ndarray: 1-D stimulus current proxy aligned with `t` (same dtype and length).
     """
     n = len(t)
     stim = np.zeros(n, dtype=np.float64)
@@ -907,11 +931,15 @@ def _compute_stim_array(
 
 def _reconstruct_stimulus_proxy(result) -> np.ndarray:
     """
-    Build a deterministic low-frequency stimulus proxy for modulation analysis.
-
-    Priority:
-    1) If dendritic filtering state exists in solution, use that directly.
-    2) Otherwise reconstruct from configured stimulus equations including event_times.
+    Construct a deterministic low-frequency stimulus proxy trace for modulation and spike analyses.
+    
+    If a dendritically filtered voltage trace is available on `result` and dendritic filtering is enabled, that trace is used directly. Otherwise the proxy is reconstructed from `result.config` for the primary stimulus and (optionally) a configured secondary stimulus: synaptic trains (stim types 4–9) use a deterministic event-generator with a stable seed and fall back to a single event at pulse start if none are produced; non-synaptic types use configured event times. Dendritic attenuation and optional first-order dendritic filtering are applied when a filtered location is requested. The actual per-sample waveform generation and filtering are delegated to a JIT helper.
+    
+    Parameters:
+        result: Simulation result object containing `t`, `config`, and optionally `v_dendritic_filtered`.
+    
+    Returns:
+        stim (np.ndarray): 1-D array of stimulus proxy values sampled at `result.t` (same length as `result.t`).
     """
     from core.solver import generate_effective_event_times
 

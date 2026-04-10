@@ -16,7 +16,12 @@ import numpy as np
 
 
 def get_dual_preset_names():
-    """Return list of available dual stimulation presets."""
+    """
+    List available dual-stimulation preset names.
+    
+    Returns:
+        preset_names (list[str]): Ordered list of available preset name strings.
+    """
     return [
         "Soma Excitation + Dendritic GABA",
         "AIS Excitation + Dendritic Inhibition",
@@ -29,14 +34,20 @@ def get_dual_preset_names():
 
 
 def apply_dual_preset(config, preset_name: str):
-    """Apply a dual stimulation preset to the configuration.
+    """
+    Apply a named dual-stimulation preset to a full model configuration, mutating its primary and secondary stimulus fields.
     
-    Args:
-        config: FullModelConfig - the main configuration object
-        preset_name: Name of the dual stimulation preset to apply
+    If `config.dual_stimulation` is None a new DualStimulationConfig will be created. The function writes primary stimulus fields to `config.stim` and `config.stim_location`, and secondary stimulus fields to `config.dual_stimulation`.
     
-    Primary stimulus parameters are set on config.stim and config.stim_location.
-    Secondary stimulus parameters are set on config.dual_stimulation.
+    Parameters:
+        config: FullModelConfig — the full model configuration to modify; must provide `stim` and `stim_location` (the function will create `dual_stimulation` if missing).
+        preset_name (str): The name of the preset to apply.
+    
+    Returns:
+        FullModelConfig: The same `config` object after applying the preset.
+    
+    Raises:
+        ValueError: If `preset_name` does not match a known preset.
     """
     
     # Ensure dual_stimulation config exists
@@ -206,13 +217,13 @@ def apply_dual_preset(config, preset_name: str):
 
 def create_demo_preset(config):
     """
-    Create the main demonstration preset for dual stimulation.
+    Create the demonstration dual-stimulation preset "Soma Excitation + Dendritic GABA" on the provided configuration.
     
-    This preset showcases the key feature: simultaneous excitation
-    and inhibition at different locations.
+    Parameters:
+        config (FullModelConfig): Configuration object to modify; expected to contain `stim` and `stim_location`, and will have `dual_stimulation` set if absent.
     
-    Args:
-        config: FullModelConfig - the main configuration object
+    Returns:
+        FullModelConfig: The same config object with the demo preset applied.
     """
     return apply_dual_preset(config, "Soma Excitation + Dendritic GABA")
 
@@ -262,9 +273,12 @@ def get_preset_description(preset_name: str) -> str:
 
 def validate_dual_preset(preset_name: str) -> bool:
     """
-    Validate that a dual stimulation preset is biologically realistic.
+    Run basic sanity checks on a named dual stimulation preset for excitation/inhibition balance and timing.
     
-    Returns True if preset passes validation checks.
+    Performs E/I magnitude checks and temporal-overlap checks for inhibitory secondaries; prints warnings when the excitation-to-inhibition ratio is unusually high (> 5.0) or low (< 0.5), or when an inhibitory secondary does not overlap the primary excitation window.
+    
+    Returns:
+        True (currently always returned).
     """
     from .models import FullModelConfig
     from .dual_stimulation import DualStimulationConfig
