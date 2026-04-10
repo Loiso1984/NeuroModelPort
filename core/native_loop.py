@@ -47,12 +47,17 @@ def _compute_ionic_currents_vectorized(
     ca_ext, t_kelvin, ca_rest,
     n_comp,
 ):
-    """Vectorized computation of ionic currents for all compartments.
+    """
+    Compute per-compartment total membrane conductance, conductance-weighted effective reversal, and calcium influx contributions.
     
-    Returns arrays:
-    - g_total: total membrane conductance per compartment
-    - e_eff: effective reversal potential per compartment
-    - i_ca_influx: calcium influx per compartment
+    For each compartment, returns:
+    - g_total: sum of all active and passive ionic conductances.
+    - e_eff: conductance-weighted effective reversal potential (Σ g_ch * E_ch).
+    - i_ca_influx: nonnegative calcium influx contributions (accumulated inward currents from calcium-permeable channels and ITCa).
+    
+    Notes:
+    - When `dyn_ca` is enabled, the calcium reversal potential is computed from the Nernst equation using a clamped intracellular calcium concentration; otherwise a constant calcium reversal is used.
+    - The IA current is treated as a potassium-like channel and contributes with the potassium reversal (`ek`).
     """
     g_total = np.empty(n_comp, dtype=np.float64)
     e_eff = np.empty(n_comp, dtype=np.float64)

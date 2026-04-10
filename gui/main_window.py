@@ -500,6 +500,20 @@ class MainWindow(QMainWindow):
     #  TABS  +  COLLAPSIBLE SIDEBAR
     # ─────────────────────────────────────────────────────────────────
     def _setup_tabs(self):
+        """
+        Constructs and configures the application's main tabbed interface, collapsible sidebar, and the widgets contained in each tab.
+        
+        Creates and assigns:
+        - the QTabWidget stored on `self.tabs`;
+        - a sidebar frame used as the primary parameter/quick-controls panel (`self._sidebar_frame`);
+        - the "Stimulation Studio" tab with primary stimulus forms (`self.form_stim`, `self.form_stim_loc`, `self.form_dfilter`), the secondary/dual stimulation widget (`self.dual_stim_widget`), and a resizable real-time stimulus preview plot with an I/g toggle (`self._stim_preview_plot`, `self._toggle_conductance`);
+        - the "Oscilloscope" tab (`self.oscilloscope`) and syncs its delay controls with the current config;
+        - the "Analytics" tab (`self.analytics`) with a session notes editor (`self.session_notes`);
+        - the "Topology", "Axon Biophysics", and "Guide" tabs (`self.topology`, `self.axon_biophysics`, `self.guide_browser`);
+        - the horizontal main splitter (`self._main_splitter`) that contains the sidebar and the tabs.
+        
+        Also wires relevant signals (e.g., stimulus/dual-stim change handlers, oscilloscope ↔ analytics time highlighting), sets initial widget states from the configuration, and registers form widgets with the ConfigManager.
+        """
         self.tabs = QTabWidget()
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tabs.setMovable(True)  # Allow users to rearrange tabs
@@ -1373,6 +1387,11 @@ class MainWindow(QMainWindow):
     #  PRESET & LANGUAGE
     # ─────────────────────────────────────────────────────────────────
     def load_preset(self, name: str):
+        """
+        Apply a named preset configuration and update the UI and internal state to reflect it.
+        
+        Ignores placeholder names containing "—" or "Select". Synchronizes the preset selection controls without emitting signals, loads the preset into the configuration manager, performs preset-specific postprocessing (auto-selects the jacobian mode, updates the Hines toggle state), refreshes all form widgets, synchronizes oscilloscope delay controls, resets the dual-stimulation widget to its preset defaults, updates preset-mode controls, redraws the topology using the current delay focus, and updates the status bar with the applied preset name and active mode suffix.
+        """
         if "—" in name or "Select" in name:
             return
         # Keep both preset combos in sync without re-firing
@@ -1808,7 +1827,19 @@ class MainWindow(QMainWindow):
         )
 
     def _on_simulation_done(self, result: dict):
-        """Handle simulation results on the main thread (UI updates)."""
+        """
+        Handle completed simulation payloads and update the UI accordingly.
+        
+        Processes the provided result dictionary which may contain:
+        - 'single': a single-run result object — stores it as the last result, updates plots, analytics, topology, axon biophysics, sparkline, enables export actions, and updates the status with compartment count and ATP estimate. If the result indicates divergence (`res.diverged`), updates plots/analytics, sets a warning status, and aborts the normal completion flow.
+        - 'mc_results': a list of Monte Carlo trial results — updates oscilloscope Monte Carlo view and status with trial count.
+        - 'bif': bifurcation data (paired with 'bif_param') — updates the analytics bifurcation view.
+        
+        The method always selects the oscilloscope tab, shows a critical message box on unexpected errors, and ensures the UI is unlocked at the end.
+        
+        Parameters:
+            result (dict): Simulation outcome payload containing one or more of the keys described above.
+        """
         try:
             if 'mc_results' in result:
                 self.oscilloscope.update_plots_mc(result['mc_results'])
@@ -1854,7 +1885,11 @@ class MainWindow(QMainWindow):
             self._lock_ui(False)
 
     def _on_notes_changed(self):
-        """Handle notes text changes and sync to config."""
+        """
+        Synchronize the session notes editor content into the application's configuration.
+        
+        Sets self.config_manager.config.notes to the current text of the session_notes QTextEdit.
+        """
         self.config_manager.config.notes = self.session_notes.toPlainText()
 
     def _on_dual_stim_config_changed(self):
@@ -2049,6 +2084,18 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Export Plot", f"Saved to:\n{path}")
 
     def export_csv(self):
+        """
+        Export the most recent simulation result to a CSV file selected by the user.
+        
+        Opens a file-save dialog and, if a path is chosen, writes a CSV with per-time-row data from self._last_result. Columns produced:
+        - t_ms, V_soma_mV
+        - If the result has multiple compartments: V_AIS_mV, V_terminal_mV
+        - Per-current columns: for single-compartment results `I_{name}_uA_cm2`; for multi-compartment results `I_{name}_Soma_uA_cm2`, `I_{name}_AIS_uA_cm2`, `I_{name}_Terminal_uA_cm2`
+        - Calcium concentration column(s): `Ca_i_mM` or `Ca_i_Soma_mM`, `Ca_i_AIS_mM`, `Ca_i_Terminal_mM` if present
+        - Gate traces: `gate_{name}` for each extracted gate trace
+        
+        If no last result is available (no attribute `_last_result`), the function returns without prompting. On successful export, updates the status via self._status and shows an information dialog. Exceptions during export are caught and reported with a critical message box.
+        """
         if not hasattr(self, '_last_result'):
             return
         res = self._last_result

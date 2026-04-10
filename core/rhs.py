@@ -93,14 +93,15 @@ def _validate_conductance(g: float64) -> float64:
 
 @njit(cache=True)
 def _calculate_syn_tau(stype, atau_mult):
-    """Return (tau_rise, tau_decay) for a conductance-based synapse type.
-
-    atau_mult is a multiplier to literature values (default 1.0).
-    If user sets 2.0, synapse is 2x slower than literature baseline.
-    This makes the UI alpha_tau slider honest and predictable.
+    """
+    Map a conductance-based synapse type code to its literature baseline rise and decay time constants, scaled by a multiplier.
     
-    Reference: Destexhe et al. 1994, J Neurophysiol 72:689-703.
-             Jonas et al. 1993, J Physiol 468:743-767 (GABA kinetics).
+    Parameters:
+        stype (int): Synapse type code (4=AMPA, 5=NMDA, 6=GABA-A, 7=GABA-B, 8=Kainate, 9=Nicotinic).
+        atau_mult (float): Multiplier applied to literature time constants; values less than 0.01 are treated as 0.01.
+    
+    Returns:
+        (tau_rise, tau_decay) (tuple of float): Rise and decay time constants (same units as literature values) scaled by `atau_mult`; returns (0.0, 0.0) for unsupported `stype`.
     """
     # Prevent zero or negative multipliers
     mult = max(0.01, atau_mult)
@@ -187,7 +188,22 @@ def compute_ionic_currents_scalar(
     ena, ek, el, eih, ea,
     ca_i_val, ca_ext, ca_rest, t_kelvin,
 ):
-    """Shared ionic-current math (deterministic RHS + stochastic EM path)."""
+    """
+    Compute total ionic current and calcium influx contribution for a single compartment.
+    
+    Calculates leak, sodium, potassium, and optional channel currents (Ih, high-voltage Ca, A-type K, T-type Ca, SK, M-current, persistent and resurgent Na) from the provided gating variables, conductances, and reversal potentials. When `dyn_ca` is True, the Ca reversal potential is computed from `ca_i_val` and `ca_ext` and any inward Ca current (negative current) is accumulated into the calcium influx return value.
+    
+    Parameters:
+        vi (float): Membrane voltage in millivolts.
+        sk_gate (float): SK-channel activation variable (unitless, typically 0–1).
+        dyn_ca (bool): If True, compute Ca reversal from concentrations and accumulate Ca influx.
+        ca_i_val (float): Intracellular Ca concentration in mM; clamped to physiological bounds when used.
+        ca_ext (float): Extracellular Ca concentration in mM (used for Nernst calculation).
+        t_kelvin (float): Absolute temperature in Kelvin (used for Nernst calculation).
+    
+    Returns:
+        tuple: `(i_ion, i_ca_influx)` where `i_ion` is the net ionic current (signed, same units as input conductances × mV) and `i_ca_influx` is the positive magnitude of inward Ca current (0.0 if no inward Ca current).
+    """
     i_ion = gl * (vi - el)
     i_ion += gna * (mi * mi * mi) * hi * (vi - ena)
     i_ion += gk * (ni * ni * ni * ni) * (vi - ek)
@@ -233,15 +249,16 @@ def compute_ionic_currents_scalar(
 
 @njit(float64(int32, float64, float64), cache=True)
 def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
-    """Return synaptic reversal potential for conductance-based types.
+    """
+    Select the synaptic reversal potential (mV) for a conductance-based synapse type.
     
-    Args:
-        stype: Synapse type (4=AMPA, 5=NMDA, 6=GABAA, 7=GABAB, 8=Kainate, 9=Nicotinic)
-        e_rev_primary: Primary stimulus synaptic reversal (for pathology)
-        e_rev_secondary: Secondary stimulus synaptic reversal (for pathology)
+    Parameters:
+        stype: Synapse type code (4=AMPA, 5=NMDA, 6=GABAA, 7=GABAB, 8=Kainate, 9=Nicotinic).
+        e_rev_primary: Primary stimulus synaptic reversal potential (mV), used for excitatory types and GABA-A to allow flexible/pathological values.
+        e_rev_secondary: Secondary stimulus synaptic reversal potential (mV); present for API compatibility with dual-stimulus handling (not used by this selection logic).
     
     Returns:
-        Reversal potential in mV
+        Reversal potential in millivolts (mV) for the specified synapse type.
     """
     if stype == 6:   # GABA-A (Cl⁻, Bormann 1988)
         return e_rev_primary  # Use flexible reversal for pathology
@@ -253,31 +270,18 @@ def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
 @njit(float64(float64, int32, float64, float64[:], int32, float64), cache=True)
 def get_event_driven_conductance(t: float64, stype: int32, iext: float64, 
                                event_times: float64[:], n_events: int32, atau: float64) -> float64:
-    """Sum biexponential conductance [mS/cm²] from all events in the synaptic queue.
-
-    Stage 6.3 - event-driven synaptic stimulation (preparation for network connectivity).
-    Returns 0.0 if n_events == 0 or stype is not a conductance-based type.
-    
-    Parameters
-    ----------
-    t : float64
-        Current time (ms)
-    stype : int32
-        Stimulus type code (4-9 for conductance-based synapses)
-    iext : float64
-        Maximum conductance (mS/cm²)
-    event_times : float64[:]
-        Array of synaptic event times
-    n_events : int32
-        Number of events in the queue
-    atau : float64
-        Synaptic time constant (ms)
-        
-    Returns
-    -------
-    float64
-        Total conductance at time t (mS/cm²)
     """
+                               Compute total synaptic conductance at time t from an event-time queue using a normalized biexponential kernel.
+                               
+                               Each event contributes a normalized dual-exponential waveform (peak = 1) whose rise/decay time constants are determined by the synapse type and the `atau` multiplier. Events with times < 0 or > t + 1000 are ignored. If `n_events == 0`, `atau <= 0`, or the synapse type yields zero time constants, the function returns 0.0.
+                               
+                               Parameters:
+                                   event_times (float64[:]): Array of synaptic event timestamps (ms).
+                                   n_events (int32): Number of event entries from `event_times` to consider.
+                               
+                               Returns:
+                                   float64: Total conductance (mS/cm²) at time t, computed as `abs(iext)` times the sum of per-event normalized waveforms.
+                               """
     if n_events == 0 or atau <= 0.0:
         return 0.0
     
@@ -305,12 +309,16 @@ def rhs_multicompartment(
     t, y, physics_params, dydt
 ):
     """
-    Высокопроизводительное ядро ОДУ v11.0 (C-style scalar loop).
-    Использует структурированный контейнер PhysicsParams для устранения
-    "аргументного взрыва" и повышения надежности API.
-    Все токи рассчитываются как скаляры, без промежуточных аллокаций.
-    dydt is a pre-allocated output array passed from the solver; zeroed here
-    via a Numba loop (no numpy allocation inside @njit).
+    Compute time derivatives for a multi-compartment Hodgkin–Huxley–type neuron model.
+    
+    This function evaluates membrane voltage and gating-variable ODEs for all compartments, including:
+    - intrinsic ionic currents (Na, K, leak, Ih, Ca, A, T‑type Ca, M, SK, persistent/resurgent Na as configured),
+    - synaptic/externally applied stimuli (supporting current- and conductance-based modes, event-driven conductances, NMDA Mg2+ block, and optional dual stimulation),
+    - sparse axial coupling via a Laplacian representation,
+    - optional calcium and ATP dynamics with physiologically bounded handling,
+    - optional single-compartment dendritic filtering and per-compartment temperature/Q10 scaling.
+    
+    dydt is a preallocated output array that is zeroed and then filled in-place; the same array is returned.
     """
     
     # --- Unpack physics parameters ---
