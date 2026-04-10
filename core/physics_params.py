@@ -40,6 +40,8 @@ class PhysicsParams(NamedTuple):
     el: float64
     eih: float64
     ea: float64
+    e_rev_syn_primary: float64   # Primary stimulus synaptic reversal (for pathology)
+    e_rev_syn_secondary: float64  # Secondary stimulus synaptic reversal (for pathology)
     
     # Morphology and axial coupling
     cm_v: np.ndarray
@@ -134,6 +136,8 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'katp_kd_atp_mM': 0.5,
         'atp_max_mM': 2.0,
         'atp_synthesis_rate': 0.6,
+        'e_rev_syn_primary': 0.0,      # Default: 0 mV (excitatory)
+        'e_rev_syn_secondary': -75.0,  # Default: -75 mV (inhibitory)
     }
     for k, v in defaults.items():
         if k not in kwargs:

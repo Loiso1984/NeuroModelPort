@@ -112,7 +112,7 @@ def _compute_ionic_currents_vectorized(
         if en_ia:
             g_ia = ga_v[i] * ai * bi
             g_tot += g_ia
-            e_eff_i += g_ia * ea
+            e_eff_i += g_ia * ek  # IA is a K+ channel, use ek
         
         if en_itca:
             g_tca = gtca_v[i] * (pi ** 2) * qi

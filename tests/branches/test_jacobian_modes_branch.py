@@ -39,7 +39,7 @@ def _solver_args_from_cfg(cfg: FullModelConfig):
     """
     morph = MorphologyBuilder.build(cfg)
     n_comp = morph["N_comp"]
-    y0 = ChannelRegistry().compute_initial_states(-65.0, cfg)
+    y0 = ChannelRegistry().compute_initial_states(cfg.channels.EL, cfg)
 
     s_map = {
         "const": 0, "pulse": 1, "alpha": 2, "ou_noise": 3,

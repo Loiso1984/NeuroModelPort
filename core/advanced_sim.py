@@ -256,7 +256,7 @@ def run_euler_maruyama(config: FullModelConfig,
     n_comp = morph['N_comp']
     ch     = cfg.channels
 
-    y      = reg.compute_initial_states(-65.0, cfg)
+    y      = reg.compute_initial_states(ch.EL, cfg)
     
     # Debug: Check array sizes
     if morph['Cm_v'].shape[0] != n_comp:
@@ -374,7 +374,7 @@ def run_euler_maruyama(config: FullModelConfig,
                 False, False, False, False, dyn_ca,
                 morph['gNa_v'][i], morph['gK_v'][i], morph['gL_v'][i], morph['gIh_v'][i],
                 morph['gCa_v'][i], morph['gA_v'][i], morph['gSK_v'][i], 0.0, 0.0, 0.0, 0.0,
-                ch.ENa, ch.EK, ch.EL, ch.E_Ih, ch.E_A,
+                ch.ENa, ch.EK, ch.EL, ch.E_Ih, ch.EK,  # A-current uses EK
                 ca_i[i], cfg.calcium.Ca_ext, cfg.calcium.Ca_rest, t_kelvin,
             )
             I_ion[i] = i_ion_i
