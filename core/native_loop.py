@@ -29,6 +29,7 @@ from .rhs import (
     get_stim_current, get_event_driven_conductance,
     _get_syn_reversal, nernst_ca_ion, nmda_mg_block,
     CA_I_MIN_M_M, CA_I_MAX_M_M, CA_DAMPING_FACTOR,
+    ATP_MIN_M_M, ATP_MAX_M_M, ATP_PUMP_FAILURE_THRESHOLD,
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
 from .hines import hines_solve, update_gates_analytic
@@ -191,6 +192,7 @@ def run_native_loop(
     en_nap  = physics.en_nap
     en_nar  = physics.en_nar
     dyn_ca  = physics.dyn_ca
+    dyn_atp = physics.dyn_atp
 
     # ── Channel counts for Langevin noise (approximate, proportional to conductance) ──
     N_Na = np.maximum(50.0, 1000.0 * gna_v / max(physics.gna_max, 1e-12))
@@ -212,6 +214,12 @@ def run_native_loop(
     t_kelvin = physics.t_kelvin
     tau_sk   = physics.tau_sk
     mg_ext   = physics.mg_ext
+
+    # ── ATP metabolism ──
+    g_katp_max = physics.g_katp_max
+    katp_kd_atp_mM = physics.katp_kd_atp_mM
+    atp_max_mM = physics.atp_max_mM
+    atp_synthesis_rate = physics.atp_synthesis_rate
 
     # ── State offsets (must mirror channels.py / rhs.py exactly) ──
     # Layout: V(n_comp), m(n_comp), h(n_comp), n_K(n_comp),
@@ -266,6 +274,10 @@ def run_native_loop(
     if dyn_ca:
         cursor += n_comp
 
+    off_atp = cursor
+    if dyn_atp:
+        cursor += n_comp
+
     off_vfilt_primary = cursor
     if physics.use_dfilter_primary == 1:
         cursor += 1
@@ -304,6 +316,7 @@ def run_native_loop(
     j_arr_buf = np.zeros(n_comp, dtype=np.float64)
     z_arr_buf = np.zeros(n_comp, dtype=np.float64)
     ca_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    atp_arr_buf = np.zeros(n_comp, dtype=np.float64)
 
     # ── Stimulus flags (computed once) ──
     is_cond   = (physics.stype >= 4)
@@ -369,7 +382,13 @@ def run_native_loop(
         else:
             for i in range(n_comp):
                 ca_arr_buf[i] = ca_rest
-        
+        if dyn_atp:
+            for i in range(n_comp):
+                atp_arr_buf[i] = y[off_atp + i]
+        else:
+            for i in range(n_comp):
+                atp_arr_buf[i] = atp_max_mM
+
         # Compute calcium influx using vectorized function
         _, _, i_ca_influx_v = _compute_ionic_currents_vectorized(
             v_arr, m_arr, h_arr, n_arr,
@@ -495,7 +514,13 @@ def run_native_loop(
         else:
             for i in range(n_comp):
                 ca_arr_buf[i] = ca_rest
-        
+        if dyn_atp:
+            for i in range(n_comp):
+                atp_arr_buf[i] = y[off_atp + i]
+        else:
+            for i in range(n_comp):
+                atp_arr_buf[i] = atp_max_mM
+
         # Compute g_total and e_eff using vectorized function
         g_total_arr, e_eff_arr, _ = _compute_ionic_currents_vectorized(
             v_arr, m_arr, h_arr, n_arr,
@@ -593,6 +618,37 @@ def run_native_loop(
             factor_2 = dt / max(physics.dfilter_tau_ms_2, 1e-12)
             i_att_2  = base_current_2 * physics.dfilter_attenuation_2
             y[off_vfilt_secondary] = (y[off_vfilt_secondary] + factor_2 * i_att_2) / (1.0 + factor_2)
+
+        # ATP dynamics (simple Euler integration)
+        if dyn_atp:
+            for i in range(n_comp):
+                atp_val = y[off_atp + i]
+                vi = y[i]
+                mi = y[off_m + i]
+                hi = y[off_h + i]
+
+                # Pump consumption: proportional to Na+ influx
+                i_na = gna_v[i] * (mi ** 3) * hi * (vi - ena)
+                pump_consumption = abs(i_na) * 0.001  # Convert µA/cm² to nmol/cm²/s
+
+                # Add calcium pump consumption if dynamic Ca is enabled
+                if dyn_ca:
+                    pump_consumption += 3.0 * i_ca_influx_v[i] * 0.001
+
+                # ATP ODE: d[ATP]/dt = Synthesis - PumpConsumption
+                datp = atp_synthesis_rate * 0.001 - pump_consumption
+
+                # Metabolic feedback: reduce synthesis if ATP < 0.2 mM
+                if atp_val < ATP_PUMP_FAILURE_THRESHOLD:
+                    datp *= atp_val / ATP_PUMP_FAILURE_THRESHOLD
+
+                # Clamp ATP to physiological bounds
+                if atp_val <= ATP_MIN_M_M and datp < 0.0:
+                    datp = abs(datp) * 0.5
+                elif atp_val >= ATP_MAX_M_M and datp > 0.0:
+                    datp = -abs(datp) * 0.5
+
+                y[off_atp + i] += datp * dt
 
         t += dt
 

@@ -28,6 +28,7 @@ class PhysicsParams(NamedTuple):
     en_im: boolean
     en_nap: boolean
     en_nar: boolean
+    dyn_atp: boolean
     
     # Conductance matrix [11 x n_comp]
     # Rows: [gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar]
@@ -58,6 +59,12 @@ class PhysicsParams(NamedTuple):
     b_ca: np.ndarray
     mg_ext: float64
     tau_sk: float64
+
+    # ATP metabolism parameters
+    g_katp_max: float64
+    katp_kd_atp_mM: float64
+    atp_max_mM: float64
+    atp_synthesis_rate: float64
     
     # Primary stimulation parameters
     stype: int32
@@ -122,6 +129,11 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'rng_state': None,
         'event_times_arr_2': np.zeros(0, dtype=np.float64),
         'n_events_2': np.int32(0),
+        'dyn_atp': False,
+        'g_katp_max': 5.0,
+        'katp_kd_atp_mM': 0.5,
+        'atp_max_mM': 2.0,
+        'atp_synthesis_rate': 0.6,
     }
     for k, v in defaults.items():
         if k not in kwargs:

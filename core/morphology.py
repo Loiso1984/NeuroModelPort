@@ -152,6 +152,23 @@ class MorphologyBuilder:
             trunk_slice = slice(1 + mc.N_ais, 1 + mc.N_ais + mc.N_trunk)
             gNa_v[trunk_slice] *= mc.gNa_trunk_mult
 
+        # Apply trunk gL and Cm multipliers (myelin loss model: massive leak in exposed membrane)
+        # Apply only to trunk and branches, NOT soma (index 0) or AIS (indices 1..N_ais)
+        if not mc.single_comp and mc.N_trunk > 0:
+            trunk_slice = slice(1 + mc.N_ais, 1 + mc.N_ais + mc.N_trunk)
+            gL_v[trunk_slice] *= mc.gL_trunk_mult
+            Cm_v[trunk_slice] *= mc.Cm_trunk_mult
+
+        # Apply branch gL and Cm multipliers (same as trunk for myelin loss)
+        if not mc.single_comp and mc.N_b1 > 0:
+            b1_slice = slice(idx_fork + 1, idx_fork + 1 + mc.N_b1)
+            gL_v[b1_slice] *= mc.gL_trunk_mult
+            Cm_v[b1_slice] *= mc.Cm_trunk_mult
+        if not mc.single_comp and mc.N_b2 > 0:
+            b2_slice = slice(idx_b1_start + mc.N_b1, idx_b1_start + mc.N_b1 + mc.N_b2)
+            gL_v[b2_slice] *= mc.gL_trunk_mult
+            Cm_v[b2_slice] *= mc.Cm_trunk_mult
+
         # Apply AIS multipliers for all channels (matches Scilab v9.0 behaviour)
         if not mc.single_comp and mc.N_ais > 0:
             ais_slice = slice(1, 1 + mc.N_ais)

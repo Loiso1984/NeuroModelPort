@@ -19,14 +19,14 @@ import numpy as np
 from numba import njit, float64, int32
 
 from .kinetics import (
-    am, bm, ah, bh, an, bn,
-    ar_Ih, br_Ih,
-    as_Ca, bs_Ca, au_Ca, bu_Ca,
-    aa_IA, ba_IA, ab_IA, bb_IA,
-    am_TCa, bm_TCa, ah_TCa, bh_TCa,
-    aw_IM, bw_IM,
-    ax_NaP, bx_NaP,
-    ay_NaR, by_NaR, aj_NaR, bj_NaR,
+    am_lut, bm_lut, ah_lut, bh_lut, an_lut, bn_lut,
+    ar_Ih_lut, br_Ih_lut,
+    as_Ca_lut, bs_Ca_lut, au_Ca_lut, bu_Ca_lut,
+    aa_IA_lut, ba_IA_lut, ab_IA_lut, bb_IA_lut,
+    am_TCa_lut, bm_TCa_lut, ah_TCa_lut, bh_TCa_lut,
+    aw_IM_lut, bw_IM_lut,
+    ax_NaP_lut, bx_NaP_lut,
+    ay_NaR_lut, by_NaR_lut, aj_NaR_lut, bj_NaR_lut,
     z_inf_SK,
 )
 from .rhs import nernst_ca_ion, CA_I_MIN_M_M, CA_I_MAX_M_M, CA_DAMPING_FACTOR
@@ -77,51 +77,51 @@ def update_gates_analytic(
         # ── Na gates (m, h) — phi_na ──
         phi = phi_na[i]
         eff_dt_na = dt * phi
-        y[off_m + i] = _gate_step(y[off_m + i], am(vi), bm(vi), eff_dt_na)
-        y[off_h + i] = _gate_step(y[off_h + i], ah(vi), bh(vi), eff_dt_na)
+        y[off_m + i] = _gate_step(y[off_m + i], am_lut(vi), bm_lut(vi), eff_dt_na)
+        y[off_h + i] = _gate_step(y[off_h + i], ah_lut(vi), bh_lut(vi), eff_dt_na)
 
         # ── K gate (n) — phi_k ──
         phi = phi_k[i]
         eff_dt_k = dt * phi
-        y[off_n + i] = _gate_step(y[off_n + i], an(vi), bn(vi), eff_dt_k)
+        y[off_n + i] = _gate_step(y[off_n + i], an_lut(vi), bn_lut(vi), eff_dt_k)
 
         # ── Ih gate (r) — phi_ih ──
         if en_ih:
             phi = phi_ih[i]
-            y[off_r + i] = _gate_step(y[off_r + i], ar_Ih(vi), br_Ih(vi), dt * phi)
+            y[off_r + i] = _gate_step(y[off_r + i], ar_Ih_lut(vi), br_Ih_lut(vi), dt * phi)
 
         # ── ICa gates (s, u) — phi_ca ──
         if en_ica:
             phi = phi_ca[i]
             eff_dt_ca = dt * phi
-            y[off_s + i] = _gate_step(y[off_s + i], as_Ca(vi), bs_Ca(vi), eff_dt_ca)
-            y[off_u + i] = _gate_step(y[off_u + i], au_Ca(vi), bu_Ca(vi), eff_dt_ca)
+            y[off_s + i] = _gate_step(y[off_s + i], as_Ca_lut(vi), bs_Ca_lut(vi), eff_dt_ca)
+            y[off_u + i] = _gate_step(y[off_u + i], au_Ca_lut(vi), bu_Ca_lut(vi), eff_dt_ca)
 
         # ── IA gates (a, b) — phi_k2 ──
         if en_ia:
-            y[off_a + i] = _gate_step(y[off_a + i], aa_IA(vi), ba_IA(vi), eff_dt_k)
-            y[off_b + i] = _gate_step(y[off_b + i], ab_IA(vi), bb_IA(vi), eff_dt_k)
+            y[off_a + i] = _gate_step(y[off_a + i], aa_IA_lut(vi), ba_IA_lut(vi), eff_dt_k)
+            y[off_b + i] = _gate_step(y[off_b + i], ab_IA_lut(vi), bb_IA_lut(vi), eff_dt_k)
 
         # ── ITCa gates (p, q) — phi_ca ──
         if en_itca:
             if not en_ica:
                 phi = phi_ca[i]
                 eff_dt_ca = dt * phi
-            y[off_p + i] = _gate_step(y[off_p + i], am_TCa(vi), bm_TCa(vi), eff_dt_ca)
-            y[off_q + i] = _gate_step(y[off_q + i], ah_TCa(vi), bh_TCa(vi), eff_dt_ca)
+            y[off_p + i] = _gate_step(y[off_p + i], am_TCa_lut(vi), bm_TCa_lut(vi), eff_dt_ca)
+            y[off_q + i] = _gate_step(y[off_q + i], ah_TCa_lut(vi), bh_TCa_lut(vi), eff_dt_ca)
 
         # ── IM gate (w) — phi_k2 ──
         if en_im:
-            y[off_w + i] = _gate_step(y[off_w + i], aw_IM(vi), bw_IM(vi), eff_dt_k)
+            y[off_w + i] = _gate_step(y[off_w + i], aw_IM_lut(vi), bw_IM_lut(vi), eff_dt_k)
 
         # ── NaP gate (x) — phi_na family ──
         if en_nap:
-            y[off_x + i] = _gate_step(y[off_x + i], ax_NaP(vi), bx_NaP(vi), eff_dt_na)
+            y[off_x + i] = _gate_step(y[off_x + i], ax_NaP_lut(vi), bx_NaP_lut(vi), eff_dt_na)
 
         # ── NaR gates (y, j) — phi_na family ──
         if en_nar:
-            y[off_y + i] = _gate_step(y[off_y + i], ay_NaR(vi), by_NaR(vi), eff_dt_na)
-            y[off_j + i] = _gate_step(y[off_j + i], aj_NaR(vi), bj_NaR(vi), eff_dt_na)
+            y[off_y + i] = _gate_step(y[off_y + i], ay_NaR_lut(vi), by_NaR_lut(vi), eff_dt_na)
+            y[off_j + i] = _gate_step(y[off_j + i], aj_NaR_lut(vi), bj_NaR_lut(vi), eff_dt_na)
 
         # ── SK gate ODE: dz/dt = phi_k * (z_inf(Ca) - z) / tau_SK
         # SK is a Ca-activated K channel — temperature scaling via phi_k.
