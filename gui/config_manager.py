@@ -187,8 +187,8 @@ class ConfigManager(QObject):
         
         if dual_enabled:
             priority_note = (
-                "Priority: Dual Stim is ON, so primary stimulation values from the Dual Stim tab "
-                "override main Stimulation/Stimulus Location fields."
+                "Priority: Dual Stim is ON, secondary stimulation is active in addition to "
+                "main Stimulation/Stimulus Location fields."
             )
         else:
             priority_note = (
@@ -224,8 +224,8 @@ class ConfigManager(QObject):
         """
         Compute display-only absolute current from the active source of truth.
         
-        - Dual Stim ON  -> dual primary Iext is effective input.
-        - Dual Stim OFF -> canonical config.stim.Iext is effective input.
+        - Display uses dual primary Iext when Dual Stim is ON.
+        - Display uses canonical config.stim.Iext when Dual Stim is OFF.
         
         Returns
         -------
@@ -258,8 +258,8 @@ class ConfigManager(QObject):
         
         if dual_enabled:
             return (
-                "Priority: Dual Stim is ON, so primary stimulation values from the Dual Stim tab "
-                "override main Stimulation/Stimulus Location fields."
+                "Priority: Dual Stim is ON, secondary stimulation is active in addition to "
+                "main Stimulation/Stimulus Location fields."
             )
         else:
             return (

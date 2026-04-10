@@ -725,7 +725,7 @@ class TopologyWidget(QWidget):
                 f"tau={df.tau_dendritic_ms:.0f}ms  atten={att:.3f}"
             )
         if dual_config is not None and dual_config.enabled:
-            info_parts.append(f"DUAL: {dual_config.primary_location}+{dual_config.secondary_location}")
+            info_parts.append(f"DUAL: {config.stim_location.location}+{dual_config.secondary_location}")
 
         self._info.setText("  |  ".join(info_parts))
         self._plot.autoRange()
@@ -926,5 +926,5 @@ class TopologyWidget(QWidget):
             att = np.exp(-df.distance_um / max(df.space_constant_um, 1e-9))
             info_parts.append(f"Dend d={df.distance_um:.0f}um atten={att:.3f}")
         if dual_config is not None and dual_config.enabled:
-            info_parts.append(f"DUAL: {dual_config.primary_location}+{dual_config.secondary_location}")
+            info_parts.append(f"DUAL: {config.stim_location.location}+{dual_config.secondary_location}")
         self._info.setText("  |  ".join(info_parts))

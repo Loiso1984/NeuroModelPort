@@ -1202,15 +1202,7 @@ class MainWindow(QMainWindow):
 
     def _sync_stim_type_controls(self):
         """Show only stimulation parameters relevant for current stim_type."""
-        dual_enabled = bool(
-            hasattr(self, "dual_stim_widget")
-            and bool(self.dual_stim_widget.config.enabled)
-        )
-        stype = (
-            str(getattr(self.dual_stim_widget.config, "primary_stim_type", "const"))
-            if dual_enabled
-            else str(getattr(self.config_manager.config.stim, "stim_type", "const"))
-        )
+        stype = str(getattr(self.config_manager.config.stim, "stim_type", "const"))
         stim_fields = self.form_stim.widgets_map
         labels = self.form_stim.labels_map
 
@@ -2209,7 +2201,7 @@ extended with multi-compartment morphology, optional ion channels, and advanced 
   <li>Select a <b>Preset</b> from the dropdown (e.g. <i>Squid Giant Axon</i>).</li>
   <li>Adjust parameters in <b>1) Setup</b> (Run Setup / Model Biophysics / Advanced Analysis Tools).</li>
   <li>If needed, enable and configure secondary stimulation in <b>2) Dual Stim</b>.
-      When Dual Stim is ON, dual primary fields override main stimulation fields.</li>
+      Dual Stim adds an optional secondary stimulus source.</li>
   <li>Click <b>▶ RUN SIMULATION</b> — results appear in Oscilloscope and Analytics.</li>
   <li>Inspect traces in <b>3) Oscilloscope</b> and metrics in <b>4) Analytics</b>.</li>
 </ol>
@@ -2292,7 +2284,7 @@ Interpret terminal modes as late-pathology behavior for analysis/education, not 
 <b>F (Multiple Sclerosis)</b> is currently modeled as a single-stage preset (no progressive/terminal switch).
 </p>
 <p style="color:#BAC2DE;">
-When <b>Dual Stim</b> is enabled, Dual tab primary settings override standard stimulation fields.
+When <b>Dual Stim</b> is enabled, an additional secondary stimulus can be configured in the Dual tab.
 </p>
 
 <h2 style="color:#A6E3A1;">💾 Export</h2>
