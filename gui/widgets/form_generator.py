@@ -134,3 +134,6 @@ class PydanticFormWidget(QWidget):
                 logging.error(f"Error refreshing widget for field '{name}': {e}")
                 # Ensure signals are re-enabled even if there's an error
                 widget.blockSignals(False)
+        # Safety check for hidden_fields set
+        if not isinstance(self.hidden_fields, set):
+            self.hidden_fields = set(self.hidden_fields)

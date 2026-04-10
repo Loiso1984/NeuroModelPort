@@ -97,7 +97,7 @@ class DualStimulationWidget(QWidget):
         # Current and timing
         primary_layout.addWidget(QLabel("Current (µA/cm²):"), 1, 0)
         self.spin_primary_current = QDoubleSpinBox()
-        self.spin_primary_current.setRange(-100, 100)
+        self.spin_primary_current.setRange(-5000, 5000)
         self.spin_primary_current.setSingleStep(0.5)
         self.spin_primary_current.setDecimals(1)
         self.spin_primary_current.valueChanged.connect(self.on_config_changed)
@@ -156,7 +156,7 @@ class DualStimulationWidget(QWidget):
         # Current and timing
         secondary_layout.addWidget(QLabel("Current (µA/cm²):"), 1, 0)
         self.spin_secondary_current = QDoubleSpinBox()
-        self.spin_secondary_current.setRange(-100, 100)
+        self.spin_secondary_current.setRange(-5000, 5000)
         self.spin_secondary_current.setSingleStep(0.5)
         self.spin_secondary_current.setDecimals(1)
         self.spin_secondary_current.valueChanged.connect(self.on_config_changed)

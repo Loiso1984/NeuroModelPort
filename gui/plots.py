@@ -108,6 +108,7 @@ class OscilloscopeWidget(QWidget):
     """
 
     delay_target_changed = Signal(str, int)
+    time_highlighted = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -164,6 +165,7 @@ class OscilloscopeWidget(QWidget):
             self.hLine.setPos(mousePoint.y())
             self.crosshair_label.setText(f"t={mousePoint.x():.2f} ms\nV={mousePoint.y():.2f} mV")
             self.crosshair_label.setPos(mousePoint.x(), mousePoint.y())
+            self.time_highlighted.emit(mousePoint.x())
 
     def cleanup(self):
         """Clean up resources to prevent memory leaks."""
@@ -806,10 +808,15 @@ class OscilloscopeWidget(QWidget):
         # ── Ion currents ──────────────────────────────────────────────
         visible_currents: set[str] = set()
         for name, curr in result.currents.items():
+            # Handle 2D current arrays (n_comp, n_time) - sum across compartments
+            curr_arr = np.asarray(curr, dtype=float)
+            if curr_arr.ndim == 2:
+                curr_arr = np.sum(curr_arr, axis=0)
+            
             col   = CHAN_COLORS.get(name, (120, 120, 120, 150))
             pen   = pg.mkPen(color=col[:3], width=1.5 * lw)
             brush = pg.mkBrush(col)
-            tc, yc = _downsample_xy(t, curr, max_points=budget_i)
+            tc, yc = _downsample_xy(t, curr_arr, max_points=budget_i)
             c = self._curves_i.get(name)
             if c is None:
                 c = self._p_i.plot([], [], pen=pen, fillLevel=0.0, fillBrush=brush, name=f"I_{name}")

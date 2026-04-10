@@ -466,6 +466,13 @@ class MainWindow(QMainWindow):
         self.combo_lang.setCurrentText("EN")
         self.combo_lang.currentTextChanged.connect(self.change_language)
 
+        # ── Experience mode selector ───────────────────────────────
+        self.lbl_mode = QLabel("Mode:")
+        self.combo_mode = QComboBox()
+        self.combo_mode.addItems(["🔬 Microscope", "🌉 Bridge", "🧪 Research"])
+        self.combo_mode.setCurrentText("🌉 Bridge")
+        self.combo_mode.currentTextChanged.connect(self._toggle_ui_complexity)
+
         # ── Sparkline (mini Vm trace) ──────────────────────────
         self._sparkline = pg.PlotWidget()
         self._sparkline.setFixedHeight(36)
@@ -480,6 +487,8 @@ class MainWindow(QMainWindow):
         row2.addWidget(self.combo_presets, 2)
         row2.addWidget(self.lbl_lang)
         row2.addWidget(self.combo_lang)
+        row2.addWidget(self.lbl_mode)
+        row2.addWidget(self.combo_mode)
         row2.addWidget(self._sparkline, 1)
         row2.addStretch()
 
@@ -631,6 +640,9 @@ class MainWindow(QMainWindow):
         # Step 4: Analytics
         self.analytics = AnalyticsWidget()
         self.tabs.addTab(self.analytics,    "4) Analytics")
+        
+        # Connect oscilloscope time_highlighted to analytics for linked cursors
+        self.oscilloscope.time_highlighted.connect(self.analytics.highlight_time)
 
         # ── Tab 4: Topology ───────────────────────────────────────────
         # Step 5: Topology
@@ -821,11 +833,11 @@ class MainWindow(QMainWindow):
         c_layout.addWidget(grp_modes)
 
         # Group 1: Morphology (geometry)
-        grp_morph = QGroupBox("Morphology")
-        morph_layout = QVBoxLayout(grp_morph)
+        self.grp_morph = QGroupBox("Morphology")
+        morph_layout = QVBoxLayout(self.grp_morph)
         morph_layout.setSpacing(4)
         morph_layout.addWidget(self.form_morph)
-        c_layout.addWidget(grp_morph)
+        c_layout.addWidget(self.grp_morph)
 
         # Group 2: Biophysics Context (Environment + Calcium)
         grp_context = QGroupBox("Biophysics Context")
@@ -849,14 +861,60 @@ class MainWindow(QMainWindow):
         c_layout.addWidget(grp_chan)
 
         # Group 4: Analysis Settings
-        grp_ana = QGroupBox("Analysis Settings")
-        ana_layout = QVBoxLayout(grp_ana)
+        self.grp_ana = QGroupBox("Analysis Settings")
+        ana_layout = QVBoxLayout(self.grp_ana)
         ana_layout.setSpacing(4)
         ana_layout.addWidget(self.form_ana)
-        c_layout.addWidget(grp_ana)
+        c_layout.addWidget(self.grp_ana)
 
         scroll.setWidget(content)
         layout.addWidget(scroll)
+
+    def _toggle_ui_complexity(self, mode: str):
+        """Toggle UI complexity based on experience mode.
+        
+        Microscope: Simplified for students - hide topology/axon tabs, hide morphology/analysis groups, force single-comp
+        Bridge: Full functionality
+        Research: Future SWC/Network support (identical to Bridge for now)
+        """
+        if mode == "🔬 Microscope":
+            # Hide topology and axon biophysics tabs
+            for i in range(self.tabs.count()):
+                tab_text = self.tabs.tabText(i)
+                if "Topology" in tab_text or "Axon Biophysics" in tab_text:
+                    self.tabs.setTabVisible(i, False)
+            
+            # Hide morphology and analysis groups in sidebar
+            if hasattr(self, 'grp_morph'):
+                self.grp_morph.setVisible(False)
+            if hasattr(self, 'grp_ana'):
+                self.grp_ana.setVisible(False)
+            
+            # Force single-compartment mode
+            self.config_manager.config.morphology.single_comp = True
+            self._refresh_all_forms()
+            
+        elif mode == "🌉 Bridge":
+            # Show all tabs
+            for i in range(self.tabs.count()):
+                self.tabs.setTabVisible(i, True)
+            
+            # Show all sidebar groups
+            if hasattr(self, 'grp_morph'):
+                self.grp_morph.setVisible(True)
+            if hasattr(self, 'grp_ana'):
+                self.grp_ana.setVisible(True)
+            
+        elif mode == "🧪 Research":
+            # Identical to Bridge for now (future SWC/Network tabs)
+            for i in range(self.tabs.count()):
+                self.tabs.setTabVisible(i, True)
+            
+            if hasattr(self, 'grp_morph'):
+                self.grp_morph.setVisible(True)
+            if hasattr(self, 'grp_ana'):
+                self.grp_ana.setVisible(True)
+
     def _val_to_live_slider(self, param_name: str) -> int:
         # Try custom path resolution first
         obj, attr = self._resolve_param(param_name)
@@ -1184,9 +1242,13 @@ class MainWindow(QMainWindow):
         if field_name in {"Iext", "stim_type"}:
             self.lbl_params_hint.setText(self.config_manager.get_hint_text())
             self.form_stim.refresh()
+        if field_name == "t_sim":
+            # t_sim change requires updating stim preview with new time range
+            self._update_stim_preview()
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._refresh_topology_preview()
-        self._update_stim_preview()
+        if field_name != "t_sim":
+            self._update_stim_preview()
 
     def _on_stim_loc_field_changed(self, _field_name: str, _value):
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())

@@ -5,11 +5,11 @@ from numba import vectorize, float64, njit
 # LUT (Look-Up Table) Infrastructure for Gate Kinetics
 # =====================================================================
 
-# Voltage range: -120 to 60 mV, 0.1 mV step
+# Voltage range: -120 to 120 mV, 0.1 mV step
 V_MIN = -120.0
-V_MAX = 60.0
+V_MAX = 120.0
 V_STEP = 0.1
-N_V = int((V_MAX - V_MIN) / V_STEP) + 1  # 1801 points
+N_V = int((V_MAX - V_MIN) / V_STEP) + 1  # 2401 points
 
 # Pre-computed voltage array for LUT
 _V_LUT = np.linspace(V_MIN, V_MAX, N_V, dtype=np.float64)

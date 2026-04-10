@@ -531,7 +531,7 @@ class NeuronSolver:
 
     # ─────────────────────────────────────────────────────────────────
     def _post_process_physics(self, res: SimulationResult, morph: dict):
-        """Reconstruct ion-channel current densities and ATP estimate."""
+        """Reconstruct ion-channel current densities and ATP estimate for ALL compartments."""
         y, n, cfg = res.y, res.n_comp, res.config
         v  = y[0:n, :]
         m  = y[n   :2*n, :]
@@ -545,16 +545,22 @@ class NeuronSolver:
                 logger.error(f"Missing morph key: {key}")
                 return
         
-        res.currents['Na']   = morph['gNa_v'][0] * (m[0, :] ** 3) * h[0, :] * (v[0, :] - cfg.channels.ENa)
-        res.currents['K']    = morph['gK_v'][0]  * (nk[0, :] ** 4) * (v[0, :] - cfg.channels.EK)
-        res.currents['Leak'] = morph['gL_v'][0]  * (v[0, :] - cfg.channels.EL)
+        # Broadcast conductances to shape (n_comp, 1) for 2D current calculation
+        g_na = morph['gNa_v'][:, np.newaxis]
+        g_k  = morph['gK_v'][:, np.newaxis]
+        g_l  = morph['gL_v'][:, np.newaxis]
+        
+        res.currents['Na']   = g_na * (m ** 3) * h * (v - cfg.channels.ENa)
+        res.currents['K']    = g_k  * (nk ** 4) * (v - cfg.channels.EK)
+        res.currents['Leak'] = g_l  * (v - cfg.channels.EL)
 
         cursor = 4 * n
 
         if cfg.channels.enable_Ih:
             if 'gIh_v' in morph:
                 r = y[cursor:cursor + n, :]
-                res.currents['Ih'] = morph['gIh_v'][0] * r[0, :] * (v[0, :] - cfg.channels.E_Ih)
+                g_ih = morph['gIh_v'][:, np.newaxis]
+                res.currents['Ih'] = g_ih * r * (v - cfg.channels.E_Ih)
                 cursor += n
             else:
                 logger.warning("Ih channel enabled but gIh_v missing from morph")
@@ -563,13 +569,14 @@ class NeuronSolver:
             if 'gCa_v' in morph:
                 s = y[cursor:cursor + n, :]
                 u = y[cursor + n:cursor + 2*n, :]
+                g_ca = morph['gCa_v'][:, np.newaxis]
                 if cfg.calcium.dynamic_Ca and res.ca_i is not None:
                     t_kelvin = cfg.env.T_celsius + 273.15
-                    ca_soma = np.maximum(res.ca_i[0, :], 1e-9)
-                    e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_soma) * 1000.0
+                    ca_i = np.maximum(res.ca_i, 1e-9)
+                    e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_i) * 1000.0
                 else:
                     e_ca = 120.0
-                res.currents['ICa'] = morph['gCa_v'][0] * (s[0, :] ** 2) * u[0, :] * (v[0, :] - e_ca)
+                res.currents['ICa'] = g_ca * (s ** 2) * u * (v - e_ca)
                 cursor += 2 * n
             else:
                 logger.warning("ICa channel enabled but gCa_v missing from morph")
@@ -578,7 +585,8 @@ class NeuronSolver:
             if 'gA_v' in morph:
                 a = y[cursor:cursor + n, :]
                 b = y[cursor + n:cursor + 2*n, :]
-                res.currents['IA'] = morph['gA_v'][0] * a[0, :] * b[0, :] * (v[0, :] - cfg.channels.E_A)
+                g_a = morph['gA_v'][:, np.newaxis]
+                res.currents['IA'] = g_a * a * b * (v - cfg.channels.E_A)
                 cursor += 2 * n
             else:
                 logger.warning("IA channel enabled but gA_v missing from morph")
@@ -587,15 +595,16 @@ class NeuronSolver:
             if 'gTCa_v' in morph:
                 p_t = y[cursor:cursor + n, :]
                 q_t = y[cursor + n:cursor + 2*n, :]
+                g_tca = morph['gTCa_v'][:, np.newaxis]
                 if not cfg.channels.enable_ICa:
                     # e_ca not yet computed - compute here
                     if cfg.calcium.dynamic_Ca and res.ca_i is not None:
                         t_kelvin = cfg.env.T_celsius + 273.15
-                        ca_soma = np.maximum(res.ca_i[0, :], 1e-9)
-                        e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_soma) * 1000.0
+                        ca_i = np.maximum(res.ca_i, 1e-9)
+                        e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_i) * 1000.0
                     else:
                         e_ca = 120.0
-                res.currents['ITCa'] = morph['gTCa_v'][0] * (p_t[0, :] ** 2) * q_t[0, :] * (v[0, :] - e_ca)
+                res.currents['ITCa'] = g_tca * (p_t ** 2) * q_t * (v - e_ca)
                 cursor += 2 * n
             else:
                 logger.warning("ITCa channel enabled but gTCa_v missing from morph")
@@ -603,7 +612,8 @@ class NeuronSolver:
         if cfg.channels.enable_IM:
             if 'gIM_v' in morph:
                 w_m = y[cursor:cursor + n, :]
-                res.currents['IM'] = morph['gIM_v'][0] * w_m[0, :] * (v[0, :] - cfg.channels.EK)
+                g_im = morph['gIM_v'][:, np.newaxis]
+                res.currents['IM'] = g_im * w_m * (v - cfg.channels.EK)
                 cursor += n
             else:
                 logger.warning("IM channel enabled but gIM_v missing from morph")
@@ -611,7 +621,8 @@ class NeuronSolver:
         if cfg.channels.enable_NaP:
             if 'gNaP_v' in morph:
                 x_p = y[cursor:cursor + n, :]
-                res.currents['NaP'] = morph['gNaP_v'][0] * x_p[0, :] * (v[0, :] - cfg.channels.ENa)
+                g_nap = morph['gNaP_v'][:, np.newaxis]
+                res.currents['NaP'] = g_nap * x_p * (v - cfg.channels.ENa)
                 cursor += n
             else:
                 logger.warning("NaP channel enabled but gNaP_v missing from morph")
@@ -620,7 +631,8 @@ class NeuronSolver:
             if 'gNaR_v' in morph:
                 y_r = y[cursor:cursor + n, :]
                 j_r = y[cursor + n:cursor + 2*n, :]
-                res.currents['NaR'] = morph['gNaR_v'][0] * y_r[0, :] * j_r[0, :] * (v[0, :] - cfg.channels.ENa)
+                g_nar = morph['gNaR_v'][:, np.newaxis]
+                res.currents['NaR'] = g_nar * y_r * j_r * (v - cfg.channels.ENa)
                 cursor += 2 * n
             else:
                 logger.warning("NaR channel enabled but gNaR_v missing from morph")
@@ -628,7 +640,8 @@ class NeuronSolver:
         if cfg.channels.enable_SK:
             if 'gSK_v' in morph:
                 z_sk = y[cursor:cursor + n, :]
-                res.currents['SK'] = morph['gSK_v'][0] * z_sk[0, :] * (v[0, :] - cfg.channels.EK)
+                g_sk = morph['gSK_v'][:, np.newaxis]
+                res.currents['SK'] = g_sk * z_sk * (v - cfg.channels.EK)
                 cursor += n
             else:
                 logger.warning("SK channel enabled but gSK_v missing from morph")
