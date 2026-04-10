@@ -58,7 +58,7 @@ def test_valid_config_still_runs_after_validation_layer():
     apply_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
     cfg.stim.t_sim = 80.0
     cfg.stim.dt_eval = 0.2
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
     res = NeuronSolver(cfg).run_single()
     assert len(res.t) > 0
 

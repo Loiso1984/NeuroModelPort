@@ -48,7 +48,7 @@ def _gate_step(x_old, alpha, beta, dt):
     return x_inf + (x_old - x_inf) * np.exp(-ab * dt)
 
 
-@njit(cache=True)
+@njit
 def update_gates_analytic(
     y, dt, n_comp,
     # channel enable flags
@@ -123,20 +123,22 @@ def update_gates_analytic(
             y[off_y + i] = _gate_step(y[off_y + i], ay_NaR(vi), by_NaR(vi), eff_dt_na)
             y[off_j + i] = _gate_step(y[off_j + i], aj_NaR(vi), bj_NaR(vi), eff_dt_na)
 
-        # ── SK gate (z) — driven by [Ca²⁺], phi_k ──
+        # ── SK gate ODE: dz/dt = phi_k * (z_inf(Ca) - z) / tau_SK
+        # SK is a Ca-activated K channel — temperature scaling via phi_k.
+        # Hirschberg et al. 1998, J Gen Physiol 111:565
         if en_sk:
-            if dyn_ca:
-                ca_sk = min(max(y[off_ca + i], CA_I_MIN_M_M), CA_I_MAX_M_M)
-            else:
-                ca_sk = ca_rest
+            zi = y[off_zsk + i]
+            ca_val = y[off_ca + i] if dyn_ca else ca_rest
+            ca_sk = ca_val if ca_val > 0 else ca_rest
             z_inf = z_inf_SK(ca_sk)
-            tau_eff = tau_sk / phi_k[i] if phi_k[i] > 1e-15 else tau_sk
-            y[off_zsk + i] = z_inf + (y[off_zsk + i] - z_inf) * np.exp(-dt / tau_eff)
+            tau_eff = max(tau_sk, 1e-12) / max(phi_k[i], 1e-12) if phi_k[i] > 1e-15 else max(tau_sk, 1e-12)
+            y[off_zsk + i] = z_inf + (zi - z_inf) * np.exp(-dt / tau_eff)
 
         # ── Calcium dynamics (Euler — bounded) ──
         if dyn_ca:
             ca_val = y[off_ca + i]
-            dca = b_ca[i] * i_ca_influx_v[i] - (ca_val - ca_rest) / tau_ca
+            tau_ca_safe = max(tau_ca, 1e-12)
+            dca = b_ca[i] * i_ca_influx_v[i] - (ca_val - ca_rest) / tau_ca_safe
             ca_at_min = (ca_val <= CA_I_MIN_M_M and dca < 0.0)
             ca_at_max = (ca_val >= CA_I_MAX_M_M and dca > 0.0)
             if ca_at_min:

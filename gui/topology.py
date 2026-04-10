@@ -131,6 +131,9 @@ class TopologyWidget(QWidget):
         self._heatmap_data = None
         self._heatmap_time = None
         self._soma_item = None   # direct reference for scrubber coloring
+        
+        # Enable mouse clicks for compartment selection
+        self._plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
 
     def _on_reset_view(self):
         self._plot.autoRange()
@@ -774,6 +777,46 @@ class TopologyWidget(QWidget):
             elif isinstance(item, pg.PlotCurveItem):
                 w = getattr(item, '_heat_pen_width', 2.0)
                 item.setPen(pg.mkPen(color, width=w))
+    
+    def _on_plot_clicked(self, event):
+        """Handle mouse clicks on topology plot to select compartment."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Get click position in plot coordinates
+            pos = event.scenePos()
+            mouse_point = self._plot.vb.mapSceneToView(pos)
+            mx, my = mouse_point.x(), mouse_point.y()
+            
+            # Find nearest compartment with comp_idx attribute
+            nearest_idx = None
+            min_dist = float('inf')
+            
+            for item in self._draw_items:
+                if not hasattr(item, 'comp_idx'):
+                    continue
+                # For segments, check midpoint
+                if isinstance(item, pg.PlotCurveItem):
+                    x_data = item.getData()[0]
+                    y_data = item.getData()[1]
+                    if len(x_data) >= 2:
+                        mid_x = (x_data[0] + x_data[1]) / 2
+                        mid_y = (y_data[0] + y_data[1]) / 2
+                        dist = ((mx - mid_x)**2 + (my - mid_y)**2)**0.5
+                        if dist < min_dist:
+                            min_dist = dist
+                            nearest_idx = item.comp_idx
+                # For scatter points (soma, fork, branch ends)
+                elif isinstance(item, pg.ScatterPlotItem):
+                    x_data = item.getData()[0]
+                    y_data = item.getData()[1]
+                    if len(x_data) > 0:
+                        dist = ((mx - x_data[0])**2 + (my - y_data[0])**2)**0.5
+                        if dist < min_dist:
+                            min_dist = dist
+                            nearest_idx = item.comp_idx
+            
+            # Emit signal if a compartment was found within reasonable distance
+            if nearest_idx is not None and min_dist < 5.0:  # 5 unit tolerance
+                self.compartment_selected.emit(int(nearest_idx))
 
     def _draw_single_comp(
         self,

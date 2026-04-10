@@ -586,7 +586,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
         for i in range(n_comp):
             v_row = idx["v"].start + i
-            cm = cm_v[i]
+            cm = max(cm_v[i], 1e-12)  # Guard against zero capacitance
 
             # Axial coupling
             for p in range(int(l_indptr[i]), int(l_indptr[i + 1])):
@@ -747,14 +747,16 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
             if en_sk and idx["z_sk"] is not None:
                 zsk_row = idx["z_sk"].start + i
-                _set(zsk_row, zsk_row, -1.0 / tau_sk)
+                _set(zsk_row, zsk_row, -1.0 / max(tau_sk, 1e-12))
                 if dyn_ca and idx["ca"] is not None:
                     # dz_inf/dCa * (1/tau_SK)
-                    ca_safe = max(ca_i[i], 1e-9)
+                    ca_safe = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
+                    ca_sk = ca_safe if ca_i[i] > 0 else ca_rest
+                    ca_safe = max(ca_safe, 1e-12)  # Guard against zero
                     kd = 0.0004
                     q = (kd / ca_safe) ** 4
                     dz_inf_dca = (4.0 * (kd ** 4) / (ca_safe ** 5)) / ((1.0 + q) ** 2)
-                    _set(zsk_row, idx["ca"].start + i, dz_inf_dca / tau_sk)
+                    _set(zsk_row, idx["ca"].start + i, dz_inf_dca / max(tau_sk, 1e-12))
 
             if dyn_ca and idx["ca"] is not None:
                 ca_row = idx["ca"].start + i

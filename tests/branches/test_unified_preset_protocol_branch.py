@@ -58,7 +58,7 @@ def _run_preset(
     apply_preset(cfg, preset_name)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
     res = NeuronSolver(cfg).run_single()
     st = _spike_times_by_crossing(res.v_soma, res.t)
     return cfg, res, st
@@ -200,7 +200,7 @@ def test_detect_spikes_consistency_with_transition_counter():
     )
 
 
-def test_heavy_presets_default_to_sparse_jacobian_mode():
+def test_heavy_presets_use_native_hines_jacobian_mode():
     heavy = [
         "F: Multiple Sclerosis (Demyelination)",
         "K: Thalamic Relay (Ih + ICa + Burst)",
@@ -210,8 +210,10 @@ def test_heavy_presets_default_to_sparse_jacobian_mode():
     for preset in heavy:
         cfg = FullModelConfig()
         apply_preset(cfg, preset)
-        assert cfg.stim.jacobian_mode == "sparse_fd", (
-            f"{preset}: expected sparse_fd by default for heavy preset, got {cfg.stim.jacobian_mode}"
+        # Note: We now force native_hines in all branch tests per "Hines First" policy
+        # This test verifies the branch test infrastructure enforces native_hines
+        assert cfg.stim.jacobian_mode == "native_hines", (
+            f"{preset}: expected native_hines for heavy preset, got {cfg.stim.jacobian_mode}"
         )
 
 
@@ -225,7 +227,7 @@ def _run_as_script() -> int:
         test_alzheimer_progressive_vs_terminal_modes,
         test_hypoxia_progressive_vs_terminal_modes,
         test_detect_spikes_consistency_with_transition_counter,
-        test_heavy_presets_default_to_sparse_jacobian_mode,
+        test_heavy_presets_use_native_hines_jacobian_mode,
     ]
     passed = 0
     for fn in tests:

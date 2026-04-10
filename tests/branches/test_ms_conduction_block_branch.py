@@ -25,7 +25,7 @@ def _run(preset: str) -> dict:
     apply_preset(cfg, preset)
     cfg.stim.t_sim = 320.0
     cfg.stim.dt_eval = 0.15
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     res = NeuronSolver(cfg).run_single()
     if cfg.morphology.N_trunk > 0:

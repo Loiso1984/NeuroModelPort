@@ -383,6 +383,10 @@ class PresetModeParams(BaseModel):
         default='progressive',
         description="Hypoxia preset stage: progressive (early spikes then decay) or terminal"
     )
+    l5_mode: Literal['normal', 'high_ach'] = Field(
+        default='normal',
+        description="L5 Pyramidal neuromodulation mode: normal (standard IM/SK) or high_ach (IM disabled, SK reduced 50%)"
+    )
 
 
 class FullModelConfig(BaseModel):

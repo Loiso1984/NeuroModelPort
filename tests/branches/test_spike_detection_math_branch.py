@@ -85,7 +85,7 @@ def test_full_analysis_uses_configurable_detection_parameters():
     apply_preset(cfg_default, "B: Pyramidal L5 (Mainen 1996)")
     cfg_default.stim.t_sim = 180.0
     cfg_default.stim.dt_eval = 0.2
-    cfg_default.stim.jacobian_mode = "sparse_fd"
+    cfg_default.stim.jacobian_mode = "native_hines"
     res_default = NeuronSolver(cfg_default).run_single()
     stats_default = full_analysis(res_default)
 
@@ -93,7 +93,7 @@ def test_full_analysis_uses_configurable_detection_parameters():
     apply_preset(cfg_strict, "B: Pyramidal L5 (Mainen 1996)")
     cfg_strict.stim.t_sim = 180.0
     cfg_strict.stim.dt_eval = 0.2
-    cfg_strict.stim.jacobian_mode = "sparse_fd"
+    cfg_strict.stim.jacobian_mode = "native_hines"
     cfg_strict.analysis.spike_detect_algorithm = "threshold_crossing"
     cfg_strict.analysis.spike_detect_threshold = 35.0
     cfg_strict.analysis.spike_detect_baseline_threshold = -45.0

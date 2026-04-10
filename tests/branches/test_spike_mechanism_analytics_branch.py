@@ -26,7 +26,7 @@ def test_spike_mechanism_tab_populates_axes():
     apply_preset(cfg, "D: alpha-Motoneuron (Powers 2001)")
     cfg.stim.t_sim = 180.0
     cfg.stim.dt_eval = 0.2
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
     res = NeuronSolver(cfg).run_single()
 
     w = AnalyticsWidget()
