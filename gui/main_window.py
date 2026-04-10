@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
         self._live_combos: list[QComboBox] = []
         self._live_sliders: list[QSlider] = []
         self._live_labels: list[QLabel] = []
+        self._live_custom_bounds: dict[int, tuple[float, float]] = {}  # Cache bounds for custom parameters
         self._live_timer = QTimer(self)
         self._live_timer.setSingleShot(True)
         self._live_timer.setInterval(30)
@@ -450,7 +451,7 @@ class MainWindow(QMainWindow):
         # Row 2: Preset, Language, and Sparkline
         row2 = QHBoxLayout()
         row2.setSpacing(8)
-        
+
         # ── Preset selector ───────────────────────────────────────────
         self.lbl_preset = QLabel("Preset:")
         self.combo_presets = QComboBox()
@@ -688,6 +689,15 @@ class MainWindow(QMainWindow):
         preset_row.addWidget(self._sidebar_preset_combo, 1)
         layout.addLayout(preset_row)
 
+        # ── Quick-Set dropdown for parameter groups ────────────────────
+        quickset_row = QHBoxLayout()
+        quickset_row.addWidget(QLabel("📋 Quick-Set:"))
+        self._quickset_combo = QComboBox()
+        self._quickset_combo.addItems(["— Quick-Set —", "Channel Densities", "Dendritic Cable", "Metabolism"])
+        self._quickset_combo.currentTextChanged.connect(self._on_quick_set_changed)
+        quickset_row.addWidget(self._quickset_combo, 1)
+        layout.addLayout(quickset_row)
+
         # ── Live Control Deck (Step 2) ─────────────────────────────────
         deck = QGroupBox("🎛️ Live Control Deck")
         deck_layout = QVBoxLayout(deck)
@@ -737,6 +747,8 @@ class MainWindow(QMainWindow):
             row_h.addWidget(slider, 1)
             row_h.addWidget(lbl)
             deck_layout.addWidget(row_w)
+
+        layout.addWidget(deck)
 
         # ── Params hint ───────────────────────────────────────────────
         self.lbl_params_hint = QLabel("")
@@ -801,31 +813,43 @@ class MainWindow(QMainWindow):
             "Analysis / Sweep / Map",
         )
 
-        # Group 1: preset modes
-        grp_preset = QGroupBox("Preset Modes")
-        preset_layout = QVBoxLayout(grp_preset)
-        preset_layout.setSpacing(4)
-        preset_layout.addWidget(self.form_preset_modes)
-        c_layout.addWidget(grp_preset)
+        # Group 0: Preset Modes (variations)
+        grp_modes = QGroupBox("Preset Modes")
+        modes_layout = QVBoxLayout(grp_modes)
+        modes_layout.setSpacing(4)
+        modes_layout.addWidget(self.form_preset_modes)
+        c_layout.addWidget(grp_modes)
 
-        # Group 2: model biophysics
-        grp_model = QGroupBox("Biophysics")
-        model_layout = QHBoxLayout(grp_model)
-        model_layout.setSpacing(8)
-        model_left = QVBoxLayout()
-        model_right = QVBoxLayout()
-        model_left.setSpacing(4)
-        model_right.setSpacing(4)
-        model_left.addWidget(self.form_chan)
-        model_left.addWidget(self.form_calcium)
-        model_right.addWidget(self.form_morph)
-        model_right.addWidget(self.form_env)
-        model_layout.addLayout(model_left)
-        model_layout.addLayout(model_right)
-        c_layout.addWidget(grp_model)
+        # Group 1: Morphology (geometry)
+        grp_morph = QGroupBox("Morphology")
+        morph_layout = QVBoxLayout(grp_morph)
+        morph_layout.setSpacing(4)
+        morph_layout.addWidget(self.form_morph)
+        c_layout.addWidget(grp_morph)
 
-        # Group 3: advanced analysis/sweep tools
-        grp_ana = QGroupBox("Advanced Analysis Tools")
+        # Group 2: Biophysics Context (Environment + Calcium)
+        grp_context = QGroupBox("Biophysics Context")
+        context_layout = QHBoxLayout(grp_context)
+        context_layout.setSpacing(8)
+        context_left = QVBoxLayout()
+        context_right = QVBoxLayout()
+        context_left.setSpacing(4)
+        context_right.setSpacing(4)
+        context_left.addWidget(self.form_env)
+        context_right.addWidget(self.form_calcium)
+        context_layout.addLayout(context_left)
+        context_layout.addLayout(context_right)
+        c_layout.addWidget(grp_context)
+
+        # Group 3: Ion Channels (conductances)
+        grp_chan = QGroupBox("Ion Channels")
+        chan_layout = QVBoxLayout(grp_chan)
+        chan_layout.setSpacing(4)
+        chan_layout.addWidget(self.form_chan)
+        c_layout.addWidget(grp_chan)
+
+        # Group 4: Analysis Settings
+        grp_ana = QGroupBox("Analysis Settings")
         ana_layout = QVBoxLayout(grp_ana)
         ana_layout.setSpacing(4)
         ana_layout.addWidget(self.form_ana)
@@ -882,15 +906,22 @@ class MainWindow(QMainWindow):
         """Sync slider position to new parameter's current value."""
         param = self._live_combos[row_i].currentText()
         combo = self._live_combos[row_i]
-        
+
         # Try custom path resolution first
         obj, attr = self._resolve_param(param)
         if obj is not None and attr is not None:
             val = getattr(obj, attr)
-            # Use reasonable default ranges for custom paths
-            lo, hi = -100.0, 500.0
+            # Cache bounds based on initial value to prevent runaway drift
             if param in _LIVE_PARAMS:
                 lo, hi, _, _ = _LIVE_PARAMS[param]
+            else:
+                if val == 0.0:
+                    lo, hi = -1.0, 1.0
+                elif val > 0:
+                    lo, hi = val * 0.1, val * 5.0
+                else:
+                    lo, hi = val * 5.0, val * 0.1
+                self._live_custom_bounds[row_i] = (lo, hi)
             combo.setStyleSheet("")  # Clear error style
         elif param in _LIVE_PARAMS:
             lo, hi, _, getter = _LIVE_PARAMS[param]
@@ -899,7 +930,7 @@ class MainWindow(QMainWindow):
         else:
             combo.setStyleSheet("color: #F38BA8;")  # Red text for invalid path
             return
-        
+
         new_pos = int(round(max(0.0, min(1.0, (val - lo) / max(hi - lo, 1e-9))) * _LIVE_SLIDER_STEPS))
         self._live_sliders[row_i].blockSignals(True)
         self._live_sliders[row_i].setValue(new_pos)
@@ -910,31 +941,50 @@ class MainWindow(QMainWindow):
         param = self._live_combos[row_i].currentText()
         combo = self._live_combos[row_i]
         slider = self._live_sliders[row_i]
-        
+
         # Try custom path resolution first
         obj, attr = self._resolve_param(param)
         if obj is not None and attr is not None:
-            val = getattr(obj, attr)
-            # Use the same dynamic bound calculation as _val_to_live_slider
-            simple_name = param.split('.')[-1] if '.' in param else param
-            if simple_name in _LIVE_PARAMS:
-                lo, hi, _, _ = _LIVE_PARAMS[simple_name]
+            # Use cached bounds instead of recalculating to prevent runaway drift
+            if param in _LIVE_PARAMS:
+                lo, hi, _, _ = _LIVE_PARAMS[param]
+            elif row_i in self._live_custom_bounds:
+                lo, hi = self._live_custom_bounds[row_i]
             else:
-                # SMART DYNAMIC BOUNDS
-                if val == 0.0:
-                    lo, hi = -1.0, 1.0
-                elif val > 0:
-                    lo, hi = val * 0.1, val * 5.0
-                else:
-                    lo, hi = val * 0.1, val * 5.0
-            val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
-            self._live_labels[row_i].setText(f"{val:.2f}")
+                lo, hi = -100.0, 500.0  # Fallback
+            
+            # Dynamic precision: use logarithmic mapping for very small scales
+            range_size = hi - lo
+            if range_size < 0.001 and lo > 0 and hi > 0:
+                # Logarithmic mapping for small positive values
+                val = lo * (hi / lo) ** (raw_val / _LIVE_SLIDER_STEPS)
+                self._live_labels[row_i].setText(f"{val:.6f}")
+            elif range_size < 0.1:
+                # Higher precision for small ranges
+                val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
+                self._live_labels[row_i].setText(f"{val:.6f}")
+            else:
+                # Standard precision
+                val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
+                self._live_labels[row_i].setText(f"{val:.2f}")
+            
             setattr(obj, attr, val)
             combo.setStyleSheet("")  # Clear error style
         elif param in _LIVE_PARAMS:
             lo, hi, setter, _ = _LIVE_PARAMS[param]
-            val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
-            self._live_labels[row_i].setText(f"{val:.2f}")
+            range_size = hi - lo
+            if range_size < 0.001 and lo > 0 and hi > 0:
+                # Logarithmic mapping for small positive values
+                val = lo * (hi / lo) ** (raw_val / _LIVE_SLIDER_STEPS)
+                self._live_labels[row_i].setText(f"{val:.6f}")
+            elif range_size < 0.1:
+                # Higher precision for small ranges
+                val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
+                self._live_labels[row_i].setText(f"{val:.6f}")
+            else:
+                # Standard precision
+                val = lo + (raw_val / _LIVE_SLIDER_STEPS) * (hi - lo)
+                self._live_labels[row_i].setText(f"{val:.2f}")
             setter(self.config_manager.config, val)
             combo.setStyleSheet("")  # Clear error style
         else:
@@ -944,7 +994,7 @@ class MainWindow(QMainWindow):
             slider.setValue(self._val_to_live_slider(param))
             slider.blockSignals(False)
             return
-        
+
         # Sync forms so the change is visible in the detail fields
         for form in (self.form_stim, self.form_chan, self.form_morph, self.form_env):
             try:
@@ -1432,7 +1482,23 @@ class MainWindow(QMainWindow):
         """Reapply active preset when user changes a mode selector."""
         if not self.config_manager.current_preset_name:
             return
+        from core.presets import _apply_k_mode, _apply_l5_mode, _apply_alzheimer_mode, _apply_hypoxia_mode
+        
         apply_preset(self.config_manager.config, self.config_manager.current_preset_name)
+        
+        # Re-apply mode-specific overlay after preset reapplication
+        preset_name = self.config_manager.current_preset_name.lower()
+        cfg = self.config_manager.config
+        
+        if "thalamic" in preset_name or "k:" in preset_name:
+            _apply_k_mode(cfg)
+        elif "hippocampal" in preset_name or "l:" in preset_name:
+            _apply_l5_mode(cfg)
+        elif "alzheimer" in preset_name or "n:" in preset_name:
+            _apply_alzheimer_mode(cfg)
+        elif "hypoxia" in preset_name or "o:" in preset_name:
+            _apply_hypoxia_mode(cfg)
+        
         self._refresh_all_forms()
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         self.topology.draw_neuron(

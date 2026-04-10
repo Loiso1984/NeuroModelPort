@@ -80,6 +80,13 @@ class Translator:
             'tau_Ca':    'Ca²⁺ pump time constant (ms). Long τ → prolonged SK activation.',
             'B_Ca':      'Current-to-concentration factor (mM / (µA/cm² · ms)).',
 
+            # ── Metabolism descriptions ───────────────────────────────
+            'enable_dynamic_atp': 'Enable dynamic ATP pool metabolism. ATP depletion opens K_ATP channels, hyperpolarizing the cell.',
+            'g_katp_max': 'Maximum ATP-sensitive K⁺ conductance (mS/cm²). Opens when ATP < 0.5 mM.',
+            'katp_kd_atp_mM': 'ATP concentration for half-activation of K_ATP (mM).',
+            'atp_max_mM': 'Baseline intracellular ATP concentration (mM). Healthy neurons: 2-5 mM.',
+            'atp_synthesis_rate': 'ATP synthesis rate via oxidative phosphorylation (nmol/cm²/s).',
+
             # ── Environment descriptions ─────────────────────────────
             'T_celsius':     'Experiment temperature (°C). Scales all kinetics via Q10.',
             'T_ref':         'Reference temperature for channel kinetics (°C).',
@@ -217,6 +224,13 @@ class Translator:
             'Ca_rest':   'Покоящийся [Ca²⁺]ᵢ (мМ). Базовый уровень до стимула.',
             'tau_Ca':    'Время откачки Ca²⁺ (мс). Длинный τ → долгий SK-ток → адаптация.',
             'B_Ca':      'Конверсия тока в концентрацию (мМ / (мкА/см² · мс)).',
+
+            # ── Метаболизм ───────────────────────────────────────────
+            'enable_dynamic_atp': 'Включить динамический пул АТФ. Истощение АТФ открывает K_ATP каналы, гиперполяризуя клетку.',
+            'g_katp_max': 'Макс. проводимость ATP-чувствительных K⁺ каналов (мСм/см²). Открываются при АТФ < 0.5 мМ.',
+            'katp_kd_atp_mM': 'Концентрация АТФ для полуактивации K_ATP (мМ).',
+            'atp_max_mM': 'Базовая внутриклеточная концентрация АТФ (мМ). Здоровые нейроны: 2-5 мМ.',
+            'atp_synthesis_rate': 'Скорость синтеза АТФ через окислительное фосфорилирование (нмоль/см²/с).',
 
             # ── Среда ────────────────────────────────────────────────
             'T_celsius':     'Температура эксперимента (°C). Масштабирует кинетику через Q10.',

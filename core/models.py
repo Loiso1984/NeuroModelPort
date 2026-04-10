@@ -25,6 +25,10 @@ class MorphologyParams(BaseModel):
     gNa_trunk_mult: float = Field(default=1.0, ge=0.0, le=1.0,
         description="gNa multiplier in trunk (0–1×). Default 1.0 = uniform density; "
                     "set <1 to model internodal Na-channel scarcity (demyelination).")
+    gL_trunk_mult: float = Field(default=1.0, ge=0.0, description="gL multiplier in trunk/branches. Default 1.0. "
+                    "Set >1 to model myelin loss (massive leak in exposed membrane).")
+    Cm_trunk_mult: float = Field(default=1.0, ge=0.0, description="Cm multiplier in trunk/branches. Default 1.0. "
+                    "Set >1 to model myelin loss (high capacitance of exposed membrane).")
 
     # Bifurcation and branches (Rall's law)
     N_b1: int  = Field(default=4,    ge=0, description="Branch 1 segments")
@@ -86,6 +90,15 @@ class CalciumParams(BaseModel):
     Ca_rest:    float = Field(default=50e-6, description="Resting [Ca²⁺]ᵢ (mM)")
     tau_Ca:     float = Field(default=200.0, description="Ca²⁺ pump time constant (ms)")
     B_Ca:       float = Field(default=0.001, description="Current-to-concentration conversion")
+
+
+class MetabolismParams(BaseModel):
+    """Dynamic intracellular ATP pool and metabolic feedback."""
+    enable_dynamic_atp: bool = Field(default=False, description="Enable dynamic ATP metabolism")
+    atp_max_mM: float = Field(default=2.0, ge=0.1, le=10.0, description="Maximum ATP concentration (mM, literature: 2-5 mM)")
+    atp_synthesis_rate: float = Field(default=0.6, ge=0.0, description="ATP synthesis rate (nmol/cm²/s)")
+    g_katp_max: float = Field(default=5.0, ge=0.0, description="Max K_ATP channel conductance (mS/cm²)")
+    katp_kd_atp_mM: float = Field(default=0.5, ge=0.01, description="ATP concentration for half-activation of K_ATP (mM)")
 
 
 class EnvironmentParams(BaseModel):
@@ -288,9 +301,6 @@ class SimulationParams(BaseModel):
     stoch_gating: bool  = Field(default=False, description="Langevin gate noise (Euler-Maruyama solver)")
     noise_sigma:  float = Field(default=0.0,   description="Additive membrane current noise sigma (uA/cm2)")
 
-    # Analysis
-    compute_lyapunov: bool = Field(default=False, description="Compute Lyapunov exponent (LLE) after simulation")
-
 
 class AnalysisParams(BaseModel):
     """Analysis, bifurcation, Monte-Carlo, Sweep, S-D curve, Excitability map."""
@@ -371,9 +381,9 @@ class AnalysisParams(BaseModel):
 
 class PresetModeParams(BaseModel):
     """Switchable physiology modes for selected presets."""
-    k_mode: Literal['activated', 'baseline'] = Field(
+    k_mode: Literal['activated', 'baseline', 'delta_oscillator'] = Field(
         default='baseline',
-        description="Thalamic relay mode: activated (high drive) or baseline (low drive)"
+        description="Thalamic relay mode: activated (high drive), baseline (low drive), or delta_oscillator (self-sustained delta oscillations)"
     )
     alzheimer_mode: Literal['progressive', 'terminal'] = Field(
         default='progressive',
@@ -387,6 +397,10 @@ class PresetModeParams(BaseModel):
         default='normal',
         description="L5 Pyramidal neuromodulation mode: normal (standard IM/SK) or high_ach (IM disabled, SK reduced 50%)"
     )
+    dravet_mode: Literal['normal', 'febrile'] = Field(
+        default='normal',
+        description="Dravet syndrome mode: normal or febrile (temperature-triggered failure)"
+    )
 
 
 class FullModelConfig(BaseModel):
@@ -394,6 +408,7 @@ class FullModelConfig(BaseModel):
     morphology: MorphologyParams = MorphologyParams()
     channels:   ChannelParams    = ChannelParams()
     calcium:    CalciumParams     = CalciumParams()
+    metabolism: MetabolismParams = MetabolismParams()
     env:        EnvironmentParams = EnvironmentParams()
     stim:       SimulationParams  = SimulationParams()
     stim_location: StimulationLocationParams = StimulationLocationParams()

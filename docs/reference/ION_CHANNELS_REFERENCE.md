@@ -10,6 +10,8 @@
 5. [A-type Potassium Channels (IA)](#a-type-potassium-channels-ia)
 6. [SK Channels (Ca²⁺-activated K⁺)](#sk-channels-ca-activated-k)
 7. [Leak Channels (I_leak)](#leak-channels-i_leak)
+8. [ATP-Sensitive Potassium Channels (K_ATP) | ATP-чувствительные калиевые каналы](#atp-sensitive-potassium-channels-katp)
+9. [Metabolic Coupling | Метаболическая связь](#metabolic-coupling)
 
 ---
 
@@ -330,6 +332,105 @@ cfg.channels.gL = 0.5
 2. **Frequency ranges**: Theta, gamma, beta rhythms
 3. **Pathological models**: Epilepsy, Alzheimer's, hypoxia
 4. **Species-specific**: Rodent vs human parameters
+
+---
+
+## ⚡ ATP-Sensitive Potassium Channels (K_ATP) | ATP-чувствительные калиевые каналы
+
+### Physiology | Физиология
+- **Function**: Metabolic feedback to excitability, ischemic protection
+- **Role**: Links cellular energy state to membrane potential, hyperpolarizes cell during ATP depletion
+- **Kinetics**: ATP-dependent inhibition, no voltage dependence, fast activation (< 1 ms)
+- **Reference**: Nichols 2006, Nature Reviews Molecular Cell Biology
+
+### Reference Values | Референсные значения
+```python
+# K_ATP channel parameters
+g_katp_max = 5.0          # mS/cm² (maximum conductance)
+katp_kd_atp_mM = 0.5      # mM (ATP concentration for half-activation)
+atp_max_mM = 2.0          # mM (baseline intracellular ATP concentration)
+atp_synthesis_rate = 0.6  # nmol/cm²/s (oxidative phosphorylation flux)
+```
+
+### Conductance Model | Модель проводимости
+```python
+# ATP-dependent conductance (Hill equation)
+g_KATP = g_katp_max / (1 + ([ATP]/K_d)^2)
+
+# K_ATP current
+I_KATP = g_KATP * (V - E_K)
+
+# When [ATP] < K_d, K_ATP opens → hyperpolarization → reduced excitability
+```
+
+### Metabolic Feedback | Метаболическая обратная связь
+- **Ischemic threshold**: 0.5 mM ATP (K_ATP opens significantly)
+- **Pump failure threshold**: 0.2 mM ATP (Na/K and Ca pumps lose efficiency)
+- **Physiological range**: 2-5 mM ATP (healthy neuron)
+- **Depletion time**: 100-500 ms during ischemia (depends on synthesis rate)
+
+### Preset Examples | Примеры пресетов
+```python
+# Hypoxia Progressive (gradual ATP depletion)
+cfg.metabolism.enable_dynamic_atp = True
+cfg.metabolism.atp_synthesis_rate = 0.1  # Reduced synthesis
+cfg.metabolism.g_katp_max = 5.0
+
+# Hypoxia Terminal (complete metabolic failure)
+cfg.metabolism.enable_dynamic_atp = True
+cfg.metabolism.atp_synthesis_rate = 0.0  # No synthesis
+cfg.metabolism.g_katp_max = 5.0
+
+# Healthy neuron (ATP metabolism disabled)
+cfg.metabolism.enable_dynamic_atp = False
+```
+
+### Validation Criteria | Критерии валидации
+- **ATP baseline**: 2-5 mM (physiological range)
+- **K_ATP activation**: At [ATP] < 0.5 mM
+- **Pump failure**: At [ATP] < 0.2 mM
+- **Ischemic protection**: Spiking stops when ATP depletes
+
+---
+
+## 🔬 Metabolic Coupling | Метаболическая связь
+
+### ATP Pool Dynamics | Динамика пула АТФ
+The intracellular ATP pool is modeled as a finite buffer with:
+- **Synthesis**: Constant oxidative phosphorylation flux (atp_synthesis_rate)
+- **Consumption**: Proportional to ion pump activity (Na/K pump, Ca pump)
+- **ODE**: d[ATP]/dt = Synthesis - PumpConsumption
+
+### Pump Consumption Model | Модель потребления насосами
+```python
+# Na/K pump consumption (3 Na per ATP)
+i_na = gNa * m^3 * h * (V - ENa)
+pump_consumption = abs(i_na) * 0.001  # Convert µA/cm² to nmol/cm²/s
+
+# Ca pump consumption (3 Ca per ATP, if dynamic Ca enabled)
+if dyn_ca:
+    pump_consumption += 3.0 * i_ca_influx * 0.001
+```
+
+### Metabolic Feedback to Pumps | Метаболическая обратная связь к насосам
+When ATP < 0.2 mM, pump efficiency scales linearly:
+```python
+if [ATP] < 0.2 mM:
+    efficiency = [ATP] / 0.2
+    # Na/K pump and Ca pump efficiency reduced
+    # Leads to ion accumulation and depolarization block
+```
+
+### Physiological Relevance | Физиологическая значимость
+- **Ischemia**: Reduced O2 → decreased ATP synthesis → K_ATP opens → hyperpolarization
+- **Metabolic stress**: High firing → ATP depletion → excitability reduction
+- **Neuroprotection**: K_ATP hyperpolarization prevents Ca²⁺ overload
+- **Pathological states**: Alzheimer's, epilepsy, stroke involve metabolic dysfunction
+
+### Literature References | Литературные ссылки
+1. **Nichols, C.G. (2006)** - "K_ATP channels as molecular sensors of cellular metabolism"
+2. **Ashcroft, F.M. (1988)** - "Adenosine 5'-triphosphate-sensitive potassium channels"
+3. **Cunningham, M.O. et al. (2006)** - "Metabolic regulation of neuronal excitability"
 
 ---
 

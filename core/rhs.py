@@ -18,6 +18,12 @@ CA_DAMPING_FACTOR = 0.5  # Damped reflection factor for calcium bounds (prevents
 # energy dissipation to prevent sustained oscillations at the boundary while maintaining
 # numerical stability. This is analogous to a "soft bounce" in physical systems.
 
+# ATP metabolism constants
+ATP_MIN_M_M = 0.0
+ATP_MAX_M_M = 10.0
+ATP_ISCHEMIC_THRESHOLD = 0.5  # mM - K_ATP opens below this threshold
+ATP_PUMP_FAILURE_THRESHOLD = 0.2  # mM - pumps fail below this threshold
+
 # Noise parameters
 OU_NOISE_AMPLITUDE = 0.1  # 10% noise amplitude
 OU_NOISE_FREQUENCY = 0.1  # Hz (period = 10 seconds)
@@ -153,7 +159,10 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
             return 0.0
     elif 4 <= stype <= 9:  # Conductance-based synaptic types (AMPA/NMDA/GABA-A/GABA-B/Kainate/Nicotinic)
         tau_r, tau_d = _calculate_syn_tau(stype, atau)
-        return abs(iext) * _biexp_waveform(t, t0, tau_r, tau_d)
+        iext_eff = iext
+        if stype == 5:  # NMDA boost to compensate for Mg2+ block at resting potentials
+            iext_eff *= 5.0
+        return abs(iext_eff) * _biexp_waveform(t, t0, tau_r, tau_d)
     elif stype == 10:  # ZAP/Chirp current (frequency sweep)
         if td <= 0.0 or t < t0 or t > (t0 + td):
             return 0.0
@@ -311,6 +320,7 @@ def rhs_multicompartment(
     en_im = physics_params.en_im
     en_nap = physics_params.en_nap
     en_nar = physics_params.en_nar
+    dyn_atp = physics_params.dyn_atp
     
     # Unpack conductance matrix
     (gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, 
@@ -341,6 +351,12 @@ def rhs_multicompartment(
     b_ca = physics_params.b_ca
     mg_ext = physics_params.mg_ext
     tau_sk = physics_params.tau_sk
+
+    # ATP metabolism parameters
+    g_katp_max = physics_params.g_katp_max
+    katp_kd_atp_mM = physics_params.katp_kd_atp_mM
+    atp_max_mM = physics_params.atp_max_mM
+    atp_synthesis_rate = physics_params.atp_synthesis_rate
     
     # Primary stimulation
     stype = physics_params.stype
@@ -430,6 +446,10 @@ def rhs_multicompartment(
     if dyn_ca:
         cursor += n_comp
 
+    off_atp = cursor
+    if dyn_atp:
+        cursor += n_comp
+
     # Dendritic filter state offsets
     off_vfilt_primary = cursor
     if use_dfilter_primary == 1:
@@ -511,6 +531,7 @@ def rhs_multicompartment(
         ji = y[off_j + i] if en_nar else 0.0
         zi = y[off_zsk + i] if en_sk else 0.0
         ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
+        atp_i_val = y[off_atp + i] if dyn_atp else atp_max_mM
 
         i_ion, i_ca_influx = compute_ionic_currents_scalar(
             vi, mi, hi, ni,
@@ -520,6 +541,15 @@ def rhs_multicompartment(
             ena, ek, el, eih, ea,
             ca_i_val, ca_ext, ca_rest, t_kelvin,
         )
+
+        # K_ATP current: ATP-sensitive potassium channel
+        # g_KATP = g_max / (1 + ([ATP]/K_d)^2)
+        # I_KATP = g_KATP * (V - E_K)
+        if dyn_atp:
+            atp_ratio = atp_i_val / katp_kd_atp_mM
+            g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
+            i_katp = g_katp * (vi - ek)
+            i_ion += i_katp
 
         # Axial coupling (sparse Laplacian row i)
         i_ax = 0.0
@@ -608,7 +638,8 @@ def rhs_multicompartment(
         if en_sk:
             zi = y[off_zsk + i]
             if dyn_ca:
-                ca_sk = min(max(y[off_ca + i], CA_I_MIN_M_M), CA_I_MAX_M_M)
+                # Clamp calcium for SK gating to prevent saturation (limit to 10 µM)
+                ca_sk = min(max(y[off_ca + i], CA_I_MIN_M_M), 0.01)
             else:
                 ca_sk = ca_rest
             z_inf = z_inf_SK(ca_sk)
@@ -618,7 +649,7 @@ def rhs_multicompartment(
         if dyn_ca:
             ca_i_val = y[off_ca + i]
             dca = b_ca[i] * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
-            
+
             # Hard clamp: keep calcium in physiologically bounded range.
             # Only clamp the derivative, not set to zero, to avoid artificial equilibrium
             ca_at_min = (ca_i_val <= CA_I_MIN_M_M and dca < 0.0)
@@ -630,6 +661,34 @@ def rhs_multicompartment(
                 # Force derivative negative (away from upper bound)
                 dca = -abs(dca) * CA_DAMPING_FACTOR
             dydt[off_ca + i] = dca
+
+        # ATP dynamics
+        if dyn_atp:
+            atp_i_val = y[off_atp + i]
+            # Pump consumption: proportional to Na+ and Ca2+ influx
+            # Simplified model: consumption ~ |I_Na| + 3*|I_Ca| (Na/K pump uses 3 Na per ATP)
+            i_na = gna_v[i] * (mi * mi * mi) * hi * (vi - ena)
+            pump_consumption = abs(i_na) * 0.001  # Convert µA/cm² to nmol/cm²/s (simplified)
+            if dyn_ca:
+                pump_consumption += 3.0 * i_ca_influx * 0.001
+
+            # ATP ODE: d[ATP]/dt = Synthesis - PumpConsumption
+            datp = atp_synthesis_rate * 0.001 - pump_consumption
+
+            # Metabolic feedback: scale pump efficiency if ATP < 0.2 mM
+            # This affects calcium pump time constant (tau_ca) and Na/K pump efficiency
+            # Applied in the next time step via parameter scaling
+            if atp_i_val < ATP_PUMP_FAILURE_THRESHOLD:
+                # Pump failure: reduce synthesis efficiency
+                datp *= atp_i_val / ATP_PUMP_FAILURE_THRESHOLD
+
+            # Clamp ATP to physiological bounds
+            if atp_i_val <= ATP_MIN_M_M and datp < 0.0:
+                datp = abs(datp) * 0.5
+            elif atp_i_val >= ATP_MAX_M_M and datp > 0.0:
+                datp = -abs(datp) * 0.5
+
+            dydt[off_atp + i] = datp
 
     # Dendritic filter ODEs (outside main loop — not per-compartment)
     if use_dfilter_primary == 1:

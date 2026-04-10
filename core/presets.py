@@ -66,11 +66,12 @@ def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
         MorphologyParams, ChannelParams, CalciumParams,
         EnvironmentParams, SimulationParams,
         StimulationLocationParams, DendriticFilterParams, AnalysisParams,
-        PresetModeParams,
+        PresetModeParams, MetabolismParams,
     )
     _copy_defaults(cfg.morphology,        MorphologyParams())
     _copy_defaults(cfg.channels,          ChannelParams())
     _copy_defaults(cfg.calcium,           CalciumParams())
+    _copy_defaults(cfg.metabolism,       MetabolismParams())
     _copy_defaults(cfg.env,               EnvironmentParams())
     _copy_defaults(cfg.stim,              SimulationParams())
     _copy_defaults(cfg.stim_location,     StimulationLocationParams())
@@ -112,6 +113,7 @@ def _apply_k_mode(cfg: FullModelConfig) -> None:
 
     Baseline (sleep): Rest Vm = -75mV, bursty. Enable ITCa (2.0), Ih (0.02). Use alpha stimulus (8uA) at 20ms to trigger LTS burst.
     Activated (awake): Rest Vm = -60mV, tonic relay. Iext = 8.0 (tonic drive), same channels, tonic firing because ITCa is inactivated.
+    Delta_oscillator: Self-sustained delta oscillations at ~2 Hz via Ih + I_T interaction with constant hyperpolarization.
     """
     if cfg.preset_modes.k_mode == "baseline":
         # Sleep/drowsy: hyperpolarized state → I_T de-inactivates → LTS bursting on alpha trigger
@@ -121,6 +123,13 @@ def _apply_k_mode(cfg: FullModelConfig) -> None:
         cfg.channels.gIh_max = 0.02
         cfg.channels.gTCa_max = 2.0
         cfg.channels.EL = -75.0  # Rest Vm = -75mV (sleep)
+    elif cfg.preset_modes.k_mode == "delta_oscillator":
+        # Self-sustained delta oscillations: constant hyperpolarization + strong Ih + I_T
+        cfg.stim.stim_type = "const"
+        cfg.stim.Iext = -3.0  # Constant hyperpolarization to drive Ih activation
+        cfg.channels.gIh_max = 0.05  # Increased Ih for pacemaker activity
+        cfg.channels.gTCa_max = 2.0  # I_T for burst generation
+        cfg.channels.EL = -70.0  # Rest Vm slightly hyperpolarized
     else:
         # Activated: tonic relay firing (I_T mostly inactivated at depolarized Vm)
         cfg.stim.stim_type = "const"
@@ -160,18 +169,26 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
     cfg.calcium.dynamic_Ca = True
     cfg.channels.enable_ICa = True
     cfg.channels.enable_SK = False  # SK may not work under ATP depletion
-    
+
+    # Enable dynamic ATP metabolism for hypoxia pathology
+    cfg.metabolism.enable_dynamic_atp = True
+
     if cfg.preset_modes.hypoxia_mode == "terminal":
         # Terminal stage: profound depolarization block and pump collapse.
+        # ATP synthesis stops completely, K_ATP fully opens, pumps fail
+        cfg.metabolism.atp_synthesis_rate = 0.01  # Severe metabolic failure
+        cfg.morphology.gL_trunk_mult = 10.0  # Massive demyelination-like leak in trunk
         cfg.channels.EK = -45.0
         cfg.channels.EL = -40.0
         cfg.channels.gL = 0.4
         cfg.calcium.tau_Ca = 1200.0
         cfg.channels.gCa_max = 0.10
-        cfg.stim.stim_type = "const"
+        cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 80.0
     else:
         # Progressive stage: short early spiking epoch, then attenuation.
+        # Reduced ATP synthesis causes gradual depletion, K_ATP opens, spiking slows
+        cfg.metabolism.atp_synthesis_rate = 0.15  # Reduced synthesis (nmol/cm²/s)
         cfg.channels.EK = -60.0
         cfg.channels.EL = -50.0
         cfg.channels.gL = 0.15
@@ -231,6 +248,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # These will scale automatically with soma area - presets remain valid
         # for any soma diameter in physiological range (15-30 µm)
         cfg.morphology.d_soma = 20e-4  # Mainen et al 1996: ~20 µm ± 2 µm
+        cfg.morphology.N_trunk = 10     # Standardized reduced model
         cfg.morphology.N_ais = 3       # Axon initial segment compartments
         cfg.morphology.gNa_ais_mult = 40.0  # AIS has 40× higher Na than soma
         cfg.morphology.gK_ais_mult = 5.0    # AIS has 5× higher K than soma
@@ -243,7 +261,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
         cfg.calcium.tau_Ca = 200.0
-        cfg.calcium.B_Ca = 1e-5
+        cfg.calcium.B_Ca = 1e-5  # v12.0: Reverted to 1e-5 (was 1e-7)
         cfg.channels.enable_ICa = True  # L-type calcium channel
         cfg.channels.gCa_max = 0.08  # Moderate ICa for calcium dynamics
         cfg.channels.gSK_max = 1.2  # SK channel for calcium-dependent adaptation
@@ -295,11 +313,14 @@ def apply_preset(cfg: FullModelConfig, name: str):
     elif "alpha-Motoneuron" in name:
         cfg.morphology.single_comp = False
         cfg.stim_location.location = "dendritic_filtered"
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 100.0, 30.0, 0.3
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 100.0, 30.0, 0.1
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -77.0, -60.0
         cfg.channels.Cm = 1.5
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
-        cfg.morphology.d_soma = 60e-4
+        cfg.morphology.d_soma = 70e-4
+        cfg.morphology.N_trunk = 10     # Standardized reduced model
+        cfg.morphology.d_ais = 4e-4    # Match large soma (60 μm)
+        cfg.morphology.d_trunk = 5e-4  # Match large soma (60 μm)
         cfg.morphology.N_ais = 5
         cfg.morphology.Ra = 70.0
         
@@ -307,12 +328,12 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.dynamic_Ca = True
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
-        cfg.calcium.tau_Ca = 200.0
-        cfg.calcium.B_Ca = 1e-5
+        cfg.calcium.tau_Ca = 50.0  # v12.0: Fast initial buffering (was 200.0)
+        cfg.calcium.B_Ca = 2e-6  # v12.0: Large volume = high dilution (was 1e-5)
         cfg.channels.enable_ICa = True  # L-type calcium channels for PICs
         cfg.channels.gCa_max = 0.08  # Moderate L-type Ca for persistent inward currents
         cfg.channels.enable_SK = True  # SK channels for AHP
-        cfg.channels.gSK_max = 1.0  # SK for afterhyperpolarization
+        cfg.channels.gSK_max = 2.0  # v12.0: Reduced from 4.0 to 2.0 (was 1.0)
         
         # IA channel: Moderate for frequency adaptation and spike-frequency accommodation
         cfg.channels.enable_IA = True
@@ -337,6 +358,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 45.0, -85.0, -68.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 22.0, 2.3
         cfg.morphology.d_soma = 25e-4
+        cfg.morphology.N_trunk = 10     # Standardized reduced model
         cfg.morphology.N_ais = 3
         cfg.morphology.gNa_ais_mult = 30.0
         cfg.channels.enable_SK = True  # Re-enable SK - critical for Purkinje physiology
@@ -346,8 +368,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.dynamic_Ca = True
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
-        cfg.calcium.tau_Ca = 150.0  # Fast extrusion (Purkinje: excellent calcium buffering)
-        cfg.calcium.B_Ca = 1e-5  # Calibrated conversion: keeps spike-driven Ca transients in physiological nM-µM range
+        cfg.calcium.tau_Ca = 80.0  # v12.0: Purkinje extreme calcium buffering (was 150.0)
+        cfg.calcium.B_Ca = 1e-5  # v12.0: Reverted to 1e-5 (was 1e-7)
         cfg.channels.enable_ICa = True  # L-type calcium channels
         cfg.channels.gCa_max = 0.08  # Physiological L-type calcium conductance
         
@@ -365,6 +387,24 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.alpha_tau = 2.0
         cfg.stim.Iext = 32.0
 
+        # DUAL STIMULATION: Add noisy dendritic inhibition (granular layer)
+        from core.dual_stimulation import DualStimulationConfig
+        cfg.dual_stimulation = DualStimulationConfig(
+            enabled=True,
+            primary_location="soma",
+            primary_stim_type="const",
+            primary_Iext=30.0,
+            secondary_location="dendritic_filtered",
+            secondary_stim_type="GABAA",
+            secondary_Iext=15.0,
+            secondary_train_type="poisson",
+            secondary_train_freq_hz=60.0,
+            secondary_train_duration_ms=5000.0,
+            secondary_distance_um=200.0,
+            secondary_space_constant_um=180.0,
+            secondary_tau_dendritic_ms=15.0
+        )
+
     # --- 6. ТАЛАМИЧЕСКИЙ РЕЛЕ-НЕЙРОН (Ih + IT + Ca-dynamics) ---
     elif "Thalamic" in name:
         # Thalamocortical relay neuron: T-type Ca²⁺ (I_T) drives low-threshold
@@ -380,6 +420,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Ih: hyperpolarization-activated cation current — essential for sag and rebound
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.03
+        cfg.channels.E_Ih = -43.0  # Standardized reversal potential
         # I_T: low-threshold T-type Ca²⁺ (CaV3.x) — replaces L-type for LTS bursting
         cfg.channels.enable_ITCa = True
         cfg.channels.gTCa_max = 2.0     # Destexhe 1998: 2.0 mS/cm² somatic density
@@ -389,7 +430,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
         cfg.calcium.tau_Ca = 200.0
-        cfg.calcium.B_Ca = 1e-5
+        cfg.calcium.B_Ca = 2e-5  # v12.0: Thalamic calcium conversion factor (was 1e-5)
         cfg.morphology.d_soma = 25e-4
         cfg.stim.jacobian_mode = 'native_hines'
         # v12.0: k_mode overlay handles stimulus (baseline=alpha burst, activated=tonic)
@@ -399,17 +440,18 @@ def apply_preset(cfg: FullModelConfig, name: str):
 
     # --- 7. ПАТОЛОГИЯ: РАССЕЯННЫЙ СКЛЕРОЗ (Демиелинизация) ---
     elif "Multiple Sclerosis" in name:
-        apply_preset(cfg, "alpha-Motoneuron (Powers 2001)")
-        # Severe demyelination profile:
-        # - high axial resistance (internodal conduction impairment),
-        # - high leak shunt + higher effective membrane capacitance (myelin loss),
-        # - reduced Na drive to favor distal propagation failure/block.
-        cfg.morphology.Ra = 900.0
-        cfg.channels.gL = 3.2
-        cfg.channels.gNa_max = 45.0
-        cfg.channels.Cm = 6.0
+        apply_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
+        # Authentic demyelination model: axon-specific scaling
+        # Soma remains healthy (gL=0.02, Cm=0.75), but axon trunk/branches have increased leak
+        # This creates "Conduction Delay/Block" where soma spikes but axon conduction is impaired
+        cfg.channels.gL = 0.02  # Soma remains healthy
+        cfg.channels.Cm = 0.75  # Soma remains healthy
+        cfg.morphology.gL_trunk_mult = 15.0  # Moderate leak in demyelinated segments (was 80.0)
+        cfg.morphology.Cm_trunk_mult = 3.0  # Moderately increased capacitance (was 10.0)
+        cfg.morphology.gNa_trunk_mult = 0.5  # Reduced sodium in internodes (was 0.2)
+        cfg.morphology.Ra = 400.0  # Elevated axial resistance (was 900.0)
         cfg.stim.jacobian_mode = 'native_hines'
-        # Keep the same input class as control; pathology should emerge from membrane/cable changes.
+        # Keep the same input class as control; pathology should emerge from axon-specific changes.
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.5
         cfg.stim.Iext = 50.0
@@ -417,7 +459,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 8. ПАТОЛОГИЯ: ЭПИЛЕПСИЯ (SCN1A GAIN-OF-FUNCTION) ---
     elif "Epilepsy" in name:
         apply_preset(cfg, "FS Interneuron (Wang-Buzsaki)")
-        cfg.channels.gNa_max = 200.0  # Gain-of-function: 120 → 200 (SCN1A mutation)
+        cfg.channels.gNa_max = 180.0  # Gain-of-function: 120 → 180 (SCN1A mutation)
         cfg.channels.enable_IA = False
         # Enable calcium channels for pathological calcium dynamics
         cfg.channels.enable_ICa = True  # L-type calcium channel
@@ -430,6 +472,24 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 1.0
         cfg.stim.Iext = 30.0
+
+        # DUAL STIMULATION: Add depolarizing GABAA inhibition (disinhibition model)
+        from core.dual_stimulation import DualStimulationConfig
+        cfg.dual_stimulation = DualStimulationConfig(
+            enabled=True,
+            primary_location="soma",
+            primary_stim_type="const",
+            primary_Iext=30.0,
+            secondary_location="dendritic_filtered",
+            secondary_stim_type="GABAA",
+            secondary_Iext=10.0,
+            secondary_train_type="poisson",
+            secondary_train_freq_hz=100.0,
+            secondary_train_duration_ms=5000.0,
+            secondary_distance_um=75.0,
+            secondary_space_constant_um=100.0,
+            secondary_tau_dendritic_ms=5.0
+        )
 
     # --- 9. ПАТОЛОГИЯ: АЛЬЦГЕЙМЕР (CALCIUM TOXICITY - SLOW EXTRUSION) ---
     elif "Alzheimer's" in name:
@@ -450,13 +510,16 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.EL = -45.0  # Reduced: -65 → -45 (Na+ accumulation)
         # CALCIUM OVERLOAD: Hypoxia causes Ca2+ accumulation and mitochondrial dysfunction
         cfg.calcium.tau_Ca = 900.0  # Slow clearance: pump failure (fixed from 1500ms)
-        cfg.calcium.B_Ca = 1e-5  # Calibrated conversion for hypoxic overload scenarios
+        cfg.calcium.B_Ca = 2e-5  # v12.0: Slower metabolic suffocation (was 1e-5)
         cfg.channels.gCa_max = 0.08  # Elevated ICa - PHYSIOLOGICAL range (was 1.2, too high)
         cfg.stim.jacobian_mode = 'native_hines'
         # Pathology: depolarization block after 1-2 spikes due to ion imbalance + Ca overload
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.0
         cfg.stim.Iext = 80.0  # Higher stim, but fails due to block
+        # Enable dynamic ATP metabolism for hypoxia pathology
+        cfg.metabolism.enable_dynamic_atp = True
+        cfg.metabolism.atp_synthesis_rate = 0.1  # Reduced synthesis causes gradual depletion
 
     # --- 11. С-ВОЛОКНО (БОЛЬ / БЕЗМИЕЛИНОВОЕ) ---
     elif "C-Fiber" in name:
@@ -467,6 +530,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -80.0, -60.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
         cfg.morphology.d_soma = 10e-4
+        cfg.morphology.N_trunk = 10     # Standardized reduced model
         cfg.morphology.d_trunk = 0.8e-4
         cfg.morphology.Ra = 200.0
         cfg.morphology.N_ais = 0
@@ -489,15 +553,23 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Ih: provides subthreshold resonance in theta band (Magee 1998)
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.02  # Increased for theta resonance
+        cfg.channels.E_Ih = -43.0  # Standardized reversal potential
         # IA: physiological density for spike-frequency adaptation
         # (Storm 1990: gA ~0.3-0.5 mS/cm² somatic; NOT the unphysiological 10.0)
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.3  # Standard for CA1
-        # v12.0: Enable SK/IM for proper adaptation, but keep values low
-        cfg.channels.enable_SK = False
-        cfg.channels.enable_IM = False
-        cfg.channels.enable_ICa = False
-        cfg.calcium.dynamic_Ca = False
+        # v12.0: Enable calcium dynamics for proper adaptation
+        cfg.channels.enable_SK = True
+        cfg.channels.enable_IM = True
+        cfg.channels.enable_ICa = True
+        cfg.calcium.dynamic_Ca = True
+        cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
+        cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
+        cfg.calcium.tau_Ca = 100.0  # v12.0: CA1 calcium decay (was disabled)
+        cfg.calcium.B_Ca = 1e-5  # v12.0: CA1 calcium conversion factor (was disabled)
+        cfg.channels.gCa_max = 0.08  # L-type calcium for adaptation
+        cfg.channels.gSK_max = 0.8  # SK for calcium-dependent adaptation
+        cfg.channels.gIM_max = 0.04  # M-type for slow adaptation
         cfg.morphology.d_soma = 20e-4
         # v12.0: Dual-drive stimulation for theta rhythm
         # Primary: weak tonic current for readiness
@@ -568,6 +640,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.gTCa_max = 5.0     # High T-type: drives robust spindle-like bursts
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.01     # Lower Ih than relay — less sag, more burst
+        cfg.channels.E_Ih = -43.0  # Standardized reversal potential
         cfg.channels.enable_ICa = False
         cfg.channels.enable_SK = False
         cfg.calcium.dynamic_Ca = True
@@ -595,18 +668,20 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
         # Strong I_A: key feature — delays spike onset by hundreds of ms
         cfg.channels.enable_IA = True
-        cfg.channels.gA_max = 2.0       # High I_A density (Nisenbaum & Wilson 1995)
+        cfg.channels.gA_max = 3.0       # High I_A density to guarantee late-spiking phenotype
         # Ih: inward rectification contributes to ramp-like depolarization
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.01
+        cfg.channels.E_Ih = -43.0  # Standardized reversal potential
         cfg.channels.enable_ICa = False
         cfg.channels.enable_SK = False
         cfg.calcium.dynamic_Ca = False
         cfg.morphology.d_soma = 15e-4   # Small soma (12-20 µm)
         cfg.stim.jacobian_mode = 'native_hines'
-        # Moderate const stimulus: shows characteristic delayed firing onset
-        cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 6.0
+        # Alpha stimulus with slow tau to showcase characteristic delayed firing onset
+        cfg.stim.stim_type = 'alpha'
+        cfg.stim.alpha_tau = 20.0
+        cfg.stim.Iext = 15.0  # Increased slightly to overcome IA and slow tau
 
     # --- 18. ХОЛИНЕРГИЧЕСКАЯ НЕЙРОМОДУЛЯЦИЯ (ACh: Бодрствование vs Сон) ---
     elif "Cholinergic" in name or "ACh" in name:
@@ -626,6 +701,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Moderate Ih for subthreshold dynamics
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.01
+        cfg.channels.E_Ih = -43.0  # Standardized reversal potential
         cfg.stim.jacobian_mode = 'native_hines'
         # Const stimulus: with I_M → adapting; user blocks gIM → tonic firing
         cfg.stim.stim_type = 'const'
@@ -653,6 +729,12 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 40.0            # Same drive as FS base, but fewer spikes
 
+        # Fever mode: temperature-triggered failure
+        if cfg.preset_modes.dravet_mode == "febrile":
+            cfg.env.T_celsius = 40.0  # Fever temperature
+            cfg.channels.gNa_max = 42.0  # Further 30% reduction from baseline (60 → 42)
+            cfg.env.Q10_Na = 3.0  # Thermal hyper-sensitivity: Na channels become more sensitive to heat
+
     # --- 20. PASSIVE CABLE (LINEAR DECAY) ---
     elif "Passive Cable" in name:
         # Pure passive membrane: no active channels, only leak conductance.
@@ -668,13 +750,13 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Disable ALL active channels
         cfg.channels.gNa_max = 0.0
         cfg.channels.gK_max = 0.0
+        cfg.channels.enable_NaR = False
         cfg.channels.enable_IM = False
         cfg.channels.enable_Ih = False
         cfg.channels.enable_IA = False
         cfg.channels.enable_SK = False
         cfg.channels.enable_ICa = False
         cfg.channels.enable_ITCa = False
-        cfg.channels.enable_NaR = False
 
         # Only leak conductance (high resistance for clear decay)
         cfg.channels.gL = 0.1
@@ -686,6 +768,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.env.T_celsius = 37.0
 
         cfg.morphology.d_soma = 20e-4
+        cfg.morphology.N_trunk = 10     # Standardized reduced model
         cfg.morphology.N_ais = 0
         cfg.morphology.d_trunk = 2e-4
         cfg.morphology.Ra = 150.0

@@ -34,8 +34,10 @@ cdef inline double get_stim_current_fast(
         if t < t0:
             return 0.0
         dt = t - t0
-        tau_rise = 0.5
-        tau_decay = 3.0
+        # Use centralized tau calculation logic (consistent with _calculate_syn_tau in rhs.py)
+        cdef double TAU_RISE_RATIO = 10.0
+        tau_rise = max(0.2, min(1.0, atau / TAU_RISE_RATIO))
+        tau_decay = max(2.0, min(10.0, atau))
         t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * log(tau_decay / tau_rise)
         norm = exp(-t_peak / tau_decay) - exp(-t_peak / tau_rise)
         return fabs(iext) * (exp(-dt / tau_decay) - exp(-dt / tau_rise)) / norm
@@ -43,8 +45,10 @@ cdef inline double get_stim_current_fast(
         if t < t0:
             return 0.0
         dt = t - t0
-        tau_rise = 1.0
-        tau_decay = 7.0
+        # Use centralized tau calculation logic (consistent with _calculate_syn_tau in rhs.py)
+        cdef double TAU_RISE_RATIO = 10.0
+        tau_rise = max(0.5, min(2.0, atau / TAU_RISE_RATIO))
+        tau_decay = max(6.0, min(20.0, atau))
         t_peak = tau_rise * tau_decay / (tau_decay - tau_rise) * log(tau_decay / tau_rise)
         norm = exp(-t_peak / tau_decay) - exp(-t_peak / tau_rise)
         return -fabs(iext) * (exp(-dt / tau_decay) - exp(-dt / tau_rise)) / norm
