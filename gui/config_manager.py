@@ -235,10 +235,7 @@ class ConfigManager(QObject):
         d = float(self.config.morphology.d_soma)
         area = np.pi * d * d
         
-        if self._dual_stim_widget is not None and bool(self._dual_stim_widget.config.enabled):
-            i_density = float(self._dual_stim_widget.config.primary_Iext)
-        else:
-            i_density = float(self.config.stim.Iext)
+        i_density = float(self.config.stim.Iext)
         
         return float(density_to_absolute_current(i_density, area))
     

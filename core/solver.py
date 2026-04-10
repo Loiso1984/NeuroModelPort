@@ -1,6 +1,7 @@
 import numpy as np
 import copy
 import logging
+import hashlib
 from scipy.integrate import solve_ivp
 from concurrent.futures import ProcessPoolExecutor
 
@@ -15,6 +16,13 @@ from core.validation import estimate_simulation_runtime, validate_simulation_con
 
 
 logger = logging.getLogger(__name__)
+
+
+def _stable_seed_from_values(*values) -> int:
+    """Deterministic 32-bit seed from value tuple (stable across Python sessions)."""
+    payload = "|".join(str(v) for v in values).encode("utf-8")
+    digest = hashlib.blake2s(payload, digest_size=4).digest()
+    return int.from_bytes(digest, byteorder="little", signed=False)
 
 
 class SimulationResult:
@@ -202,7 +210,7 @@ class NeuronSolver:
         morph  = MorphologyBuilder.build(cfg)
         n_comp = morph['N_comp']
 
-        y0 = self.registry.compute_initial_states(-65.0, cfg)
+        y0 = self.registry.compute_initial_states(cfg.channels.EL, cfg)
 
         s_map = {
             'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 3,
@@ -277,7 +285,12 @@ class NeuronSolver:
 
         # Generate ephemeral primary train
         # Create a stable seed based on the parameters
-        seed_hash = hash((cfg.stim.synaptic_train_freq_hz, cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start)) % (2**32 - 1)
+        seed_hash = _stable_seed_from_values(
+            cfg.stim.synaptic_train_freq_hz,
+            cfg.stim.synaptic_train_duration_ms,
+            cfg.stim.pulse_start,
+            cfg.stim.synaptic_train_type,
+        )
         eff_event_times_1 = generate_effective_event_times(
             cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
             cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times, seed_hash=seed_hash
@@ -286,9 +299,12 @@ class NeuronSolver:
         # Generate ephemeral secondary train
         eff_event_times_2 = np.zeros(0, dtype=np.float64)
         if dual_stim_enabled == 1 and dual_cfg is not None:
-            seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
-                               getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
-                               getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
+            seed_hash_2 = _stable_seed_from_values(
+                getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                getattr(dual_cfg, 'secondary_start', 0.0),
+                getattr(dual_cfg, 'secondary_train_type', 'none'),
+            )
             eff_event_times_2 = generate_effective_event_times(
                 getattr(dual_cfg, 'secondary_train_type', 'none'),
                 getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
@@ -378,8 +394,8 @@ class NeuronSolver:
             "dual_stim_enabled": dual_stim_enabled,
             "gna_max": cfg.channels.gNa_max,
             "gk_max": cfg.channels.gK_max,
-            "e_rev_syn_primary": getattr(cfg.channels, 'e_rev_syn_primary', 0.0),
-            "e_rev_syn_secondary": getattr(cfg.channels, 'e_rev_syn_secondary', -75.0),
+            "e_rev_syn_primary": cfg.channels.e_rev_syn_primary,
+            "e_rev_syn_secondary": cfg.channels.e_rev_syn_secondary,
             "stype_2": stype_2,
             "iext_2": iext_2,
             "t0_2": t0_2,
@@ -726,11 +742,6 @@ class NeuronSolver:
         dual_cfg = getattr(cfg, "dual_stimulation", None)
         if dual_cfg is not None and hasattr(dual_cfg, 'enabled') and dual_cfg.enabled:
             dual_stim_enabled = 1
-        use_dfilter_primary = int(
-            stim_mode == 2
-            and cfg.dendritic_filter.enabled
-            and cfg.dendritic_filter.tau_dendritic_ms > 0.0
-        )
         
         stype = s_map.get(cfg.stim.stim_type, 0)
         iext = cfg.stim.Iext
@@ -780,9 +791,12 @@ class NeuronSolver:
             # Generate event times for secondary stimulus (synaptic train)
             event_times_arr_2 = np.zeros(0, dtype=np.float64)
             if stype_2 >= 4:  # Conductance-based synapse
-                seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
-                                   getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
-                                   getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
+                seed_hash_2 = _stable_seed_from_values(
+                    getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                    getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                    getattr(dual_cfg, 'secondary_start', 0.0),
+                    getattr(dual_cfg, 'secondary_train_type', 'none'),
+                )
                 event_times_arr_2 = generate_effective_event_times(
                     getattr(dual_cfg, 'secondary_train_type', 'none'),
                     getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
@@ -887,7 +901,12 @@ class NeuronSolver:
         rng_state = rng.get_state()['state'] if (stoch_gating or noise_sigma > 0) else None
 
         # Generate ephemeral primary train
-        seed_hash = hash((cfg.stim.synaptic_train_freq_hz, cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start)) % (2**32 - 1)
+        seed_hash = _stable_seed_from_values(
+            cfg.stim.synaptic_train_freq_hz,
+            cfg.stim.synaptic_train_duration_ms,
+            cfg.stim.pulse_start,
+            cfg.stim.synaptic_train_type,
+        )
         event_times_arr = generate_effective_event_times(
             cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
             cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times, seed_hash=seed_hash
@@ -896,9 +915,12 @@ class NeuronSolver:
         # Generate ephemeral secondary train
         event_times_arr_2 = np.zeros(0, dtype=np.float64)
         if dual_stim_enabled == 1 and dual_cfg is not None:
-            seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
-                               getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
-                               getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
+            seed_hash_2 = _stable_seed_from_values(
+                getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                getattr(dual_cfg, 'secondary_start', 0.0),
+                getattr(dual_cfg, 'secondary_train_type', 'none'),
+            )
             event_times_arr_2 = generate_effective_event_times(
                 getattr(dual_cfg, 'secondary_train_type', 'none'),
                 getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
@@ -926,8 +948,8 @@ class NeuronSolver:
             el                  = float(cc.EL),
             eih                 = float(cc.E_Ih),
             ea                  = float(cc.EK),  # A-current uses K reversal potential
-            e_rev_syn_primary   = float(getattr(cc, 'e_rev_syn_primary', 0.0)),
-            e_rev_syn_secondary = float(getattr(cc, 'e_rev_syn_secondary', -75.0)),
+            e_rev_syn_primary   = float(cc.e_rev_syn_primary),
+            e_rev_syn_secondary = float(cc.e_rev_syn_secondary),
             cm_v                = morph["Cm_v"].astype(np.float64),
             l_data              = morph["L_data"].astype(np.float64),
             l_indices           = morph["L_indices"].astype(np.int32),
