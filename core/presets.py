@@ -81,9 +81,20 @@ def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
 
 
 def _copy_defaults(target, source) -> None:
-    """Copy every field from *source* (a fresh default instance) to *target*."""
+    """Copy every field from *source* (a fresh default instance) to *target*.
+    
+    Uses deep recursive update to preserve object identity for nested Pydantic models.
+    """
     for field_name in type(source).model_fields:
-        setattr(target, field_name, getattr(source, field_name))
+        target_val = getattr(target, field_name)
+        source_val = getattr(source, field_name)
+        
+        # If it's a nested Pydantic model, recurse to preserve identity
+        if hasattr(target_val, 'model_fields') and hasattr(source_val, 'model_fields'):
+            _copy_defaults(target_val, source_val)
+        else:
+            # Otherwise, just set the value (preserves the parent object identity)
+            setattr(target, field_name, source_val)
 
 
 def _apply_l5_mode(cfg: FullModelConfig) -> None:
@@ -116,10 +127,11 @@ def _apply_k_mode(cfg: FullModelConfig) -> None:
     Delta_oscillator: Self-sustained delta oscillations at ~2 Hz via Ih + I_T interaction with constant hyperpolarization.
     """
     if cfg.preset_modes.k_mode == "baseline":
-        # Sleep/drowsy: hyperpolarized state → I_T de-inactivates → LTS bursting on alpha trigger
-        cfg.stim.stim_type = "alpha"
-        cfg.stim.alpha_tau = 20.0  # v12.0: 20ms alpha pulse to trigger burst
-        cfg.stim.Iext = 8.0  # v12.0: 8uA alpha stimulus
+        # Sleep/drowsy: hyperpolarizing pulse de-inactivates I_T → Post-Inhibitory Rebound burst
+        cfg.stim.stim_type = "pulse"
+        cfg.stim.Iext = -5.0  # Hyperpolarizing pulse
+        cfg.stim.pulse_start = 10.0
+        cfg.stim.pulse_dur = 100.0
         cfg.channels.gIh_max = 0.02
         cfg.channels.gTCa_max = 2.0
         cfg.channels.EL = -75.0  # Rest Vm = -75mV (sleep)
@@ -222,6 +234,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.single_comp = True
         cfg.morphology.d_soma = 500e-4  # 500 µm giant axon diameter
         cfg.stim.Iext = 10.0  # Classic HH: ~68 Hz tonic firing, Vmax ≈ 40 mV
+        cfg.stim.jacobian_mode = 'native_hines'  # Use native Hines for Squid Axon
 
     # --- 2. БАЗОВЫЙ ПРЕСЕТ: ПИРАМИДАЛЬНЫЙ L5 (Млекопитающие) ---
     elif "Pyramidal L5" in name:
@@ -380,7 +393,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # IA channel: High for complex spike dynamics and dendritic integration
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.4   # IA for complex spike dynamics
-        cfg.channels.E_A = -77.0    # K+ reversal potential
+        # E_A is now a property that returns EK
         
         # Tuned to preserve tonic Purkinje spiking and avoid a silent island
         cfg.stim.stim_type = 'const'
@@ -388,12 +401,13 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 32.0
 
         # DUAL STIMULATION: Add noisy dendritic inhibition (granular layer)
+        # Primary stimulus is set on cfg.stim, secondary on dual_stimulation
         from core.dual_stimulation import DualStimulationConfig
+        cfg.stim_location.location = "soma"
+        cfg.stim.stim_type = "const"
+        cfg.stim.Iext = 30.0  # Primary stimulus
         cfg.dual_stimulation = DualStimulationConfig(
             enabled=True,
-            primary_location="soma",
-            primary_stim_type="const",
-            primary_Iext=30.0,
             secondary_location="dendritic_filtered",
             secondary_stim_type="GABAA",
             secondary_Iext=15.0,
@@ -451,6 +465,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.gNa_trunk_mult = 0.5  # Reduced sodium in internodes (was 0.2)
         cfg.morphology.Ra = 400.0  # Elevated axial resistance (was 900.0)
         cfg.stim.jacobian_mode = 'native_hines'
+        # Set delay target to Terminal to show the "Wow" effect of conduction block immediately
+        cfg.preset_modes.delay_target = "Terminal"
         # Keep the same input class as control; pathology should emerge from axon-specific changes.
         cfg.stim.stim_type = 'alpha'
         cfg.stim.alpha_tau = 1.5
@@ -467,6 +483,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.dynamic_Ca = True  # Enable calcium dynamics
         cfg.calcium.tau_Ca = 300.0  # Moderately impaired clearance
         cfg.calcium.B_Ca = 1e-5  # Calibrated conversion for pathological accumulation without runaway Ca
+        # Chloride Shift: depolarized GABA reversal (pathological disinhibition)
+        cfg.channels.e_rev_syn_secondary = -40.0  # Depolarized from -75 to -40 mV
         # Const stim to show sustained hyperexcitability
         # Validated: ~29 spikes, 197 Hz, Vmax ≈ 48 mV (higher amp than FS base)
         cfg.stim.stim_type = 'const'
@@ -474,12 +492,13 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 30.0
 
         # DUAL STIMULATION: Add depolarizing GABAA inhibition (disinhibition model)
+        # Primary stimulus is set on cfg.stim, secondary on dual_stimulation
         from core.dual_stimulation import DualStimulationConfig
+        cfg.stim_location.location = "soma"
+        cfg.stim.stim_type = "const"
+        cfg.stim.Iext = 30.0  # Primary stimulus
         cfg.dual_stimulation = DualStimulationConfig(
             enabled=True,
-            primary_location="soma",
-            primary_stim_type="const",
-            primary_Iext=30.0,
             secondary_location="dendritic_filtered",
             secondary_stim_type="GABAA",
             secondary_Iext=10.0,
@@ -575,6 +594,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # Primary: weak tonic current for readiness
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 2.0
+        cfg.stim.pulse_start = 0.0
         cfg.stim.t_sim = 5000.0  # Match secondary train duration
         cfg.stim.dt_eval = 0.5  # Optimized for faster testing (0.5ms sampling)
         cfg.stim.noise_sigma = 0.8  # Stochastic facilitation
@@ -582,10 +602,6 @@ def apply_preset(cfg: FullModelConfig, name: str):
         from core.dual_stimulation import DualStimulationConfig
         cfg.dual_stimulation = DualStimulationConfig(
             enabled=True,
-            primary_location="soma",
-            primary_stim_type="const",
-            primary_Iext=2.0,
-            primary_start=0.0,
             secondary_location="soma",
             secondary_stim_type="AMPA",
             secondary_Iext=5.0,

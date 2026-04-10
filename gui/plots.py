@@ -27,6 +27,7 @@ CHAN_COLORS = {
     'Leak': (50,  160, 50,  150),
     'Ih':   (160, 50,  200, 180),
     'ICa':  (250, 150, 0,   200),
+    'KATP': (249, 226, 175, 200),
     'IA':   (0,   200, 200, 180),
     'SK':   (200, 50,  160, 180),
 }
@@ -114,9 +115,10 @@ class OscilloscopeWidget(QWidget):
         super().__init__(parent)
         self._theme_name = "Default"
         self._line_width_scale = 1.0
-        self._grid_alpha = 0.2
-        self._title_font_px = 13
+        self._title_font_px = 14
+        self._grid_alpha = 0.15
         self._presentation_mode = False
+        self._scale_bar_mode = False
         self._delay_target_name = "Terminal"
         self._delay_custom_index = 1
         self._last_result = None
@@ -378,6 +380,13 @@ class OscilloscopeWidget(QWidget):
         self._cb_presentation.stateChanged.connect(self._on_view_settings_changed)
         vl2.addRow(self._cb_presentation)
 
+        self._cb_scale_bars = QCheckBox("Publication Mode (Scale Bars)")
+        self._cb_scale_bars.setChecked(False)
+        self._cb_scale_bars.setToolTip("Hide axes and show scale bars for publication-ready figures")
+        self._cb_scale_bars.setStyleSheet("color:#CBA6F7; font-size:11px;")
+        self._cb_scale_bars.stateChanged.connect(self._on_view_settings_changed)
+        vl2.addRow(self._cb_scale_bars)
+
         self._cb_show_spike_markers = QCheckBox("Show spike markers")
         self._cb_show_spike_markers.setChecked(True)
         self._cb_show_spike_markers.setStyleSheet("color:#CDD6F4; font-size:11px;")
@@ -501,6 +510,7 @@ class OscilloscopeWidget(QWidget):
         title_px_base = int(self._spin_title_px.value())
         grid_alpha_base = float(self._spin_grid_alpha.value())
         self._presentation_mode = bool(self._cb_presentation.isChecked())
+        self._scale_bar_mode = bool(self._cb_scale_bars.isChecked())
         if self._presentation_mode:
             self._line_width_scale = line_scale_base * 1.35
             self._title_font_px = title_px_base + 2
@@ -899,10 +909,74 @@ class OscilloscopeWidget(QWidget):
             )
         )
 
+        # Apply scale bar mode
+        if self._scale_bar_mode:
+            self._apply_scale_bar_mode(result)
+        else:
+            self._restore_normal_mode()
+
         self._p_v.autoRange()
         self._p_g.autoRange()
         self._p_i.autoRange()
         self._update_row_visibility()
+    
+    def _apply_scale_bar_mode(self, result):
+        """Hide axes and add scale bars for publication-ready figures."""
+        # Hide axes
+        for plot in [self._p_v, self._p_g, self._p_i]:
+            plot.hideAxis('left')
+            plot.hideAxis('bottom')
+            plot.hideAxis('right')
+            plot.hideAxis('top')
+            plot.getPlotItem().hideAxis('left')
+            plot.getPlotItem().hideAxis('bottom')
+        
+        # Add scale bars to voltage plot (bottom-right corner)
+        if hasattr(self, '_scale_bar_h') and self._scale_bar_h:
+            self._p_v.removeItem(self._scale_bar_h)
+            self._scale_bar_h = None
+        if hasattr(self, '_scale_bar_v') and self._scale_bar_v:
+            self._p_v.removeItem(self._scale_bar_v)
+            self._scale_bar_v = None
+        
+        # Time scale bar (50 ms)
+        t = result.t
+        if len(t) > 0:
+            t_range = t[-1] - t[0]
+            bar_x_start = t_range * 0.7
+            bar_x_end = bar_x_start + 50.0  # 50 ms
+            bar_y = -90  # Near bottom of voltage range
+            
+            self._scale_bar_h = pg.PlotCurveItem(
+                [bar_x_start, bar_x_end], [bar_y, bar_y],
+                pen=pg.mkPen(color='white', width=3)
+            )
+            self._p_v.addItem(self._scale_bar_h)
+            
+            # Voltage scale bar (20 mV)
+            bar_y_start = -80
+            bar_y_end = bar_y_start + 20.0  # 20 mV
+            bar_x = bar_x_start
+            
+            self._scale_bar_v = pg.PlotCurveItem(
+                [bar_x, bar_x], [bar_y_start, bar_y_end],
+                pen=pg.mkPen(color='white', width=3)
+            )
+            self._p_v.addItem(self._scale_bar_v)
+    
+    def _restore_normal_mode(self):
+        """Restore normal axis visibility."""
+        for plot in [self._p_v, self._p_g, self._p_i]:
+            plot.showAxis('left')
+            plot.showAxis('bottom')
+        
+        # Remove scale bars
+        if hasattr(self, '_scale_bar_h') and self._scale_bar_h:
+            self._p_v.removeItem(self._scale_bar_h)
+            self._scale_bar_h = None
+        if hasattr(self, '_scale_bar_v') and self._scale_bar_v:
+            self._p_v.removeItem(self._scale_bar_v)
+            self._scale_bar_v = None
 
     # ─────────────────────────────────────────────────────────────────
     #  UPDATE — Monte-Carlo cloud

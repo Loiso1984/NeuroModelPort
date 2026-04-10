@@ -26,16 +26,11 @@ if TYPE_CHECKING:
 
 
 class DualStimulationConfig(BaseModel):
-    """Configuration for dual stimulation with two independent stimuli (Pydantic model for JSON serialization)."""
+    """Configuration for dual stimulation with secondary stimulus only.
     
-    # Primary stimulus (e.g., excitatory)
-    primary_location: str = "soma"  # soma, ais, dendritic_filtered
-    primary_stim_type: str = "const"
-    primary_Iext: float = 10.0
-    primary_start: float = 10.0
-    primary_duration: float = 1.0
-    primary_alpha_tau: float = 2.0
-    primary_event_times: List[float] = Field(default_factory=list)  # Event queue for primary (e.g., [10, 20, 30] ms)
+    Primary stimulus is always configured in cfg.stim and cfg.stim_location.
+    This config only controls the optional secondary stimulus.
+    """
     
     # Secondary stimulus (e.g., inhibitory)
     secondary_location: str = "dendritic_filtered"
@@ -67,7 +62,6 @@ class DualStimulationState:
     
     def __init__(self, config: DualStimulationConfig):
         self.config = config
-        self.primary_filtered = 0.0
         self.secondary_filtered = 0.0
 
 
@@ -193,17 +187,12 @@ def create_dual_stimulation_preset() -> DualStimulationConfig:
     
     Demonstrates: Soma excitation + Dendritic GABA inhibition
     This is a classic neurophysiological scenario.
+    
+    Note: Primary stimulus must be configured separately via cfg.stim and cfg.stim_location.
+    This function only configures the secondary stimulus.
     """
     
     config = DualStimulationConfig()
-    
-    # Primary: Soma excitation (glutamatergic-like)
-    config.primary_location = "soma"
-    config.primary_stim_type = "alpha"  # EPSC-like
-    config.primary_Iext = 25.0  # Moderate excitation
-    config.primary_start = 10.0
-    config.primary_duration = 2.0
-    config.primary_alpha_tau = 2.0
     
     # Secondary: Dendritic inhibition (GABAergic)
     config.secondary_location = "dendritic_filtered"
@@ -226,17 +215,12 @@ def create_dual_stimulation_preset() -> DualStimulationConfig:
 def create_dual_stimulation_config_from_full(config: "FullModelConfig") -> DualStimulationConfig:
     """
     Convert FullModelConfig to DualStimulationConfig for backward compatibility.
+    
+    Note: Primary stimulus is always in cfg.stim and cfg.stim_location.
+    This function only creates the secondary config structure.
     """
     
     dual_config = DualStimulationConfig()
-    
-    # Use existing config as primary stimulus
-    dual_config.primary_location = config.stim_location.location
-    dual_config.primary_stim_type = config.stim.stim_type
-    dual_config.primary_Iext = config.stim.Iext
-    dual_config.primary_start = config.stim.pulse_start
-    dual_config.primary_duration = config.stim.pulse_dur
-    dual_config.primary_alpha_tau = config.stim.alpha_tau
     
     # Disable secondary by default
     dual_config.enabled = False
@@ -251,21 +235,7 @@ def validate_dual_stimulation_parameters(config: DualStimulationConfig) -> bool:
     Returns True if parameters are reasonable.
     """
     
-    # Check timing overlap
-    primary_end = config.primary_start + config.primary_duration
-    secondary_end = config.secondary_start + config.secondary_duration
-    
-    # Allow some overlap but warn if completely overlapping
-    if (config.primary_start <= config.secondary_start <= primary_end and
-        config.secondary_start <= primary_end <= secondary_end):
-        print(f"⚠️  Warning: Significant timing overlap between stimuli")
-        print(f"   Primary: {config.primary_start}-{primary_end} ms")
-        print(f"   Secondary: {config.secondary_start}-{secondary_end} ms")
-    
-    # Check current magnitudes
-    if abs(config.primary_Iext) > 200:
-        print(f"⚠️  Warning: Primary current very high: {config.primary_Iext} µA/cm²")
-    
+    # Check secondary current magnitude
     if abs(config.secondary_Iext) > 200:
         print(f"⚠️  Warning: Secondary current very high: {config.secondary_Iext} µA/cm²")
     
@@ -290,7 +260,5 @@ if __name__ == '__main__':
     validate_dual_stimulation_parameters(config)
     
     print("Dual Stimulation Configuration:")
-    print(f"Primary: {config.primary_location} {config.primary_stim_type} @ {config.primary_Iext} µA/cm²")
     print(f"Secondary: {config.secondary_location} {config.secondary_stim_type} @ {config.secondary_Iext} µA/cm²")
-    print(f"Timing: Primary {config.primary_start}-{config.primary_start + config.primary_duration} ms")
-    print(f"        Secondary {config.secondary_start}-{config.secondary_start + config.secondary_duration} ms")
+    print(f"Timing: Secondary {config.secondary_start}-{config.secondary_start + config.secondary_duration} ms")

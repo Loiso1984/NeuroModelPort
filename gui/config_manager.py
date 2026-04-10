@@ -112,19 +112,26 @@ class ConfigManager(QObject):
         """
         try:
             new_cfg = FullModelConfig.load_from_file(file_path)
-            # CRITICAL: Do not replace self.config object identity
-            # Use Pydantic v2's model_validate to properly reconstruct nested models
-            config_dict = new_cfg.model_dump()
-            # Reconstruct the config with proper Pydantic models (runs full validation)
-            updated_config = FullModelConfig.model_validate(config_dict)
             
-            # Update __dict__ to preserve object identity while using validated data
-            # This ensures forms/widgets holding references to self.config continue to work
-            self.config.__dict__.update(updated_config.__dict__)
+            # Helper to recursively update Pydantic models without replacing them
+            def _deep_update(target_obj, source_obj):
+                for field_name in target_obj.model_fields:
+                    target_val = getattr(target_obj, field_name)
+                    source_val = getattr(source_obj, field_name)
+                    
+                    # If it's a nested Pydantic model, recurse
+                    if hasattr(target_val, 'model_fields') and hasattr(source_val, 'model_fields'):
+                        _deep_update(target_val, source_val)
+                    else:
+                        # Otherwise, just set the value (preserves the parent object identity)
+                        setattr(target_obj, field_name, source_val)
+            
+            _deep_update(self.config, new_cfg)
             
             # Handle dual stimulation tab if present
             if self.config.dual_stimulation is not None and self._dual_stim_widget:
-                self._dual_stim_widget.config = self.config.dual_stimulation
+                # Same recursive update for dual stim
+                _deep_update(self._dual_stim_widget.config, self.config.dual_stimulation)
                 self._dual_stim_widget.update_ui_from_config()
             
             self.config_changed.emit()
@@ -151,89 +158,6 @@ class ConfigManager(QObject):
         else:
             self.config.dual_stimulation = None
         return dual_enabled
-    
-    def sync_stim_controls_with_dual_mode(self):
-        """
-        Disable conflicting primary-stim controls when dual stimulation is enabled.
-        
-        This method updates the UI widgets to reflect the dual stimulation state.
-        """
-        if self._dual_stim_widget is None or self._form_stim is None:
-            return
-        
-        dual_enabled = bool(self._dual_stim_widget.config.enabled)
-        if dual_enabled:
-            self._sync_primary_stim_preview_from_dual()
-        else:
-            # Restore canonical values from config when dual mode is off.
-            if self._form_stim:
-                self._form_stim.refresh()
-        
-        if self._form_stim:
-            overridden_stim_fields = (
-                "stim_type",
-                "Iext",
-                "pulse_start",
-                "pulse_dur",
-                "alpha_tau",
-                "stim_comp",
-            )
-            for field_name in overridden_stim_fields:
-                w = self._form_stim.widgets_map.get(field_name)
-                if w is not None:
-                    w.setEnabled(not dual_enabled)
-        
-        if self._form_stim_loc:
-            w_loc = self._form_stim_loc.widgets_map.get("location")
-            if w_loc is not None:
-                w_loc.setEnabled(not dual_enabled)
-        
-        if dual_enabled:
-            if self._form_stim:
-                self._form_stim.group_box.setTitle("Stimulation (Primary Overridden by Dual Stim)")
-            if self._form_stim_loc:
-                self._form_stim_loc.group_box.setTitle("Stimulus Location (Overridden by Dual Stim)")
-        else:
-            if self._form_stim:
-                self._form_stim.group_box.setTitle("Stimulation")
-            if self._form_stim_loc:
-                self._form_stim_loc.group_box.setTitle("Stimulus Location")
-    
-    def _sync_primary_stim_preview_from_dual(self):
-        """
-        Mirror active dual-primary stimulus into disabled main stim controls.
-        This removes ambiguity about which parameters actually drive the solver.
-        """
-        if self._dual_stim_widget is None or self._form_stim is None:
-            return
-        
-        dc = self._dual_stim_widget.config
-        if not bool(getattr(dc, "enabled", False)):
-            return
-        
-        self._set_stim_form_value("stim_type", dc.primary_stim_type)
-        self._set_stim_form_value("Iext", float(dc.primary_Iext))
-        self._set_stim_form_value("pulse_start", float(dc.primary_start))
-        self._set_stim_form_value("pulse_dur", float(dc.primary_duration))
-        self._set_stim_form_value("alpha_tau", float(dc.primary_alpha_tau))
-    
-    def _set_stim_form_value(self, field_name: str, value):
-        """Set stim-form widget value without emitting change callbacks."""
-        if self._form_stim is None:
-            return
-        
-        from PySide6.QtWidgets import QComboBox
-        w = self._form_stim.widgets_map.get(field_name)
-        if w is None:
-            return
-        w.blockSignals(True)
-        try:
-            if isinstance(w, QComboBox):
-                w.setCurrentText(str(value))
-            else:
-                w.setValue(value)
-        finally:
-            w.blockSignals(False)
     
     def get_hint_text(self) -> str:
         """

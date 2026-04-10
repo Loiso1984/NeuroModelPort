@@ -33,11 +33,8 @@ class SimulationResult:
         dual_cfg = getattr(config, "dual_stimulation", None)
         dual_enabled = bool(dual_cfg is not None and getattr(dual_cfg, "enabled", False))
 
-        primary_location = (
-            getattr(dual_cfg, "primary_location", config.stim_location.location)
-            if dual_enabled
-            else config.stim_location.location
-        )
+        # Primary stimulus always comes from cfg.stim_location and cfg.stim
+        primary_location = config.stim_location.location
         has_primary_dfilter_state = (
             primary_location == "dendritic_filtered"
             and config.dendritic_filter.enabled
@@ -76,7 +73,7 @@ class SimulationResult:
         self.morph: dict = {}
 
 
-def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms: float, t_start: float, manual_times: list) -> np.ndarray:
+def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms: float, t_start: float, manual_times: list, seed_hash: int = None) -> np.ndarray:
     """Generates an ephemeral array of event times without mutating the base config.
     
     Args:
@@ -85,6 +82,7 @@ def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms:
         duration_ms: Duration in ms for auto-generated trains
         t_start: Start time in ms
         manual_times: Manual event times list
+        seed_hash: Optional seed hash for deterministic Poisson generation (for previewer stability)
         
     Returns:
         Array of event times
@@ -106,9 +104,8 @@ def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms:
     if duration_ms <= 0:
         logger.warning(f"Invalid duration_ms {duration_ms}, must be > 0. Defaulting to 200 ms")
         duration_ms = 200.0
-        
-    from core.stochastic_rng import get_rng
-    rng = get_rng()
+
+    from core.stochastic_rng import get_rng, StochasticRNG
 
     if train_type == 'regular':
         if freq_hz <= 0:
@@ -122,7 +119,15 @@ def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms:
         if rate_ms <= 0:
             return np.array([t_start], dtype=np.float64)  # Fallback: single event
         expected_spikes = int(duration_ms * rate_ms * 1.5)
-        intervals = rng.exponential(1.0 / rate_ms, expected_spikes)
+        
+        # Use a temporary RNG with a fixed seed based on the parameters
+        # This ensures the previewer and the solver get the EXACT same train for the same settings
+        if seed_hash is not None:
+            temp_rng = StochasticRNG(seed_hash)
+            intervals = temp_rng.exponential(1.0 / rate_ms, expected_spikes)
+        else:
+            rng = get_rng()
+            intervals = rng.exponential(1.0 / rate_ms, expected_spikes)
         times = t_start + np.cumsum(intervals)
         return times[times < (t_start + duration_ms)].astype(np.float64)
     return np.array([], dtype=np.float64)
@@ -223,16 +228,7 @@ class NeuronSolver:
         dual_cfg = getattr(cfg, 'dual_stimulation', None)
         if dual_cfg is not None and hasattr(dual_cfg, 'enabled') and dual_cfg.enabled:
             dual_stim_enabled = 1
-            # When dual stimulation is enabled, primary parameters come from the dual config.
-            primary_stim_type = getattr(dual_cfg, "primary_stim_type", primary_stim_type)
-            primary_iext = getattr(dual_cfg, "primary_Iext", primary_iext)
-            primary_t0 = getattr(dual_cfg, "primary_start", primary_t0)
-            primary_td = getattr(dual_cfg, "primary_duration", primary_td)
-            primary_atau = getattr(dual_cfg, "primary_alpha_tau", primary_atau)
-            primary_location = getattr(dual_cfg, "primary_location", primary_location)
-            primary_stim_comp = 0
-            primary_zap_f0 = getattr(dual_cfg, "primary_zap_f0_hz", primary_zap_f0)
-            primary_zap_f1 = getattr(dual_cfg, "primary_zap_f1_hz", primary_zap_f1)
+            # Primary stimulus always comes from cfg.stim, not dual config
 
         stype = s_map.get(primary_stim_type, 0)
         stim_mode = stim_mode_map.get(primary_location, 0)
@@ -280,20 +276,26 @@ class NeuronSolver:
                 )
 
         # Generate ephemeral primary train
+        # Create a stable seed based on the parameters
+        seed_hash = hash((cfg.stim.synaptic_train_freq_hz, cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start)) % (2**32 - 1)
         eff_event_times_1 = generate_effective_event_times(
             cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
-            cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times
+            cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times, seed_hash=seed_hash
         )
         
         # Generate ephemeral secondary train
         eff_event_times_2 = np.zeros(0, dtype=np.float64)
         if dual_stim_enabled == 1 and dual_cfg is not None:
+            seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                               getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                               getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
             eff_event_times_2 = generate_effective_event_times(
                 getattr(dual_cfg, 'secondary_train_type', 'none'),
                 getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
                 getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
                 dual_cfg.secondary_start,
-                dual_cfg.secondary_event_times
+                dual_cfg.secondary_event_times,
+                seed_hash=seed_hash_2
             )
 
         # ── Initialize RNG state for reproducibility ──
@@ -330,7 +332,7 @@ class NeuronSolver:
             "ek": cfg.channels.EK,
             "el": cfg.channels.EL,
             "eih": cfg.channels.E_Ih,
-            "ea": cfg.channels.E_A,
+            "ea": cfg.channels.EK,  # A-current uses K reversal potential
             "cm_v": morph['Cm_v'],
             "l_data": morph['L_data'],
             "l_indices": morph['L_indices'],
@@ -376,6 +378,8 @@ class NeuronSolver:
             "dual_stim_enabled": dual_stim_enabled,
             "gna_max": cfg.channels.gNa_max,
             "gk_max": cfg.channels.gK_max,
+            "e_rev_syn_primary": getattr(cfg.channels, 'e_rev_syn_primary', 0.0),
+            "e_rev_syn_secondary": getattr(cfg.channels, 'e_rev_syn_secondary', -75.0),
             "stype_2": stype_2,
             "iext_2": iext_2,
             "t0_2": t0_2,
@@ -586,7 +590,7 @@ class NeuronSolver:
                 a = y[cursor:cursor + n, :]
                 b = y[cursor + n:cursor + 2*n, :]
                 g_a = morph['gA_v'][:, np.newaxis]
-                res.currents['IA'] = g_a * a * b * (v - cfg.channels.E_A)
+                res.currents['IA'] = g_a * a * b * (v - cfg.channels.EK)  # A-current uses EK
                 cursor += 2 * n
             else:
                 logger.warning("IA channel enabled but gA_v missing from morph")
@@ -646,6 +650,14 @@ class NeuronSolver:
             else:
                 logger.warning("SK channel enabled but gSK_v missing from morph")
 
+        # Extract K_ATP current if metabolism is enabled
+        if cfg.metabolism.enable_dynamic_atp:
+            # ATP state is at the end of the state vector
+            atp_state = y[-n:, :]
+            atp_ratio = atp_state / cfg.metabolism.katp_kd_atp_mM
+            g_katp = cfg.metabolism.g_katp_max / (1.0 + atp_ratio ** 2)
+            res.currents['KATP'] = g_katp * (v - cfg.channels.EK)
+
         # ── ATP consumption estimate ──────────────────────────────────
         # Na+/K+-ATPase: 3 Na+ pumped per ATP hydrolysis (Skou 1957).
         # Ca²+-ATPase (PMCA): 1 Ca²+ pumped per ATP (Bhatt et al. 2005).
@@ -698,7 +710,7 @@ class NeuronSolver:
         morph  = MorphologyBuilder.build(cfg)
         n_comp = morph["N_comp"]
 
-        y0 = self.registry.compute_initial_states(-65.0, cfg)
+        y0 = self.registry.compute_initial_states(cfg.channels.EL, cfg)
 
         # ── Stimulus maps (mirrors run_single) ──
         s_map = {
@@ -714,26 +726,21 @@ class NeuronSolver:
         dual_cfg = getattr(cfg, "dual_stimulation", None)
         if dual_cfg is not None and hasattr(dual_cfg, 'enabled') and dual_cfg.enabled:
             dual_stim_enabled = 1
-            # When dual stimulation is enabled, primary parameters come from the dual config.
-            stype = s_map.get(dual_cfg.primary_stim_type, 0)
-            iext = dual_cfg.primary_Iext
-            t0 = dual_cfg.primary_start
-            td = dual_cfg.primary_duration
-            atau = dual_cfg.primary_alpha_tau
-            stim_mode = stim_mode_map.get(dual_cfg.primary_location, 0)
-            stim_comp = 0
-            zap_f0 = getattr(dual_cfg, "primary_zap_f0_hz", cfg.stim.zap_f0_hz)
-            zap_f1 = getattr(dual_cfg, "primary_zap_f1_hz", cfg.stim.zap_f1_hz)
-        else:
-            stype = s_map.get(cfg.stim.stim_type, 0)
-            iext = cfg.stim.Iext
-            t0 = cfg.stim.pulse_start
-            td = cfg.stim.pulse_dur
-            atau = cfg.stim.alpha_tau
-            stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
-            stim_comp = cfg.stim.stim_comp
-            zap_f0 = cfg.stim.zap_f0_hz
-            zap_f1 = cfg.stim.zap_f1_hz
+        use_dfilter_primary = int(
+            stim_mode == 2
+            and cfg.dendritic_filter.enabled
+            and cfg.dendritic_filter.tau_dendritic_ms > 0.0
+        )
+        
+        stype = s_map.get(cfg.stim.stim_type, 0)
+        iext = cfg.stim.Iext
+        t0 = cfg.stim.pulse_start
+        td = cfg.stim.pulse_dur
+        atau = cfg.stim.alpha_tau
+        stim_mode = stim_mode_map.get(cfg.stim_location.location, 0)
+        stim_comp = cfg.stim.stim_comp
+        zap_f0 = cfg.stim.zap_f0_hz
+        zap_f1 = cfg.stim.zap_f1_hz
         use_dfilter_primary = int(
             stim_mode == 2
             and cfg.dendritic_filter.enabled
@@ -773,12 +780,16 @@ class NeuronSolver:
             # Generate event times for secondary stimulus (synaptic train)
             event_times_arr_2 = np.zeros(0, dtype=np.float64)
             if stype_2 >= 4:  # Conductance-based synapse
+                seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                                   getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                                   getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
                 event_times_arr_2 = generate_effective_event_times(
                     getattr(dual_cfg, 'secondary_train_type', 'none'),
                     getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
                     getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
                     dual_cfg.secondary_start,
-                    dual_cfg.secondary_event_times
+                    dual_cfg.secondary_event_times,
+                    seed_hash=seed_hash_2
                 )
 
         # ── Reconstruct state offsets (must match rhs.py exactly) ──
@@ -876,20 +887,25 @@ class NeuronSolver:
         rng_state = rng.get_state()['state'] if (stoch_gating or noise_sigma > 0) else None
 
         # Generate ephemeral primary train
+        seed_hash = hash((cfg.stim.synaptic_train_freq_hz, cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start)) % (2**32 - 1)
         event_times_arr = generate_effective_event_times(
             cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
-            cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times
+            cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times, seed_hash=seed_hash
         )
         
         # Generate ephemeral secondary train
         event_times_arr_2 = np.zeros(0, dtype=np.float64)
         if dual_stim_enabled == 1 and dual_cfg is not None:
+            seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                               getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                               getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
             event_times_arr_2 = generate_effective_event_times(
                 getattr(dual_cfg, 'secondary_train_type', 'none'),
                 getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
                 getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
                 dual_cfg.secondary_start,
-                dual_cfg.secondary_event_times
+                dual_cfg.secondary_event_times,
+                seed_hash=seed_hash_2
             )
 
         physics = create_physics_params(
@@ -909,7 +925,9 @@ class NeuronSolver:
             ek                  = float(cc.EK),
             el                  = float(cc.EL),
             eih                 = float(cc.E_Ih),
-            ea                  = float(cc.E_A),
+            ea                  = float(cc.EK),  # A-current uses K reversal potential
+            e_rev_syn_primary   = float(getattr(cc, 'e_rev_syn_primary', 0.0)),
+            e_rev_syn_secondary = float(getattr(cc, 'e_rev_syn_secondary', -75.0)),
             cm_v                = morph["Cm_v"].astype(np.float64),
             l_data              = morph["L_data"].astype(np.float64),
             l_indices           = morph["L_indices"].astype(np.int32),

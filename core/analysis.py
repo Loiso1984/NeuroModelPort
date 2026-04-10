@@ -828,6 +828,98 @@ def _stim_type_to_code(stim_type: str) -> int:
     }.get(stim_type, 0)
 
 
+@njit(cache=True)
+def _compute_stim_array(
+    t: np.ndarray,
+    stype: int,
+    iext: float,
+    t0: float,
+    td: float,
+    atau: float,
+    zap_f0: float,
+    zap_f1: float,
+    event_times: np.ndarray,
+    n_events: int,
+    mode: int,  # 0=soma, 1=ais, 2=dendritic_filtered
+    attenuation: float,
+    tau_dend: float,
+    el: float,
+) -> np.ndarray:
+    """
+    JIT-compiled helper to compute stimulus array for a single stimulus source.
+    
+    This replaces slow Python loops in _reconstruct_stimulus_proxy.
+    """
+    n = len(t)
+    stim = np.zeros(n, dtype=np.float64)
+    
+    if n == 0:
+        return stim
+    
+    dt = t[1] - t[0] if n > 1 else 0.025
+    v_fil = 0.0
+    
+    for i in range(n):
+        ti = t[i]
+        
+        # For synaptic types (4-9), use event-driven conductance
+        if 4 <= stype <= 9:
+            if n_events > 0:
+                # Simplified alpha function for conductance
+                base = 0.0
+                for j in range(n_events):
+                    te = event_times[j]
+                    if ti >= te:
+                        dt_ev = ti - te
+                        if dt_ev < 10.0 * atau:  # Cutoff for efficiency
+                            base += iext * (dt_ev / atau) * np.exp(1.0 - dt_ev / atau)
+                
+                # Convert conductance to current
+                if stype == 6:  # GABA-A
+                    e_rev = -70.0
+                elif stype == 7:  # GABA-B
+                    e_rev = -95.0
+                else:  # Excitatory
+                    e_rev = 0.0
+                current_val = abs(base) * (e_rev - el)
+                
+                # Apply dendritic filtering
+                if mode == 2 and tau_dend > 0:
+                    alpha = dt / (dt + tau_dend)
+                    v_fil = alpha * (current_val * attenuation) + (1.0 - alpha) * v_fil
+                    stim[i] = v_fil
+                else:
+                    stim[i] = attenuation * current_val
+        else:
+            # Non-synaptic types
+            if ti < t0 or ti > t0 + td:
+                current_val = 0.0
+            elif stype == 0:  # const
+                current_val = iext
+            elif stype == 1:  # pulse
+                current_val = iext
+            elif stype == 2:  # alpha
+                dt_ev = ti - t0
+                current_val = iext * (dt_ev / atau) * np.exp(1.0 - dt_ev / atau)
+            elif stype == 3:  # ou_noise (simplified as const for preview)
+                current_val = iext
+            elif stype == 10:  # zap
+                # Simplified chirp for preview
+                current_val = iext * np.sin(2.0 * np.pi * (zap_f0 + (zap_f1 - zap_f0) * (ti - t0) / td) * (ti - t0))
+            else:
+                current_val = 0.0
+            
+            # Apply dendritic filtering
+            if mode == 2 and tau_dend > 0:
+                alpha = dt / (dt + tau_dend)
+                v_fil = alpha * (current_val * attenuation) + (1.0 - alpha) * v_fil
+                stim[i] = v_fil
+            else:
+                stim[i] = attenuation * current_val
+    
+    return stim
+
+
 def _reconstruct_stimulus_proxy(result) -> np.ndarray:
     """
     Build a deterministic low-frequency stimulus proxy for modulation analysis.
@@ -836,7 +928,6 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
     1) If dendritic filtering state exists in solution, use that directly.
     2) Otherwise reconstruct from configured stimulus equations including event_times.
     """
-    from core.rhs import get_stim_current, get_event_driven_conductance
     from core.solver import generate_effective_event_times
 
     t = np.asarray(result.t, dtype=float)
@@ -846,11 +937,15 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
         return stim
 
     cfg = result.config
-    mode = getattr(cfg.stim_location, "location", "soma")
+    mode_str = getattr(cfg.stim_location, "location", "soma")
     stype = _stim_type_to_code(cfg.stim.stim_type)
 
+    # Mode mapping: soma=0, ais=1, dendritic_filtered=2
+    mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
+    mode = mode_map.get(mode_str, 0)
+
     if (
-        mode == "dendritic_filtered"
+        mode_str == "dendritic_filtered"
         and cfg.dendritic_filter.enabled
         and getattr(result, "v_dendritic_filtered", None) is not None
     ):
@@ -858,19 +953,24 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
         stim += vd[:n]
     else:
         attenuation = 1.0
-        if mode == "dendritic_filtered" and cfg.dendritic_filter.space_constant_um > 0.0:
+        if mode_str == "dendritic_filtered" and cfg.dendritic_filter.space_constant_um > 0.0:
             attenuation = float(
                 np.exp(-cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um)
             )
         
         # Get event_times - only use train generator for synaptic types (4-9)
         if 4 <= stype <= 9:
+            # Create a stable seed based on the parameters
+            seed_hash = hash((getattr(cfg.stim, "synaptic_train_freq_hz", 40.0),
+                           getattr(cfg.stim, "synaptic_train_duration_ms", 200.0),
+                           cfg.stim.pulse_start)) % (2**32 - 1)
             event_times_arr = generate_effective_event_times(
                 getattr(cfg.stim, "synaptic_train_type", "none"),
                 getattr(cfg.stim, "synaptic_train_freq_hz", 40.0),
                 getattr(cfg.stim, "synaptic_train_duration_ms", 200.0),
                 cfg.stim.pulse_start,
-                getattr(cfg.stim, "event_times", [])
+                getattr(cfg.stim, "event_times", []),
+                seed_hash=seed_hash
             )
             # Fallback: if no event times for synaptic type, generate single event at pulse_start
             if len(event_times_arr) == 0:
@@ -880,68 +980,34 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             event_times_arr = np.array(getattr(cfg.stim, "event_times", []), dtype=np.float64)
         n_events = len(event_times_arr)
         
-        # Backward Euler integration for dendritic low-pass filtering (unconditionally stable)
-        dt = t[1] - t[0] if len(t) > 1 else cfg.stim.dt_eval
-        v_fil = 0.0
         tau_dend = getattr(cfg.dendritic_filter, "tau_dendritic_ms", 0.0)
-
-        for i, ti in enumerate(t):
-            # For synaptic types (4-9), use event-driven conductance if event_times are provided
-            if 4 <= stype <= 9:
-                if n_events > 0:
-                    base = get_event_driven_conductance(
-                        float(ti),
-                        stype,
-                        float(cfg.stim.Iext),
-                        event_times_arr,
-                        n_events,
-                        float(cfg.stim.alpha_tau),
-                    )
-                    # Convert conductance to current (simplified for preview)
-                    # Use reversal potential based on type
-                    if stype == 6:  # GABA-A
-                        e_rev = -70.0  # mV
-                    elif stype == 7:  # GABA-B
-                        e_rev = -95.0  # mV
-                    else:  # Excitatory
-                        e_rev = 0.0  # mV
-                    # Use actual leak potential from config
-                    current_val = abs(float(base)) * (e_rev - cfg.channels.EL)
-                    # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
-                    if mode == "dendritic_filtered" and tau_dend > 0:
-                        alpha = dt / (dt + tau_dend)  # Backward Euler coefficient
-                        v_fil = alpha * (current_val * attenuation) + (1 - alpha) * v_fil
-                        stim[i] += v_fil
-                    else:
-                        stim[i] += attenuation * current_val
-                # If synaptic type but no event times, produce no stimulation (skip)
-            else:
-                # Non-synaptic types use regular stimulus current
-                base = get_stim_current(
-                    float(ti),
-                    stype,
-                    float(cfg.stim.Iext),
-                    float(cfg.stim.pulse_start),
-                    float(cfg.stim.pulse_dur),
-                    float(cfg.stim.alpha_tau),
-                    float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
-                    float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
-                )
-                current_val = float(base)
-                # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
-                if mode == "dendritic_filtered" and tau_dend > 0:
-                    alpha = dt / (dt + tau_dend)  # Backward Euler coefficient
-                    v_fil = alpha * (current_val * attenuation) + (1 - alpha) * v_fil
-                    stim[i] += v_fil
-                else:
-                    stim[i] += attenuation * current_val
+        
+        # Use JIT-compiled helper for primary stimulus
+        stim += _compute_stim_array(
+            t=t,
+            stype=stype,
+            iext=float(cfg.stim.Iext),
+            t0=float(cfg.stim.pulse_start),
+            td=float(cfg.stim.pulse_dur),
+            atau=float(cfg.stim.alpha_tau),
+            zap_f0=float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+            zap_f1=float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+            event_times=event_times_arr,
+            n_events=n_events,
+            mode=mode,
+            attenuation=attenuation,
+            tau_dend=tau_dend,
+            el=float(cfg.channels.EL),
+        )
 
     dual_cfg = getattr(cfg, "dual_stimulation", None)
     if dual_cfg is not None and getattr(dual_cfg, "enabled", False):
         stype_2 = _stim_type_to_code(getattr(dual_cfg, "secondary_stim_type", "const"))
-        mode_2 = getattr(dual_cfg, "secondary_location", "soma")
+        mode_2_str = getattr(dual_cfg, "secondary_location", "soma")
+        mode_2 = mode_map.get(mode_2_str, 0)
+        
         attenuation_2 = 1.0
-        if mode_2 == "dendritic_filtered":
+        if mode_2_str == "dendritic_filtered":
             space_const = float(getattr(dual_cfg, "secondary_space_constant_um", 0.0))
             dist = float(getattr(dual_cfg, "secondary_distance_um", 0.0))
             if space_const > 0.0:
@@ -949,12 +1015,17 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
         
         # Get event_times for secondary - only use train generator for synaptic types (4-9)
         if 4 <= stype_2 <= 9:
+            # Create a stable seed based on the parameters
+            seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                               getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                               getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
             event_times_arr_2 = generate_effective_event_times(
                 getattr(dual_cfg, 'secondary_train_type', 'none'),
                 getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
                 getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
                 getattr(dual_cfg, 'secondary_start', 0.0),
-                getattr(dual_cfg, 'secondary_event_times', [])
+                getattr(dual_cfg, 'secondary_event_times', []),
+                seed_hash=seed_hash_2
             )
             # Fallback: if no event times for synaptic type, generate single event at secondary_start
             if len(event_times_arr_2) == 0:
@@ -964,60 +1035,25 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             event_times_arr_2 = np.array(getattr(dual_cfg, 'secondary_event_times', []), dtype=np.float64)
         n_events_2 = len(event_times_arr_2)
         
-        # Backward Euler integration for secondary dendritic low-pass filtering (unconditionally stable)
-        v_fil_2 = 0.0
-        tau_dend_2 = getattr(dual_cfg, "secondary_tau_dendritic_ms", 0.0) if mode_2 == "dendritic_filtered" else 0.0
+        tau_dend_2 = getattr(dual_cfg, "secondary_tau_dendritic_ms", 0.0) if mode_2_str == "dendritic_filtered" else 0.0
         
-        for i, ti in enumerate(t):
-            # For synaptic types (4-9), use event-driven conductance if event_times are provided
-            if 4 <= stype_2 <= 9:
-                if n_events_2 > 0:
-                    base_2 = get_event_driven_conductance(
-                        float(ti),
-                        stype_2,
-                        float(getattr(dual_cfg, "secondary_Iext", 0.0)),
-                        event_times_arr_2,
-                        n_events_2,
-                        float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
-                    )
-                    # Convert conductance to current (simplified for preview)
-                    # Use reversal potential based on type
-                    if stype_2 == 6:  # GABA-A
-                        e_rev_2 = -70.0  # mV
-                    elif stype_2 == 7:  # GABA-B
-                        e_rev_2 = -95.0  # mV
-                    else:  # Excitatory
-                        e_rev_2 = 0.0  # mV
-                    # Use actual leak potential from config
-                    current_val_2 = abs(float(base_2)) * (e_rev_2 - cfg.channels.EL)
-                    # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
-                    if mode_2 == "dendritic_filtered" and tau_dend_2 > 0:
-                        alpha_2 = dt / (dt + tau_dend_2)  # Backward Euler coefficient
-                        v_fil_2 = alpha_2 * (current_val_2 * attenuation_2) + (1 - alpha_2) * v_fil_2
-                        stim[i] += v_fil_2
-                    else:
-                        stim[i] += attenuation_2 * current_val_2
-                # If synaptic type but no event times, produce no stimulation (skip)
-            else:
-                # Non-synaptic types use regular stimulus current
-                base_2 = get_stim_current(
-                    float(ti),
-                    stype_2,
-                    float(getattr(dual_cfg, "secondary_Iext", 0.0)),
-                    float(getattr(dual_cfg, "secondary_start", 0.0)),
-                    float(getattr(dual_cfg, "secondary_duration", 0.0)),
-                    float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
-                    float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
-                    float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
-                )
-                current_val_2 = float(base_2)
-                # Apply dendritic filtering if enabled (backward Euler: unconditionally stable)
-                if mode_2 == "dendritic_filtered" and tau_dend_2 > 0:
-                    alpha_2 = dt / (dt + tau_dend_2)  # Backward Euler coefficient
-                    v_fil_2 = alpha_2 * (current_val_2 * attenuation_2) + (1 - alpha_2) * v_fil_2
-                    stim[i] += v_fil_2
-                else:
-                    stim[i] += attenuation_2 * current_val_2
+        # Use JIT-compiled helper for secondary stimulus
+        stim += _compute_stim_array(
+            t=t,
+            stype=stype_2,
+            iext=float(getattr(dual_cfg, "secondary_Iext", 0.0)),
+            t0=float(getattr(dual_cfg, "secondary_start", 0.0)),
+            td=float(getattr(dual_cfg, "secondary_duration", 0.0)),
+            atau=float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
+            zap_f0=float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
+            zap_f1=float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
+            event_times=event_times_arr_2,
+            n_events=n_events_2,
+            mode=mode_2,
+            attenuation=attenuation_2,
+            tau_dend=tau_dend_2,
+            el=float(cfg.channels.EL),
+        )
 
     return stim
 

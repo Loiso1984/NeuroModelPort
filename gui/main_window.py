@@ -601,7 +601,15 @@ class MainWindow(QMainWindow):
         btn_refresh_preview.clicked.connect(self._update_stim_preview)
         btn_refresh_preview.setMaximumWidth(140)
         
+        self._toggle_conductance = QPushButton("I / g")
+        self._toggle_conductance.setCheckable(True)
+        self._toggle_conductance.setChecked(False)
+        self._toggle_conductance.setToolTip("Toggle between current (I) and conductance (g) view")
+        self._toggle_conductance.setMaximumWidth(60)
+        self._toggle_conductance.clicked.connect(self._update_stim_preview)
+        
         preview_controls.addWidget(btn_refresh_preview)
+        preview_controls.addWidget(self._toggle_conductance)
         preview_controls.addStretch()
         
         self._stim_preview_plot = pg.PlotWidget(title="Stimulus Protocol Preview")
@@ -638,8 +646,37 @@ class MainWindow(QMainWindow):
 
         # ── Tab 3: Analytics ──────────────────────────────────────────
         # Step 4: Analytics
+        analytics_container = QWidget()
+        analytics_layout = QVBoxLayout(analytics_container)
+        analytics_layout.setContentsMargins(0, 0, 0, 0)
+        analytics_layout.setSpacing(0)
+        
         self.analytics = AnalyticsWidget()
-        self.tabs.addTab(self.analytics,    "4) Analytics")
+        analytics_layout.addWidget(self.analytics)
+        
+        # Session Notes section
+        notes_group = QWidget()
+        notes_layout = QVBoxLayout(notes_group)
+        notes_layout.setContentsMargins(8, 8, 8, 8)
+        notes_layout.setSpacing(4)
+        
+        notes_label = QLabel("Session Notes:")
+        notes_label.setStyleSheet("color: #CBA6F7; font-size: 12px; font-weight: bold;")
+        
+        self.session_notes = QTextEdit()
+        self.session_notes.setMaximumHeight(100)
+        self.session_notes.setPlaceholderText("Enter notes about this simulation session...")
+        self.session_notes.setStyleSheet("background: #1E1E2E; color: #CDD6F4; border: 1px solid #45475A;")
+        self.session_notes.textChanged.connect(self._on_notes_changed)
+        
+        # Load initial notes from config
+        self.session_notes.setPlainText(self.config_manager.config.notes)
+        
+        notes_layout.addWidget(notes_label)
+        notes_layout.addWidget(self.session_notes)
+        analytics_layout.addWidget(notes_group)
+        
+        self.tabs.addTab(analytics_container, "4) Analytics")
         
         # Connect oscilloscope time_highlighted to analytics for linked cursors
         self.oscilloscope.time_highlighted.connect(self.analytics.highlight_time)
@@ -1351,7 +1388,6 @@ class MainWindow(QMainWindow):
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         # Reset dual stim when loading new preset
         self.dual_stim_widget.load_default_preset()
-        self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
         self.topology.draw_neuron(
             self.config_manager.config,
@@ -1430,8 +1466,29 @@ class MainWindow(QMainWindow):
             
             from core.analysis import reconstruct_stimulus_trace
             i_stim = reconstruct_stimulus_trace(res)
+            
+            # Check if conductance view is enabled
+            show_conductance = self._toggle_conductance.isChecked()
+            
             self._stim_preview_plot.clear()
-            self._stim_preview_plot.plot(t, i_stim, pen=pg.mkPen('#F5C2E7', width=2))
+            
+            if show_conductance:
+                # Show conductance (g) instead of current (I)
+                # For conductance-based synapses, i_stim is already conductance
+                # For current-based stimuli, we need to convert I to g by dividing by (V - Erev)
+                # For preview purposes, use V = -60 mV (typical resting potential)
+                v_rest = -60.0
+                # For excitatory synapses (AMPA, NMDA), Erev ≈ 0 mV
+                # For inhibitory synapses (GABA), Erev ≈ -75 mV
+                # Simplified: assume excitatory for preview
+                e_exc = 0.0
+                g_stim = i_stim / (v_rest - e_exc) if (v_rest - e_exc) != 0 else i_stim
+                self._stim_preview_plot.plot(t, g_stim, pen=pg.mkPen('#89B4FA', width=2))
+                self._stim_preview_plot.setLabel('left', 'Conductance', units='mS/cm²')
+            else:
+                # Show current (I)
+                self._stim_preview_plot.plot(t, i_stim, pen=pg.mkPen('#F5C2E7', width=2))
+                self._stim_preview_plot.setLabel('left', 'Total Input Current', units='µA/cm²')
         except Exception as e:
             # Show error message in plot area instead of silent failure
             self._stim_preview_plot.clear()
@@ -1796,20 +1853,20 @@ class MainWindow(QMainWindow):
         finally:
             self._lock_ui(False)
 
+    def _on_notes_changed(self):
+        """Handle notes text changes and sync to config."""
+        self.config_manager.config.notes = self.session_notes.toPlainText()
+
     def _on_dual_stim_config_changed(self):
         """Handle dual stimulation configuration changes."""
         if not hasattr(self, 'config_manager'):
             return
         self._sync_dual_stim_into_config()
-        self._sync_stim_controls_with_dual_mode()
         self._refresh_topology_preview()
         self._update_stim_preview()
         if self.dual_stim_widget.config.enabled:
             self._status(
-                "Dual stim enabled: "
-                f"{self.dual_stim_widget.config.primary_location} + "
-                f"{self.dual_stim_widget.config.secondary_location} "
-                "(Dual tab parameters override primary stimulation fields)"
+                f"Dual stim enabled: Secondary at {self.dual_stim_widget.config.secondary_location}"
             )
         else:
             self._status("Dual stimulation disabled")
@@ -2011,9 +2068,19 @@ class MainWindow(QMainWindow):
                 header = ['t_ms', 'V_soma_mV']
                 if res.n_comp > 1:
                     header += ['V_AIS_mV', 'V_terminal_mV']
-                header += [f'I_{k}_uA_cm2' for k in res.currents]
+                
+                # Spatial current headers
+                for k in res.currents:
+                    if res.n_comp > 1:
+                        header += [f'I_{k}_Soma_uA_cm2', f'I_{k}_AIS_uA_cm2', f'I_{k}_Terminal_uA_cm2']
+                    else:
+                        header.append(f'I_{k}_uA_cm2')
+                
                 if res.ca_i is not None:
-                    header.append('Ca_i_mM')
+                    if res.n_comp > 1:
+                        header += ['Ca_i_Soma_mM', 'Ca_i_AIS_mM', 'Ca_i_Terminal_mM']
+                    else:
+                        header.append('Ca_i_mM')
 
                 # Gate names
                 from core.analysis import extract_gate_traces
@@ -2026,10 +2093,26 @@ class MainWindow(QMainWindow):
                     if res.n_comp > 1:
                         row.append(f"{res.v_all[1, i]:.4f}")
                         row.append(f"{res.v_all[-1, i]:.4f}")
+                    
+                    # Spatial current data
                     for curr in res.currents.values():
-                        row.append(f"{curr[i]:.6f}")
+                        curr_arr = curr if curr.ndim == 2 else curr.reshape(1, -1)
+                        if res.n_comp > 1:
+                            row.append(f"{curr_arr[0, i]:.6f}")  # Soma
+                            row.append(f"{curr_arr[1, i]:.6f}")  # AIS
+                            row.append(f"{curr_arr[-1, i]:.6f}")  # Terminal
+                        else:
+                            row.append(f"{curr_arr[0, i]:.6f}")
+                    
                     if res.ca_i is not None:
-                        row.append(f"{res.ca_i[0, i]:.8f}")
+                        ca_arr = res.ca_i if res.ca_i.ndim == 2 else res.ca_i.reshape(1, -1)
+                        if res.n_comp > 1:
+                            row.append(f"{ca_arr[0, i]:.8f}")  # Soma
+                            row.append(f"{ca_arr[1, i]:.8f}")  # AIS
+                            row.append(f"{ca_arr[-1, i]:.8f}")  # Terminal
+                        else:
+                            row.append(f"{ca_arr[0, i]:.8f}")
+                    
                     for gv in gates.values():
                         row.append(f"{gv[i]:.6f}")
                     writer.writerow(row)

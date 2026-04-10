@@ -53,6 +53,8 @@ class ChannelParams(BaseModel):
     ENa:      float = Field(default=50.0,           description="Na reversal potential (mV)")
     EK:       float = Field(default=-77.0,          description="K reversal potential (mV)")
     EL:       float = Field(default=-54.387,         description="Leak reversal potential (mV)")
+    e_rev_syn_primary:   float = Field(default=0.0,   description="Primary stimulus synaptic reversal (mV, for pathology)")
+    e_rev_syn_secondary: float = Field(default=-75.0, description="Secondary stimulus synaptic reversal (mV, for pathology)")
 
     enable_Ih: bool  = Field(default=False, description="Enable Ih (HCN pacemaker current)")
     gIh_max:   float = Field(default=0.02,  description="Max Ih conductance (mS/cm²)")
@@ -64,7 +66,11 @@ class ChannelParams(BaseModel):
 
     enable_IA: bool  = Field(default=False, description="Enable A-current (transient K⁺, Connor-Stevens)")
     gA_max:    float = Field(default=0.4, description="Max A-current conductance (mS/cm²)")  # Default 0.4, NOT 10.0 (was unphysiologically high)
-    E_A:       float = Field(default=-77.0, description="A-current reversal potential (mV)")
+    
+    @property
+    def E_A(self) -> float:
+        """A-current reversal potential (mV) - always equals EK since A-current is a K+ channel."""
+        return self.EK
 
     enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated K⁺, spike adaptation)")
     gSK_max:   float = Field(default=2.0,  description="Max SK conductance (mS/cm²)")
@@ -257,7 +263,7 @@ class SimulationParams(BaseModel):
     Iext:       float   = Field(default=10.0,        description="Stimulus amplitude (uA/cm2 density)")
     pulse_start: float  = Field(default=10.0,        description="Pulse onset (ms)")
     pulse_dur:   float  = Field(default=1.0,         description="Pulse duration (ms)")
-    alpha_tau:   float  = Field(default=2.0,         description="Alpha-synapse time constant (ms)")
+    alpha_tau:   float  = Field(default=1.0,         description="Alpha-synapse time constant multiplier (1.0 = literature baseline)")
     
     # ZAP (impedance) stimulus parameters
     zap_f0_hz: float = Field(default=0.5, ge=0.01, description="ZAP/chirp start frequency (Hz)")
@@ -414,6 +420,7 @@ class FullModelConfig(BaseModel):
     stim_location: StimulationLocationParams = StimulationLocationParams()
     dendritic_filter: DendriticFilterParams = DendriticFilterParams()
     dual_stimulation: Optional["DualStimulationConfig"] = None  # Optional dual stimulation config
+    notes: str = Field(default="", description="Researcher notes for this configuration")
     analysis:   AnalysisParams    = AnalysisParams()
     preset_modes: PresetModeParams = PresetModeParams()
 

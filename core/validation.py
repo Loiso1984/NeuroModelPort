@@ -118,10 +118,8 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
     dual = getattr(cfg, "dual_stimulation", None)
     if dual is not None and getattr(dual, "enabled", False):
         warnings.append(
-            "Dual stimulation is enabled: primary fields in Parameters -> Stimulation/Stimulus Location are overridden by Dual Stim."
+            "Dual stimulation is enabled: Secondary stimulus configured in Dual Stim tab."
         )
-        if getattr(dual, "primary_duration", 0.0) < 0.0:
-            raise SimulationParameterError("dual_stimulation.primary_duration must be >= 0.")
         if getattr(dual, "secondary_duration", 0.0) < 0.0:
             raise SimulationParameterError("dual_stimulation.secondary_duration must be >= 0.")
         if getattr(dual, "secondary_location", "soma") == "dendritic_filtered":

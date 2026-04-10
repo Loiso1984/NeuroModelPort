@@ -36,11 +36,25 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
+# Import plot themes for global color consistency
+try:
+    from .plots import PLOT_THEMES
+except ImportError:
+    # Fallback if circular import
+    PLOT_THEMES = {
+        "Default": {
+            "soma": "#4080FF",
+            "ais": "#FF4040",
+            "terminal": (0, 200, 100),
+            "threshold": "#F9E2AF",
+        }
+    }
+
 # ── colour palette (matches plots.py) ──────────────────────────────
 CHAN_COLORS = {
     'Na':   '#DC3232', 'K':   '#3264DC', 'Leak': '#32A050',
     'Ih':   '#9632C8', 'ICa': '#FA9600', 'IA':   '#00C8C8',
-    'SK':   '#C83296',
+    'SK':   '#C83296', 'KATP': '#F9E2AF',
 }
 GATE_COLORS = {
     'm': '#FF4040', 'h': '#4080FF', 'n': '#40C040',
@@ -326,7 +340,95 @@ class AnalyticsWidget(QTabWidget):
         }
         self._all_tab_specs = {}  # Store all tab specs for rebuilding
         self._tab_figures = {}  # Store figures for fullscreen access
+        self._time_marker = None  # Store vertical line marker for linked cursor
         self._build_tabs()
+    
+    def highlight_time(self, t_ms: float):
+        """Show a vertical marker on analytics plots at the specified time.
+        
+        This enables cross-tab cursor synchronization with the Oscilloscope.
+        The marker is shown on time-domain plots (Single category).
+        Handles Currents, Gates, and Spike Shape tabs.
+        """
+        # Remove existing marker if any
+        if self._time_marker is not None:
+            try:
+                self._time_marker.remove()
+            except:
+                pass
+            self._time_marker = None
+        
+        current_idx = self.currentIndex()
+        if current_idx not in self._category_mapping:
+            return
+        
+        category = self._category_mapping[current_idx]
+        tab_name = self.tabText(current_idx)
+        
+        # Handle Spike Shape tab differently (highlight closest spike)
+        if "Spike Shape" in tab_name:
+            self._highlight_spike_shape(t_ms)
+            return
+        
+        # Only show marker on time-domain plots (Single category)
+        if category != 'Single':
+            return
+        
+        if tab_name not in self._tab_figures:
+            return
+        
+        fig = self._tab_figures[tab_name]
+        if fig is None:
+            return
+        
+        # Add vertical line marker at the specified time
+        for ax in fig.axes:
+            # Only add to axes with x-axis representing time (check label or data)
+            xlabel = ax.get_xlabel().lower()
+            if 'time' in xlabel or 't (ms)' in xlabel or 't_ms' in xlabel:
+                self._time_marker = ax.axvline(x=t_ms, color='#89B4FA', linestyle='--', linewidth=1.5, alpha=0.8)
+                break
+        
+        # Force redraw
+        fig.canvas.draw()
+    
+    def _highlight_spike_shape(self, t_ms: float):
+        """Highlight the spike closest to t_ms in Spike Shape tab."""
+        if not hasattr(self, '_last_result') or self._last_result is None:
+            return
+        
+        result = self._last_result
+        t = result.t
+        v = result.v_soma
+        
+        # Find spikes
+        from core.analysis import detect_spikes
+        peak_idx, spike_times, spike_amps = detect_spikes(v, t, threshold=-20.0)
+        
+        if len(spike_times) == 0:
+            return
+        
+        # Find spike closest to t_ms
+        closest_idx = np.argmin(np.abs(spike_times - t_ms))
+        closest_spike_time = spike_times[closest_idx]
+        
+        # Highlight this spike in the plot
+        tab_name = self.tabText(self.currentIndex())
+        if tab_name not in self._tab_figures:
+            return
+        
+        fig = self._tab_figures[tab_name]
+        if fig is None:
+            return
+        
+        # Add vertical marker at closest spike time
+        for ax in fig.axes:
+            xlabel = ax.get_xlabel().lower()
+            if 'time' in xlabel or 't (ms)' in xlabel:
+                self._time_marker = ax.axvline(x=closest_spike_time, color='#F9E2AF', linestyle='--', linewidth=2.0, alpha=0.9)
+                break
+        
+        fig.canvas.draw()
 
     # ─────────────────────────────────────────────────────────────────
     #  TAB CONSTRUCTION
@@ -538,11 +640,18 @@ class AnalyticsWidget(QTabWidget):
             
             # Force a geometric refresh and draw
             new_widget.show()
-            if hasattr(new_widget, 'canvas'):
-                new_widget.canvas.draw_idle()
-            elif hasattr(self, spec['builder'].replace('_build', 'cvs')):
-                # Fallback to direct attribute access for canvases
-                getattr(self, spec['builder'].replace('_build', 'cvs')).draw_idle()
+            
+            # Helper to recursively find FigureCanvas inside nested layouts (like QScrollArea)
+            def _force_draw(w):
+                if hasattr(w, 'draw_idle') and callable(w.draw_idle):
+                    w.draw_idle()
+                for child in w.children():
+                    if hasattr(child, 'draw_idle') and callable(child.draw_idle):
+                        child.draw_idle()
+                    elif isinstance(child, QWidget):
+                        _force_draw(child)
+                        
+            _force_draw(new_widget)
         except Exception as e:
             # Show error in a simple label widget
             from PySide6.QtWidgets import QLabel
@@ -1678,8 +1787,9 @@ class AnalyticsWidget(QTabWidget):
         ax = self.ax_gates
 
         # Plot membrane potential (always visible on secondary axis)
+        soma_color = PLOT_THEMES.get("Default", PLOT_THEMES["Default"]).get("soma", "#4080FF")
         if self._gates_line_v is None:
-            self._gates_line_v = ax.plot([], [], color='#2060CC', lw=2.0, alpha=0.7, label='V_soma')[0]
+            self._gates_line_v = ax.plot([], [], color=soma_color, lw=2.0, alpha=0.7, label='V_soma')[0]
         v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
         if v_soma_safe is not None:
             self._gates_line_v.set_data(t, v_soma_safe)
@@ -1788,8 +1898,9 @@ class AnalyticsWidget(QTabWidget):
         ax = self.ax_currents
 
         # Plot membrane potential (always visible on secondary axis)
+        soma_color = PLOT_THEMES.get("Default", PLOT_THEMES["Default"]).get("soma", "#4080FF")
         if self._currents_line_v is None:
-            self._currents_line_v = ax.plot([], [], color='#2060CC', lw=2.0, alpha=0.7, label='V_soma')[0]
+            self._currents_line_v = ax.plot([], [], color=soma_color, lw=2.0, alpha=0.7, label='V_soma')[0]
         v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
         if v_soma_safe is not None:
             self._currents_line_v.set_data(t, v_soma_safe)
@@ -1852,7 +1963,8 @@ class AnalyticsWidget(QTabWidget):
         ax1, ax2, ax3 = self.ax_spike_mech
 
         # Row 1: Voltage trace with peaks and calcium overlay
-        self._spike_mech_lines["ax1_vm"] = ax1.plot([], [], color="#2060CC", lw=2.0, label="V_soma")[0]
+        soma_color = PLOT_THEMES.get("Default", PLOT_THEMES["Default"]).get("soma", "#4080FF")
+        self._spike_mech_lines["ax1_vm"] = ax1.plot([], [], color=soma_color, lw=2.0, label="V_soma")[0]
         self._spike_mech_lines["ax1_peaks"] = ax1.plot([], [], linestyle="None", marker="o", markersize=4.0, color="#AA3377", label="spike peaks")[0]
         self._spike_mech_lines["ax1_eca"] = ax1.plot([], [], ":", color="#FF7F0E", lw=1.5, label="E_Ca (Nernst)", alpha=0.8)[0]
         self._spike_mech_ax2b = ax1.twinx()
@@ -2936,8 +3048,9 @@ class AnalyticsWidget(QTabWidget):
                 ax.plot(spike_t, spike_v, color=colors[abs_idx], lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')
         else:
             # Single color for all selected spikes
+            soma_color = PLOT_THEMES.get("Default", PLOT_THEMES["Default"]).get("soma", "#4080FF")
             for i, (spike_t, spike_v) in enumerate(spikes):
-                ax.plot(spike_t, spike_v, color='#2060CC', lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')
+                ax.plot(spike_t, spike_v, color=soma_color, lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')
 
         _configure_ax_interactive(
             ax,

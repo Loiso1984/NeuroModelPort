@@ -77,65 +77,6 @@ class DualStimulationWidget(QWidget):
         
         layout.addWidget(preset_group)
         
-        # ── Primary Stimulus ───────────────────────────────────────
-        primary_group = QGroupBox("Primary Stimulus (Excitatory)")
-        primary_layout = QGridLayout(primary_group)
-        
-        # Location and type
-        primary_layout.addWidget(QLabel("Location:"), 0, 0)
-        self.combo_primary_location = QComboBox()
-        self.combo_primary_location.addItems(["soma", "ais", "dendritic_filtered"])
-        self.combo_primary_location.currentTextChanged.connect(self.on_config_changed)
-        primary_layout.addWidget(self.combo_primary_location, 0, 1)
-        
-        primary_layout.addWidget(QLabel("Type:"), 0, 2)
-        self.combo_primary_type = QComboBox()
-        self.combo_primary_type.addItems(["const", "pulse", "alpha", "ou_noise", "AMPA", "NMDA", "GABAA", "GABAB", "Kainate", "Nicotinic", "zap"])
-        self.combo_primary_type.currentTextChanged.connect(self.on_config_changed)
-        primary_layout.addWidget(self.combo_primary_type, 0, 3)
-        
-        # Current and timing
-        primary_layout.addWidget(QLabel("Current (µA/cm²):"), 1, 0)
-        self.spin_primary_current = QDoubleSpinBox()
-        self.spin_primary_current.setRange(-5000, 5000)
-        self.spin_primary_current.setSingleStep(0.5)
-        self.spin_primary_current.setDecimals(1)
-        self.spin_primary_current.valueChanged.connect(self.on_config_changed)
-        primary_layout.addWidget(self.spin_primary_current, 1, 1)
-        
-        primary_layout.addWidget(QLabel("Start (ms):"), 1, 2)
-        self.spin_primary_start = QDoubleSpinBox()
-        self.spin_primary_start.setRange(0, 200)
-        self.spin_primary_start.setSingleStep(1)
-        self.spin_primary_start.valueChanged.connect(self.on_config_changed)
-        primary_layout.addWidget(self.spin_primary_start, 1, 3)
-        
-        primary_layout.addWidget(QLabel("Duration (ms):"), 2, 0)
-        self.spin_primary_duration = QDoubleSpinBox()
-        self.spin_primary_duration.setRange(0.1, 100)
-        self.spin_primary_duration.setSingleStep(0.5)
-        self.spin_primary_duration.valueChanged.connect(self.on_config_changed)
-        primary_layout.addWidget(self.spin_primary_duration, 2, 1)
-        
-        primary_layout.addWidget(QLabel("Alpha τ (ms):"), 2, 2)
-        self.spin_primary_alpha = QDoubleSpinBox()
-        self.spin_primary_alpha.setRange(0.1, 20)
-        self.spin_primary_alpha.setSingleStep(0.1)
-        self.spin_primary_alpha.setDecimals(1)
-        self.spin_primary_alpha.valueChanged.connect(self.on_config_changed)
-        primary_layout.addWidget(self.spin_primary_alpha, 2, 3)
-        
-        # Event times
-        primary_layout.addWidget(QLabel("Event Times (ms):"), 3, 0)
-        from PySide6.QtWidgets import QLineEdit
-        self.line_primary_event_times = QLineEdit()
-        self.line_primary_event_times.setPlaceholderText("e.g., 10, 20, 30")
-        self.line_primary_event_times.setToolTip("Comma-separated event timestamps (ms). Overrides pulse_start for synaptic types.")
-        self.line_primary_event_times.textChanged.connect(self.on_config_changed)
-        primary_layout.addWidget(self.line_primary_event_times, 3, 1, 1, 3)
-        
-        layout.addWidget(primary_group)
-        
         # ── Secondary Stimulus ─────────────────────────────────────
         secondary_group = QGroupBox("Secondary Stimulus (Inhibitory)")
         secondary_layout = QGridLayout(secondary_group)
@@ -320,10 +261,6 @@ class DualStimulationWidget(QWidget):
         Prevents the N-widget-change cascade that caused multiple Load fires.
         """
         _all_widgets = [
-            self.combo_primary_location, self.combo_primary_type,
-            self.spin_primary_current, self.spin_primary_start,
-            self.spin_primary_duration, self.spin_primary_alpha,
-            self.line_primary_event_times,
             self.combo_secondary_location, self.combo_secondary_type,
             self.spin_secondary_current, self.spin_secondary_start,
             self.spin_secondary_duration, self.spin_secondary_alpha,
@@ -335,19 +272,6 @@ class DualStimulationWidget(QWidget):
         ]
         for w in _all_widgets:
             w.blockSignals(True)
-
-        # Primary stimulus
-        self.combo_primary_location.setCurrentText(self.config.primary_location)
-        self.combo_primary_type.setCurrentText(self.config.primary_stim_type)
-        self.spin_primary_current.setValue(self.config.primary_Iext)
-        self.spin_primary_start.setValue(self.config.primary_start)
-        self.spin_primary_duration.setValue(self.config.primary_duration)
-        self.spin_primary_alpha.setValue(self.config.primary_alpha_tau)
-        if self.config.primary_event_times and len(self.config.primary_event_times) > 0:
-            self.line_primary_event_times.setText(", ".join(str(x) for x in self.config.primary_event_times)
-            )
-        else:
-            self.line_primary_event_times.setText("")
 
         # Secondary stimulus
         self.combo_secondary_location.setCurrentText(self.config.secondary_location)
@@ -387,27 +311,6 @@ class DualStimulationWidget(QWidget):
     
     def update_config_from_ui(self):
         """Update configuration from UI elements."""
-        # Primary stimulus
-        self.config.primary_location = self.combo_primary_location.currentText()
-        self.config.primary_stim_type = self.combo_primary_type.currentText()
-        self.config.primary_Iext = self.spin_primary_current.value()
-        self.config.primary_start = self.spin_primary_start.value()
-        self.config.primary_duration = self.spin_primary_duration.value()
-        self.config.primary_alpha_tau = self.spin_primary_alpha.value()
-        
-        # Parse primary event times
-        event_text = self.line_primary_event_times.text().strip()
-        if event_text:
-            try:
-                self.config.primary_event_times = [float(x.strip()) for x in event_text.split(",") if x.strip()]
-                self.line_primary_event_times.setStyleSheet("")  # Clear error style
-            except ValueError:
-                self.config.primary_event_times = []
-                self.line_primary_event_times.setStyleSheet("border: 2px solid #F38BA8;")  # Red border for error
-        else:
-            self.config.primary_event_times = []
-            self.line_primary_event_times.setStyleSheet("")  # Clear error style
-        
         # Secondary stimulus
         self.config.secondary_location = self.combo_secondary_location.currentText()
         self.config.secondary_stim_type = self.combo_secondary_type.currentText()
@@ -450,15 +353,12 @@ class DualStimulationWidget(QWidget):
         else:
             self.lbl_attenuation.setText("N/A")
         
-        # Calculate E/I ratio
-        excitation = abs(self.config.primary_Iext)
+        # Calculate E/I ratio (secondary only since primary is configured in main tab)
+        excitation = 0.0  # Primary excitation is in main stim tab
         inhibition = 0.0
         
         if self.config.secondary_stim_type in ["GABAA", "GABAB"]:
             inhibition = abs(self.config.secondary_Iext)
-        elif self.config.primary_stim_type in ["GABAA", "GABAB"]:
-            inhibition = abs(self.config.primary_Iext)
-            excitation = abs(self.config.secondary_Iext)
         
         if inhibition > 0:
             ei_ratio = excitation / inhibition

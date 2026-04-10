@@ -92,38 +92,33 @@ def _validate_conductance(g: float64) -> float64:
     return g
 
 @njit(cache=True)
-def _calculate_syn_tau(stype, atau):
+def _calculate_syn_tau(stype, atau_mult):
     """Return (tau_rise, tau_decay) for a conductance-based synapse type.
 
-    Centralises the biological time-constant logic so that get_stim_current
-    and get_event_driven_conductance stay consistent.
-    v12.0: Updated to literature-accurate kinetics with parameter-based scaling.
+    atau_mult is a multiplier to literature values (default 1.0).
+    If user sets 2.0, synapse is 2x slower than literature baseline.
+    This makes the UI alpha_tau slider honest and predictable.
+    
     Reference: Destexhe et al. 1994, J Neurophysiol 72:689-703.
              Jonas et al. 1993, J Physiol 468:743-767 (GABA kinetics).
     """
-    TAU_RISE_RATIO = 10.0  # tau_rise = tau_decay / TAU_RISE_RATIO
-    if stype == 4:      # AMPA — fast excitatory (literature: tau_r=0.2, tau_d=2.0)
-        tau_r = max(0.2, min(1.0,   atau / TAU_RISE_RATIO))
-        tau_d = max(2.0, min(10.0,  atau))
-    elif stype == 5:    # NMDA — slow excitatory (literature: tau_r=5.0, tau_d=120.0)
-        tau_r = max(5.0, min(10.0,  atau / TAU_RISE_RATIO))
-        tau_d = max(10.0, min(200.0, atau))
-    elif stype == 6:    # GABA-A — fast inhibitory (literature: tau_r=0.5, tau_d=6.0)
-        tau_r = max(0.5, min(2.0,   atau / TAU_RISE_RATIO))
-        tau_d = max(6.0, min(20.0,  atau))
-    elif stype == 7:    # GABA-B — slow inhibitory (literature: tau_r=30.0, tau_d=250.0)
-        tau_r = max(30.0, min(100.0, atau / TAU_RISE_RATIO))
-        tau_d = max(50.0, min(500.0, atau))
-    elif stype == 8:    # Kainate — intermediate excitatory (literature: tau_r=1.0, tau_d=10.0)
-        tau_r = max(1.0, min(5.0,   atau / TAU_RISE_RATIO))
-        tau_d = max(10.0, min(50.0,  atau))
-    elif stype == 9:    # Nicotinic ACh — moderate excitatory (literature: tau_r=2.0, tau_d=20.0)
-        tau_r = max(2.0, min(10.0,  atau / TAU_RISE_RATIO))
-        tau_d = max(20.0, min(100.0, atau))
+    # Prevent zero or negative multipliers
+    mult = max(0.01, atau_mult)
+    
+    if stype == 4:      # AMPA (Literature: r=0.2, d=2.0)
+        return 0.2 * mult, 2.0 * mult
+    elif stype == 5:    # NMDA (Literature: r=5.0, d=120.0)
+        return 5.0 * mult, 120.0 * mult
+    elif stype == 6:    # GABA-A (Literature: r=0.5, d=6.0)
+        return 0.5 * mult, 6.0 * mult
+    elif stype == 7:    # GABA-B (Literature: r=30.0, d=250.0)
+        return 30.0 * mult, 250.0 * mult
+    elif stype == 8:    # Kainate (Literature: r=1.0, d=10.0)
+        return 1.0 * mult, 10.0 * mult
+    elif stype == 9:    # Nicotinic (Literature: r=2.0, d=20.0)
+        return 2.0 * mult, 20.0 * mult
     else:
-        tau_r = 0.0
-        tau_d = 0.0
-    return tau_r, tau_d
+        return 0.0, 0.0
 
 
 @njit(float64(float64, int32, float64, float64, float64, float64, float64, float64), cache=True)
@@ -214,7 +209,7 @@ def compute_ionic_currents_scalar(
             i_ca_influx += -i_ca_current
 
     if en_ia:
-        i_ion += ga * ai * bi * (vi - ea)
+        i_ion += ga * ai * bi * (vi - ek)  # IA is a K+ channel, use ek
 
     if en_itca:
         i_tca = gtca * (pi * pi) * qi * (vi - eca_i)
@@ -236,15 +231,24 @@ def compute_ionic_currents_scalar(
 
     return i_ion, i_ca_influx
 
-@njit(float64(int32), cache=True)
-def _get_syn_reversal(stype):
-    """Return synaptic reversal potential for conductance-based types."""
+@njit(float64(int32, float64, float64), cache=True)
+def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
+    """Return synaptic reversal potential for conductance-based types.
+    
+    Args:
+        stype: Synapse type (4=AMPA, 5=NMDA, 6=GABAA, 7=GABAB, 8=Kainate, 9=Nicotinic)
+        e_rev_primary: Primary stimulus synaptic reversal (for pathology)
+        e_rev_secondary: Secondary stimulus synaptic reversal (for pathology)
+    
+    Returns:
+        Reversal potential in mV
+    """
     if stype == 6:   # GABA-A (Cl⁻, Bormann 1988)
-        return E_GABA_A
+        return e_rev_primary  # Use flexible reversal for pathology
     elif stype == 7:  # GABA-B (K⁺ via GIRK, Lüscher 1997)
-        return E_GABA_B
+        return -95.0  # GABA-B is K+-mediated, fixed near EK
     # Excitatory: AMPA(4), NMDA(5), Kainate(8), Nicotinic(9) — cation, ~0 mV
-    return E_EXCITATORY
+    return e_rev_primary  # Use flexible reversal for pathology
 
 @njit(float64(float64, int32, float64, float64[:], int32, float64), cache=True)
 def get_event_driven_conductance(t: float64, stype: int32, iext: float64, 
@@ -468,7 +472,7 @@ def rhs_multicompartment(
         base_current = get_event_driven_conductance(t, stype, iext, event_times_arr, n_events, atau)
     else:
         base_current = get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz)
-    e_syn = _get_syn_reversal(stype) if is_conductance_based else 0.0
+    e_syn = _get_syn_reversal(stype, physics.e_rev_syn_primary, physics.e_rev_syn_secondary) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
     v_filtered_primary = 0.0
@@ -494,7 +498,7 @@ def rhs_multicompartment(
     base_current_2 = 0.0
     if dual_stim_enabled == 1:
         is_cond_2 = (stype_2 >= 4)
-        e_syn_2 = _get_syn_reversal(stype_2) if is_cond_2 else 0.0
+        e_syn_2 = _get_syn_reversal(stype_2, physics.e_rev_syn_secondary, physics.e_rev_syn_primary) if is_cond_2 else 0.0
         is_nmda_2 = (stype_2 == 5)
         # Stage 6.3 symmetry: use event-driven conductance for secondary stim if queue is non-empty
         if n_events_2 > 0 and is_cond_2:
