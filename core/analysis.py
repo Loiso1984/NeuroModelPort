@@ -7,9 +7,11 @@ Ports and improves all analysis functions from Scilab hh_utils.sce:
   space_constant, compute_current_balance + Python-native extensions.
 """
 import numpy as np
+import hashlib
 from numba import njit
 from scipy.signal import butter, find_peaks, hilbert, sosfiltfilt
 from scipy.spatial import cKDTree
+from core.rhs import get_stim_current, get_event_driven_conductance, _get_syn_reversal
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -828,6 +830,13 @@ def _stim_type_to_code(stim_type: str) -> int:
     }.get(stim_type, 0)
 
 
+def _stable_seed_from_values(*values) -> int:
+    """Deterministic 32-bit seed stable across Python sessions."""
+    payload = "|".join(str(v) for v in values).encode("utf-8")
+    digest = hashlib.blake2s(payload, digest_size=4).digest()
+    return int.from_bytes(digest, byteorder="little", signed=False)
+
+
 @njit(cache=True)
 def _compute_stim_array(
     t: np.ndarray,
@@ -844,6 +853,8 @@ def _compute_stim_array(
     attenuation: float,
     tau_dend: float,
     el: float,
+    e_rev_primary: float,
+    e_rev_secondary: float,
 ) -> np.ndarray:
     """
     JIT-compiled helper to compute stimulus array for a single stimulus source.
@@ -862,52 +873,26 @@ def _compute_stim_array(
     for i in range(n):
         ti = t[i]
         
-        # For synaptic types (4-9), use event-driven conductance
+        # For synaptic types (4-9), use the same event-driven conductance
+        # and reversal logic as the solver core.
         if 4 <= stype <= 9:
             if n_events > 0:
-                # Simplified alpha function for conductance
-                base = 0.0
-                for j in range(n_events):
-                    te = event_times[j]
-                    if ti >= te:
-                        dt_ev = ti - te
-                        if dt_ev < 10.0 * atau:  # Cutoff for efficiency
-                            base += iext * (dt_ev / atau) * np.exp(1.0 - dt_ev / atau)
-                
-                # Convert conductance to current
-                if stype == 6:  # GABA-A
-                    e_rev = -70.0
-                elif stype == 7:  # GABA-B
-                    e_rev = -95.0
-                else:  # Excitatory
-                    e_rev = 0.0
+                base = get_event_driven_conductance(ti, stype, iext, event_times, n_events, atau)
+                e_rev = _get_syn_reversal(stype, e_rev_primary, e_rev_secondary)
                 current_val = abs(base) * (e_rev - el)
-                
-                # Apply dendritic filtering
-                if mode == 2 and tau_dend > 0:
-                    alpha = dt / (dt + tau_dend)
-                    v_fil = alpha * (current_val * attenuation) + (1.0 - alpha) * v_fil
-                    stim[i] = v_fil
-                else:
-                    stim[i] = attenuation * current_val
-        else:
-            # Non-synaptic types
-            if ti < t0 or ti > t0 + td:
-                current_val = 0.0
-            elif stype == 0:  # const
-                current_val = iext
-            elif stype == 1:  # pulse
-                current_val = iext
-            elif stype == 2:  # alpha
-                dt_ev = ti - t0
-                current_val = iext * (dt_ev / atau) * np.exp(1.0 - dt_ev / atau)
-            elif stype == 3:  # ou_noise (simplified as const for preview)
-                current_val = iext
-            elif stype == 10:  # zap
-                # Simplified chirp for preview
-                current_val = iext * np.sin(2.0 * np.pi * (zap_f0 + (zap_f1 - zap_f0) * (ti - t0) / td) * (ti - t0))
             else:
                 current_val = 0.0
+
+            # Apply dendritic filtering
+            if mode == 2 and tau_dend > 0:
+                alpha = dt / (dt + tau_dend)
+                v_fil = alpha * (current_val * attenuation) + (1.0 - alpha) * v_fil
+                stim[i] = v_fil
+            else:
+                stim[i] = attenuation * current_val
+        else:
+            # Non-synaptic types
+            current_val = get_stim_current(ti, stype, iext, t0, td, atau, zap_f0, zap_f1)
             
             # Apply dendritic filtering
             if mode == 2 and tau_dend > 0:
@@ -961,9 +946,12 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
         # Get event_times - only use train generator for synaptic types (4-9)
         if 4 <= stype <= 9:
             # Create a stable seed based on the parameters
-            seed_hash = hash((getattr(cfg.stim, "synaptic_train_freq_hz", 40.0),
-                           getattr(cfg.stim, "synaptic_train_duration_ms", 200.0),
-                           cfg.stim.pulse_start)) % (2**32 - 1)
+            seed_hash = _stable_seed_from_values(
+                getattr(cfg.stim, "synaptic_train_freq_hz", 40.0),
+                getattr(cfg.stim, "synaptic_train_duration_ms", 200.0),
+                cfg.stim.pulse_start,
+                getattr(cfg.stim, "synaptic_train_type", "none"),
+            )
             event_times_arr = generate_effective_event_times(
                 getattr(cfg.stim, "synaptic_train_type", "none"),
                 getattr(cfg.stim, "synaptic_train_freq_hz", 40.0),
@@ -998,6 +986,8 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             attenuation=attenuation,
             tau_dend=tau_dend,
             el=float(cfg.channels.EL),
+            e_rev_primary=float(cfg.channels.e_rev_syn_primary),
+            e_rev_secondary=float(cfg.channels.e_rev_syn_secondary),
         )
 
     dual_cfg = getattr(cfg, "dual_stimulation", None)
@@ -1016,9 +1006,12 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
         # Get event_times for secondary - only use train generator for synaptic types (4-9)
         if 4 <= stype_2 <= 9:
             # Create a stable seed based on the parameters
-            seed_hash_2 = hash((getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
-                               getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
-                               getattr(dual_cfg, 'secondary_start', 0.0))) % (2**32 - 1)
+            seed_hash_2 = _stable_seed_from_values(
+                getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
+                getattr(dual_cfg, 'secondary_train_duration_ms', 200.0),
+                getattr(dual_cfg, 'secondary_start', 0.0),
+                getattr(dual_cfg, 'secondary_train_type', 'none'),
+            )
             event_times_arr_2 = generate_effective_event_times(
                 getattr(dual_cfg, 'secondary_train_type', 'none'),
                 getattr(dual_cfg, 'secondary_train_freq_hz', 40.0),
@@ -1053,6 +1046,8 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             attenuation=attenuation_2,
             tau_dend=tau_dend_2,
             el=float(cfg.channels.EL),
+            e_rev_primary=float(cfg.channels.e_rev_syn_primary),
+            e_rev_secondary=float(cfg.channels.e_rev_syn_secondary),
         )
 
     return stim

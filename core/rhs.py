@@ -244,11 +244,11 @@ def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
         Reversal potential in mV
     """
     if stype == 6:   # GABA-A (Cl⁻, Bormann 1988)
-        return e_rev_primary  # Use flexible reversal for pathology
+        return e_rev_secondary  # Inhibitory reversal (pathology-aware)
     elif stype == 7:  # GABA-B (K⁺ via GIRK, Lüscher 1997)
         return -95.0  # GABA-B is K+-mediated, fixed near EK
     # Excitatory: AMPA(4), NMDA(5), Kainate(8), Nicotinic(9) — cation, ~0 mV
-    return e_rev_primary  # Use flexible reversal for pathology
+    return e_rev_primary  # Excitatory reversal (pathology-aware)
 
 @njit(float64(float64, int32, float64, float64[:], int32, float64), cache=True)
 def get_event_driven_conductance(t: float64, stype: int32, iext: float64, 
@@ -472,7 +472,7 @@ def rhs_multicompartment(
         base_current = get_event_driven_conductance(t, stype, iext, event_times_arr, n_events, atau)
     else:
         base_current = get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz)
-    e_syn = _get_syn_reversal(stype, physics.e_rev_syn_primary, physics.e_rev_syn_secondary) if is_conductance_based else 0.0
+    e_syn = _get_syn_reversal(stype, physics_params.e_rev_syn_primary, physics_params.e_rev_syn_secondary) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
     v_filtered_primary = 0.0
@@ -498,7 +498,7 @@ def rhs_multicompartment(
     base_current_2 = 0.0
     if dual_stim_enabled == 1:
         is_cond_2 = (stype_2 >= 4)
-        e_syn_2 = _get_syn_reversal(stype_2, physics.e_rev_syn_secondary, physics.e_rev_syn_primary) if is_cond_2 else 0.0
+        e_syn_2 = _get_syn_reversal(stype_2, physics_params.e_rev_syn_primary, physics_params.e_rev_syn_secondary) if is_cond_2 else 0.0
         is_nmda_2 = (stype_2 == 5)
         # Stage 6.3 symmetry: use event-driven conductance for secondary stim if queue is non-empty
         if n_events_2 > 0 and is_cond_2:

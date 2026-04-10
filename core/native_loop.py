@@ -321,8 +321,8 @@ def run_native_loop(
     # ── Stimulus flags (computed once) ──
     is_cond   = (physics.stype >= 4)
     is_cond_2 = (physics.stype_2 >= 4)
-    e_syn     = _get_syn_reversal(physics.stype)   if is_cond   else 0.0
-    e_syn_2   = _get_syn_reversal(physics.stype_2) if is_cond_2 else 0.0
+    e_syn     = _get_syn_reversal(physics.stype, physics.e_rev_syn_primary, physics.e_rev_syn_secondary)   if is_cond   else 0.0
+    e_syn_2   = _get_syn_reversal(physics.stype_2, physics.e_rev_syn_primary, physics.e_rev_syn_secondary) if is_cond_2 else 0.0
     is_nmda   = (physics.stype == 5)
     is_nmda_2 = (physics.stype_2 == 5)
 

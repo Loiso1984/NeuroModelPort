@@ -78,6 +78,8 @@ def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
     _copy_defaults(cfg.dendritic_filter,  DendriticFilterParams())
     _copy_defaults(cfg.analysis,          AnalysisParams())
     _copy_defaults(cfg.preset_modes,      PresetModeParams())
+    cfg.dual_stimulation = None
+    cfg.notes = ""
 
 
 def _copy_defaults(target, source) -> None:
@@ -351,7 +353,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # IA channel: Moderate for frequency adaptation and spike-frequency accommodation
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.25  # Moderate IA for adaptation dynamics
-        cfg.channels.E_A = -77.0    # K+ reversal potential
+        cfg.channels.EK = -77.0    # K+ reversal potential
         
         # Alpha stimulus: represents one synaptic volley from descending pathways
         # Multi-comp with AIS produces burst of ~16 spikes, Vmax ≈ 34 mV
