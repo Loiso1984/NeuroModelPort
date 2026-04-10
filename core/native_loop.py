@@ -619,6 +619,22 @@ def run_native_loop(
             i_att_2  = base_current_2 * physics.dfilter_attenuation_2
             y[off_vfilt_secondary] = (y[off_vfilt_secondary] + factor_2 * i_att_2) / (1.0 + factor_2)
 
+        # ─────────────────────────────────────────────────────────────
+        # 6.5. Calcium dynamics (Euler — bounded) — using i_ca_influx_v from Step 1
+        # ─────────────────────────────────────────────────────────────
+        if dyn_ca:
+            for i in range(n_comp):
+                ca_val = y[off_ca + i]
+                tau_ca_safe = max(tau_ca, 1e-12)
+                dca = b_ca[i] * i_ca_influx_v[i] - (ca_val - ca_rest) / tau_ca_safe
+                ca_at_min = (ca_val <= CA_I_MIN_M_M and dca < 0.0)
+                ca_at_max = (ca_val >= CA_I_MAX_M_M and dca > 0.0)
+                if ca_at_min:
+                    dca = abs(dca) * CA_DAMPING_FACTOR
+                elif ca_at_max:
+                    dca = -abs(dca) * CA_DAMPING_FACTOR
+                y[off_ca + i] = ca_val + dt * dca
+
         # ATP dynamics (simple Euler integration)
         if dyn_atp:
             for i in range(n_comp):
@@ -628,12 +644,24 @@ def run_native_loop(
                 hi = y[off_h + i]
 
                 # Pump consumption: proportional to Na+ influx
+                # Na/K pump moves 3 Na+ per ATP, Faraday constant = 96485 C/mol
+                # Convert µA/cm² to nmol/cm²/s: i_na (µA/cm²) * 1e-6 / (3*F) * 1e9 = i_na * 1e3 / (3*F)
                 i_na = gna_v[i] * (mi ** 3) * hi * (vi - ena)
-                pump_consumption = abs(i_na) * 0.001  # Convert µA/cm² to nmol/cm²/s
+                
+                # Add NaP (persistent sodium) current if enabled
+                if physics.en_nap:
+                    i_na += gnap_v[i] * y[off_x + i] * (vi - ena)
+                
+                # Add NaR (resurgent sodium) current if enabled
+                if physics.en_nar:
+                    i_na += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena)
+                
+                pump_consumption = abs(i_na) * 1e3 / (3.0 * 96485.0)
 
                 # Add calcium pump consumption if dynamic Ca is enabled
+                # Ca pump moves 1 Ca2+ per ATP, z=2 for divalent ion
                 if dyn_ca:
-                    pump_consumption += 3.0 * i_ca_influx_v[i] * 0.001
+                    pump_consumption += abs(i_ca_influx_v[i]) * 1e3 / (2.0 * 96485.0)
 
                 # ATP ODE: d[ATP]/dt = Synthesis - PumpConsumption
                 datp = atp_synthesis_rate * 0.001 - pump_consumption

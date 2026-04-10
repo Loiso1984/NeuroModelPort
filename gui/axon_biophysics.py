@@ -173,7 +173,10 @@ class AxonBiophysicsWidget(QWidget):
 
             for ch in channels_to_show:
                 if ch in result.currents:
-                    currents_list.append(result.currents[ch])
+                    # Extract the 1D trace specifically for the AIS compartment
+                    # AIS is index 1 in multi-compartment models, index 0 if single-comp
+                    ais_idx = 1 if n_comp > 1 else 0
+                    currents_list.append(result.currents[ch][ais_idx, :])
                     current_names.append(f'I_{ch}')
 
             if currents_list:

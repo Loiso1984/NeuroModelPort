@@ -134,19 +134,6 @@ def update_gates_analytic(
             tau_eff = max(tau_sk, 1e-12) / max(phi_k[i], 1e-12) if phi_k[i] > 1e-15 else max(tau_sk, 1e-12)
             y[off_zsk + i] = z_inf + (zi - z_inf) * np.exp(-dt / tau_eff)
 
-        # ── Calcium dynamics (Euler — bounded) ──
-        if dyn_ca:
-            ca_val = y[off_ca + i]
-            tau_ca_safe = max(tau_ca, 1e-12)
-            dca = b_ca[i] * i_ca_influx_v[i] - (ca_val - ca_rest) / tau_ca_safe
-            ca_at_min = (ca_val <= CA_I_MIN_M_M and dca < 0.0)
-            ca_at_max = (ca_val >= CA_I_MAX_M_M and dca > 0.0)
-            if ca_at_min:
-                dca = abs(dca) * CA_DAMPING_FACTOR
-            elif ca_at_max:
-                dca = -abs(dca) * CA_DAMPING_FACTOR
-            y[off_ca + i] = ca_val + dt * dca
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Hines direct solver — O(N) for a branched cable tree.

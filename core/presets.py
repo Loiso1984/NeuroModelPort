@@ -568,7 +568,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.tau_Ca = 100.0  # v12.0: CA1 calcium decay (was disabled)
         cfg.calcium.B_Ca = 1e-5  # v12.0: CA1 calcium conversion factor (was disabled)
         cfg.channels.gCa_max = 0.08  # L-type calcium for adaptation
-        cfg.channels.gSK_max = 0.8  # SK for calcium-dependent adaptation
+        cfg.channels.gSK_max = 0.5  # SK for calcium-dependent adaptation (reduced to allow theta-rhythm trains)
         cfg.channels.gIM_max = 0.04  # M-type for slow adaptation
         cfg.morphology.d_soma = 20e-4
         # v12.0: Dual-drive stimulation for theta rhythm

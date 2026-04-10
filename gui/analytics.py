@@ -51,11 +51,36 @@ GATE_COLORS = {
 
 def _mpl_fig(nrows=1, ncols=1, tight=True, **kwargs) -> tuple:
     """Create a matplotlib Figure + FigureCanvas pair."""
-    fig = Figure(figsize=(8, 4 * nrows), dpi=90, **kwargs)
+    # Extract figsize from kwargs if provided, otherwise use default
+    figsize = kwargs.pop('figsize', (8, 4 * nrows))
+    fig = Figure(figsize=figsize, dpi=90, **kwargs)
     if tight:
         fig.set_tight_layout(True)
     canvas = FigureCanvas(fig)
     return fig, canvas
+
+
+def _ensure_shape_compatible(arr, t, name="array"):
+    """Ensure array has compatible shape with time array t.
+    
+    Returns array with same shape as t, or None if incompatible.
+    """
+    if arr is None:
+        return None
+    arr = np.asarray(arr, dtype=float)
+    if arr.ndim != 1:
+        arr = arr.flatten()
+    if arr.size != t.size:
+        if arr.size > t.size:
+            arr = arr[:t.size]
+        else:
+            arr_padded = np.zeros_like(t)
+            arr_padded[:arr.size] = arr
+            arr = arr_padded
+    if arr.shape != t.shape:
+        logging.warning(f"{name} shape {arr.shape} doesn't match t {t.shape}, skipping")
+        return None
+    return arr
 
 
 def _tab_with_toolbar(canvas, fullscreen_callback=None, extra_widget=None) -> QWidget:
@@ -510,6 +535,14 @@ class AnalyticsWidget(QTabWidget):
             self.removeTab(index)
             self.insertTab(index, new_widget, title)
             self.setCurrentIndex(index)   # restore — removeTab may shift focus
+            
+            # Force a geometric refresh and draw
+            new_widget.show()
+            if hasattr(new_widget, 'canvas'):
+                new_widget.canvas.draw_idle()
+            elif hasattr(self, spec['builder'].replace('_build', 'cvs')):
+                # Fallback to direct attribute access for canvases
+                getattr(self, spec['builder'].replace('_build', 'cvs')).draw_idle()
         except Exception as e:
             # Show error in a simple label widget
             from PySide6.QtWidgets import QLabel
@@ -554,6 +587,54 @@ class AnalyticsWidget(QTabWidget):
             traceback.print_exc()
             # Show error on the figure if possible
             self._show_updater_error_message(spec['title'], str(e))
+
+    def highlight_time(self, t_ms: float):
+        """Highlight a specific time point across analytics tabs (linked cursor).
+        
+        Draws a yellow dot on the Phase Plane trajectory at the specified time.
+        """
+        # Check if Phase Plane tab has been built
+        if not hasattr(self, 'fig_phase') or self.fig_phase is None:
+            return
+        
+        # Check if we have simulation data
+        if self._last_result is None:
+            return
+        
+        # Find the index closest to the requested time
+        t = self._last_result.t
+        idx = np.argmin(np.abs(t - t_ms))
+        
+        # Get the phase plane data (V vs n for soma)
+        # V is already in result.v_soma, need to extract n gate
+        n_comp = self._last_result.n_comp
+        if n_comp == 0:
+            return
+            
+        # Extract n gate from state vector
+        # State layout: V(n_comp), m(n_comp), h(n_comp), n_K(n_comp), ...
+        off_n = 3 * n_comp
+        y = self._last_result.y
+        v_soma = y[0, :]
+        n_soma = y[off_n, :]
+        
+        # Remove existing highlight dot if any
+        if hasattr(self, '_phase_highlight_dot'):
+            try:
+                self._phase_highlight_dot.remove()
+            except:
+                pass
+        
+        # Add yellow dot at the specified time point
+        self._phase_highlight_dot = self.ax_phase.plot(
+            v_soma[idx], n_soma[idx], 
+            'o', color='#F9E2AF', markersize=10, 
+            markeredgecolor='black', markeredgewidth=1.5,
+            zorder=10, label=f't={t_ms:.1f}ms'
+        )
+        
+        # Redraw the canvas
+        self.fig_phase.canvas.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  PER-TAB BUILDER METHODS  (called once on first visit)
@@ -605,10 +686,13 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Gate Dynamics'), extra_widget=scroll_area)
 
     def _build_tab_spike_mech(self) -> QWidget:
-        # Create larger figure for better vertical space
-        self.fig_spike_mech, cvs = _mpl_fig(3, 1, figsize=(10, 12))
+        # Create wider and larger figure for better space utilization and to prevent label overlapping
+        self.fig_spike_mech, cvs = _mpl_fig(3, 1, figsize=(16, 18))
         self.ax_spike_mech = [self.fig_spike_mech.add_subplot(3, 1, k) for k in range(1, 4)]
-        self.fig_spike_mech.set_tight_layout({'pad': 3.0, 'h_pad': 0.8})
+        # Enable navigation for all subplots
+        for ax in self.ax_spike_mech:
+            ax.set_navigate(True)
+        self.fig_spike_mech.set_tight_layout({'pad': 4.0, 'h_pad': 1.0, 'w_pad': 1.0})
         self.cvs_spike_mech = cvs
         self._tab_figures['Spike Mechanism'] = self.fig_spike_mech
         self._spike_mech_init_done = False
@@ -621,7 +705,7 @@ class AnalyticsWidget(QTabWidget):
         self._spike_mech_bar_artists: dict[str, object] = {}  # For stacked bar chart
 
         # Add spike zoomer spinbox and vertical scroll control
-        from PySide6.QtWidgets import QSpinBox, QHBoxLayout, QLabel, QWidget, QScrollArea
+        from PySide6.QtWidgets import QSpinBox, QHBoxLayout, QLabel, QWidget, QScrollArea, QVBoxLayout
         control_widget = QWidget()
         control_layout = QHBoxLayout(control_widget)
         control_layout.setContentsMargins(0, 0, 0, 0)
@@ -643,27 +727,6 @@ class AnalyticsWidget(QTabWidget):
         """)
         self._spike_zoomer.valueChanged.connect(self._on_spike_zoomer_changed)
         control_layout.addWidget(self._spike_zoomer)
-
-        # Vertical position slider for scrolling through plots
-        scroll_label = QLabel("Vertical:")
-        scroll_label.setStyleSheet("color:#CDD6F4; font-size:11px;")
-        control_layout.addWidget(scroll_label)
-
-        from PySide6.QtWidgets import QSlider
-        self._spike_mech_vscroll = QSlider(Qt.Horizontal)
-        self._spike_mech_vscroll.setRange(0, 100)
-        self._spike_mech_vscroll.setValue(0)
-        self._spike_mech_vscroll.setStyleSheet("""
-            QSlider {
-                background:#313244; border:1px solid #45475A;
-                height:20px;
-            }
-            QSlider::handle:horizontal {
-                background:#89B4FA; width:16px; margin:-4px 0; border-radius:8px;
-            }
-        """)
-        self._spike_mech_vscroll.valueChanged.connect(self._on_spike_mech_vscroll_changed)
-        control_layout.addWidget(self._spike_mech_vscroll, 1)
 
         control_layout.addStretch()
 
@@ -689,19 +752,6 @@ class AnalyticsWidget(QTabWidget):
         self._spike_zoomer_data = None  # Will store (t, v, spike_times)
 
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Mechanism'), extra_widget=control_widget)
-
-    def _on_spike_mech_vscroll_changed(self, value: int):
-        """Handle vertical scroll slider change to scroll through the figure."""
-        if not hasattr(self, 'cvs_spike_mech'):
-            return
-        # Calculate vertical scroll position (0-100%)
-        scroll_area = self.cvs_spike_mech.parent()
-        if scroll_area and hasattr(scroll_area, 'verticalScrollBar'):
-            scrollbar = scroll_area.verticalScrollBar()
-            if scrollbar:
-                max_val = scrollbar.maximum()
-                if max_val > 0:
-                    scrollbar.setValue(int(value / 100 * max_val))
 
     def _build_tab_currents(self) -> QWidget:
         # Refactored: Single large plot with checkboxes for toggling individual currents
@@ -1208,9 +1258,16 @@ class AnalyticsWidget(QTabWidget):
         for name, curr in result.currents.items():
             if curr is None or len(curr) == 0:
                 continue
-            i_min = float(np.min(curr))
-            i_max = float(np.max(curr))
-            q_abs = float(np.sum(np.abs(curr)) * dt_val) if dt_val > 0 else np.nan
+            # Handle 2D current arrays (n_comp, n_time) - sum across compartments
+            curr_arr = np.asarray(curr, dtype=float)
+            if curr_arr.ndim == 2:
+                curr_arr = np.sum(curr_arr, axis=0)
+            # Safety check for empty arrays
+            if curr_arr.size == 0:
+                continue
+            i_min = float(np.min(curr_arr))
+            i_max = float(np.max(curr_arr))
+            q_abs = float(np.sum(np.abs(curr_arr)) * dt_val) if dt_val > 0 else np.nan
             current_stats[name] = (i_min, i_max, q_abs)
         dominant_current = "—"
         # Fix np capture in lambda
@@ -1497,14 +1554,18 @@ class AnalyticsWidget(QTabWidget):
             self._chaos_lines['trend'] = self.ax_chaos.plot([], [], color='#F38BA8', lw=1.5, ls='--', label='Linear trend')[0]
 
         # Plot trajectory divergence
-        self._chaos_lines['div'].set_data(t, div)
+        div_safe = _ensure_shape_compatible(div, t, "div")
+        if div_safe is not None:
+            self._chaos_lines['div'].set_data(t, div_safe)
+        else:
+            self._chaos_lines['div'].set_data([], [])
 
         # Add linear trend line
         lle_per_ms = stats.get('lle_per_ms', np.nan)
-        if np.isfinite(lle_per_ms) and len(t) > 0:
+        if np.isfinite(lle_per_ms) and len(t) > 0 and div_safe is not None:
             t_trend = np.array([t[0], t[-1]])
             # Use the first point as intercept and lle_per_ms as slope
-            div_trend = div[0] + lle_per_ms * (t_trend - t[0])
+            div_trend = div_safe[0] + lle_per_ms * (t_trend - t[0])
             self._chaos_lines['trend'].set_data(t_trend, div_trend)
             self._chaos_lines['trend'].set_visible(True)
         else:
@@ -1545,8 +1606,11 @@ class AnalyticsWidget(QTabWidget):
         n_expected = len(centers)
         if len(self._mod_bars) != n_expected:
             # Remove old bars
-            for bar in self._mod_bars:
-                bar.remove()
+            try:
+                for bar in self._mod_bars:
+                    bar.remove()
+            except Exception:
+                pass
             # Create new bars with correct count
             width = 2 * np.pi / n_expected if n_expected > 0 else 0.1
             self._mod_bars = self.ax_mod.bar(np.zeros(n_expected), np.zeros(n_expected), width=width, alpha=0.7, color='#89B4FA', edgecolor='#74C7EC')
@@ -1595,7 +1659,11 @@ class AnalyticsWidget(QTabWidget):
 
             # Clear old checkboxes
             for cb in self._gates_checkboxes.values():
-                cb.deleteLater()
+                try:
+                    cb.setParent(None)
+                    cb.deleteLater()
+                except Exception:
+                    pass
             self._gates_checkboxes.clear()
 
             # Create new checkboxes
@@ -1612,7 +1680,11 @@ class AnalyticsWidget(QTabWidget):
         # Plot membrane potential (always visible on secondary axis)
         if self._gates_line_v is None:
             self._gates_line_v = ax.plot([], [], color='#2060CC', lw=2.0, alpha=0.7, label='V_soma')[0]
-        self._gates_line_v.set_data(t, result.v_soma)
+        v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
+        if v_soma_safe is not None:
+            self._gates_line_v.set_data(t, v_soma_safe)
+        else:
+            self._gates_line_v.set_data([], [])
         self._gates_line_v.set_visible(True)
 
         # Plot gates on secondary axis
@@ -1628,7 +1700,11 @@ class AnalyticsWidget(QTabWidget):
 
             line = self._gates_lines[name]
             is_visible = self._gates_visibility.get(name, True)
-            line.set_data(t, trace)
+            trace_safe = _ensure_shape_compatible(trace, t, f"gate_{name}")
+            if trace_safe is not None:
+                line.set_data(t, trace_safe)
+            else:
+                line.set_data([], [])
             line.set_visible(is_visible)
             if is_visible:
                 visible_names.add(name)
@@ -1675,9 +1751,14 @@ class AnalyticsWidget(QTabWidget):
             logging.error("SimulationResult missing or invalid currents attribute")
             return
 
-        # Count non-zero current traces
-        currents = {name: curr for name, curr in result.currents.items()
-                    if np.max(np.abs(curr)) > 1e-9}
+        # Count non-zero current traces (handle 2D arrays)
+        currents = {}
+        for name, curr in result.currents.items():
+            curr_arr = np.asarray(curr, dtype=float)
+            if curr_arr.ndim == 2:
+                curr_arr = np.sum(curr_arr, axis=0)
+            if np.max(np.abs(curr_arr)) > 1e-9:
+                currents[name] = curr_arr
         currents_signature = tuple(currents.keys())
 
         # Rebuild checkboxes if currents changed
@@ -1688,7 +1769,11 @@ class AnalyticsWidget(QTabWidget):
 
             # Clear old checkboxes
             for cb in self._currents_checkboxes.values():
-                cb.deleteLater()
+                try:
+                    cb.setParent(None)
+                    cb.deleteLater()
+                except Exception:
+                    pass
             self._currents_checkboxes.clear()
 
             # Create new checkboxes
@@ -1705,7 +1790,11 @@ class AnalyticsWidget(QTabWidget):
         # Plot membrane potential (always visible on secondary axis)
         if self._currents_line_v is None:
             self._currents_line_v = ax.plot([], [], color='#2060CC', lw=2.0, alpha=0.7, label='V_soma')[0]
-        self._currents_line_v.set_data(t, result.v_soma)
+        v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
+        if v_soma_safe is not None:
+            self._currents_line_v.set_data(t, v_soma_safe)
+        else:
+            self._currents_line_v.set_data([], [])
         self._currents_line_v.set_visible(True)
 
         # Plot currents on secondary axis
@@ -1721,7 +1810,11 @@ class AnalyticsWidget(QTabWidget):
 
             line = self._currents_lines[name]
             is_visible = self._currents_visibility.get(name, True)
-            line.set_data(t, curr)
+            curr_safe = _ensure_shape_compatible(curr, t, f"current_{name}")
+            if curr_safe is not None:
+                line.set_data(t, curr_safe)
+            else:
+                line.set_data([], [])
             line.set_visible(is_visible)
             if is_visible:
                 visible_names.add(name)
@@ -1811,25 +1904,34 @@ class AnalyticsWidget(QTabWidget):
             self._spike_zoomer.setRange(1, max(1, n_sp))
 
         # Row 1: Voltage trace with peaks and calcium overlay
-        self._spike_mech_lines["ax1_vm"].set_data(t, v)
-        if n_sp > 0:
-            self._spike_mech_lines["ax1_peaks"].set_data(t[peak_idx], v[peak_idx])
+        v_safe = _ensure_shape_compatible(v, t, "v_soma")
+        if v_safe is not None:
+            self._spike_mech_lines["ax1_vm"].set_data(t, v_safe)
+        else:
+            self._spike_mech_lines["ax1_vm"].set_data([], [])
+        if n_sp > 0 and v_safe is not None:
+            self._spike_mech_lines["ax1_peaks"].set_data(t[peak_idx], v_safe[peak_idx])
             self._spike_mech_lines["ax1_peaks"].set_visible(True)
         else:
             self._spike_mech_lines["ax1_peaks"].set_data([], [])
             self._spike_mech_lines["ax1_peaks"].set_visible(False)
-        
+
         # Add continuous calcium trace on secondary axis
         if (result.ca_i is not None and
             len(result.ca_i) > 0 and
             result.ca_i.shape[0] > 0):
             ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
-            self._spike_mech_lines["ax1_ca"].set_data(t, ca_nM)
-            self._spike_mech_lines["ax1_ca"].set_visible(True)
-            self._spike_mech_ax2b.set_ylabel("[Ca²+]_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
-            self._spike_mech_ax2b.tick_params(axis="y", labelcolor="#D62728")
-            self._spike_mech_ax2b.relim()
-            self._spike_mech_ax2b.autoscale_view()
+            ca_nM_safe = _ensure_shape_compatible(ca_nM, t, "ca_nM")
+            if ca_nM_safe is not None:
+                self._spike_mech_lines["ax1_ca"].set_data(t, ca_nM_safe)
+                self._spike_mech_lines["ax1_ca"].set_visible(True)
+                self._spike_mech_ax2b.set_ylabel("[Ca²+]_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
+                self._spike_mech_ax2b.tick_params(axis="y", labelcolor="#D62728")
+                self._spike_mech_ax2b.relim()
+                self._spike_mech_ax2b.autoscale_view()
+            else:
+                self._spike_mech_lines["ax1_ca"].set_data([], [])
+                self._spike_mech_lines["ax1_ca"].set_visible(False)
 
             # Compute dynamic E_Ca Nernst potential
             # E_Ca = (RT/zF) * ln([Ca]_out / [Ca]_in)
@@ -1838,8 +1940,13 @@ class AnalyticsWidget(QTabWidget):
             ca_out_M = result.config.calcium.Ca_ext if hasattr(result.config.calcium, 'Ca_ext') else 2.0
             RT_over_zF = 13.35  # mV at 37°C for Ca2+
             e_ca = RT_over_zF * np.log(ca_out_M / (ca_in_M + 1e-12))
-            self._spike_mech_lines["ax1_eca"].set_data(t, e_ca)
-            self._spike_mech_lines["ax1_eca"].set_visible(True)
+            e_ca_safe = _ensure_shape_compatible(e_ca, t, "e_ca")
+            if e_ca_safe is not None:
+                self._spike_mech_lines["ax1_eca"].set_data(t, e_ca_safe)
+                self._spike_mech_lines["ax1_eca"].set_visible(True)
+            else:
+                self._spike_mech_lines["ax1_eca"].set_data([], [])
+                self._spike_mech_lines["ax1_eca"].set_visible(False)
         else:
             self._spike_mech_lines["ax1_ca"].set_data([], [])
             self._spike_mech_lines["ax1_ca"].set_visible(False)
@@ -1887,7 +1994,15 @@ class AnalyticsWidget(QTabWidget):
             logging.error("SimulationResult missing or invalid currents attribute")
             return
             
-        traces = {k: np.asarray(result.currents[k], dtype=float) for k in curr_candidates if k in result.currents}
+        # Handle 2D current arrays (n_comp, n_time) - sum across compartments
+        traces = {}
+        for k in curr_candidates:
+            if k in result.currents:
+                tr = np.asarray(result.currents[k], dtype=float)
+                # If 2D array, sum across spatial dimension to get total current
+                if tr.ndim == 2:
+                    tr = np.sum(tr, axis=0)
+                traces[k] = tr
         
         for line in self._spike_mech_norm_lines.values():
             line.set_data([], [])
@@ -1895,22 +2010,31 @@ class AnalyticsWidget(QTabWidget):
         
         for name, tr in traces.items():
             if name not in self._spike_mech_norm_lines:
-                self._spike_mech_norm_lines[name] = ax2.plot([], [], lw=1.5, label=f"|I_{name}| norm",
-                                                            color=CHAN_COLORS.get(name, "#555555"))[0]
+                color = CHAN_COLORS.get(name, '#888888')
+                self._spike_mech_norm_lines[name] = ax2.plot([], [], color=color, lw=1.5, alpha=0.8, label=name)[0]
             # Normalize and smooth
             tr_norm = np.abs(tr) / (np.max(np.abs(tr)) + 1e-12)
             tr_smooth = _smooth(tr_norm)
-            self._spike_mech_norm_lines[name].set_data(t, tr_smooth)
-            self._spike_mech_norm_lines[name].set_visible(True)
+            tr_smooth_safe = _ensure_shape_compatible(tr_smooth, t, f"trace_{name}")
+            if tr_smooth_safe is not None:
+                self._spike_mech_norm_lines[name].set_data(t, tr_smooth_safe)
+                self._spike_mech_norm_lines[name].set_visible(True)
+            else:
+                self._spike_mech_norm_lines[name].set_data([], [])
+                self._spike_mech_norm_lines[name].set_visible(False)
 
         # Compute and plot net current: I_net = sum of all ionic currents
-        # Spiking is only possible when I_net is negative (inward)
         if traces:
             i_net = np.zeros_like(t)
             for tr in traces.values():
                 i_net += tr
-            self._spike_mech_lines["ax2_inet"].set_data(t, i_net)
-            self._spike_mech_lines["ax2_inet"].set_visible(True)
+            i_net_safe = _ensure_shape_compatible(i_net, t, "i_net")
+            if i_net_safe is not None:
+                self._spike_mech_lines["ax2_inet"].set_data(t, i_net_safe)
+                self._spike_mech_lines["ax2_inet"].set_visible(True)
+            else:
+                self._spike_mech_lines["ax2_inet"].set_data([], [])
+                self._spike_mech_lines["ax2_inet"].set_visible(False)
 
         _configure_ax_interactive(
             ax2,
@@ -2145,22 +2269,43 @@ class AnalyticsWidget(QTabWidget):
                                   xlabel='V (mV)', ylabel='τ (ms)', show_legend=True)
 
         # Phase portrait V-m and V-h
-        self._equil_lines["phase_m"].set_data(result.v_soma, result.y[result.n_comp, :])
-        self._equil_lines["phase_h"].set_data(result.v_soma, result.y[2 * result.n_comp, :])
+        v_soma_safe = _ensure_shape_compatible(result.v_soma, result.y[result.n_comp, :], "v_soma_phase")
+        if v_soma_safe is not None:
+            m_safe = _ensure_shape_compatible(result.y[result.n_comp, :], v_soma_safe, "m_phase")
+            h_safe = _ensure_shape_compatible(result.y[2 * result.n_comp, :], v_soma_safe, "h_phase")
+            if m_safe is not None:
+                self._equil_lines["phase_m"].set_data(v_soma_safe, m_safe)
+            else:
+                self._equil_lines["phase_m"].set_data([], [])
+            if h_safe is not None:
+                self._equil_lines["phase_h"].set_data(v_soma_safe, h_safe)
+            else:
+                self._equil_lines["phase_h"].set_data([], [])
+        else:
+            self._equil_lines["phase_m"].set_data([], [])
+            self._equil_lines["phase_h"].set_data([], [])
         ax3.relim()
         ax3.autoscale_view()
         _configure_ax_interactive(ax3, title='V – Gate Phase Portraits',
-                                  xlabel='V (mV)', ylabel='Gate value', show_legend=True)
+                                  xlabel='V (mV)', ylabel='Gate variable', show_legend=True)
 
-        # gNa_eff and gK_eff over time
+        # Effective conductances over time
+        t    = result.t
         m_t  = result.y[result.n_comp, :]
         h_t  = result.y[2 * result.n_comp, :]
         n_t  = result.y[3 * result.n_comp, :]
-        t    = result.t
         g_Na = result.config.channels.gNa_max * (m_t ** 3) * h_t
         g_K  = result.config.channels.gK_max  * (n_t ** 4)
-        self._equil_lines["g_na"].set_data(t, g_Na)
-        self._equil_lines["g_k"].set_data(t, g_K)
+        g_Na_safe = _ensure_shape_compatible(g_Na, t, "g_Na")
+        g_K_safe = _ensure_shape_compatible(g_K, t, "g_K")
+        if g_Na_safe is not None:
+            self._equil_lines["g_na"].set_data(t, g_Na_safe)
+        else:
+            self._equil_lines["g_na"].set_data([], [])
+        if g_K_safe is not None:
+            self._equil_lines["g_k"].set_data(t, g_K_safe)
+        else:
+            self._equil_lines["g_k"].set_data([], [])
         ax4.relim()
         ax4.autoscale_view()
         _configure_ax_interactive(ax4, title='Effective Conductances',
@@ -2468,6 +2613,18 @@ class AnalyticsWidget(QTabWidget):
         from core.analysis import compute_current_balance
         try:
             I_bal = compute_current_balance(result, result.morph)
+            # Ensure I_bal is 1D and matches t shape
+            I_bal = np.asarray(I_bal, dtype=float)
+            if I_bal.ndim != 1:
+                I_bal = I_bal.flatten()
+            # If I_bal size doesn't match t, truncate or pad
+            if I_bal.size != t.size:
+                if I_bal.size > t.size:
+                    I_bal = I_bal[:t.size]
+                else:
+                    I_bal_padded = np.zeros_like(t)
+                    I_bal_padded[:I_bal.size] = I_bal
+                    I_bal = I_bal_padded
             err = float(np.max(np.abs(I_bal)))
         except Exception as e:
             I_bal = np.zeros_like(t)
@@ -2475,7 +2632,12 @@ class AnalyticsWidget(QTabWidget):
 
         if "abs_err" not in self._balance_lines:
             self._balance_lines["abs_err"] = ax1.semilogy([], [], color='#3264DC', lw=1)[0]
-        self._balance_lines["abs_err"].set_data(t, np.abs(I_bal) + 1e-12)
+        # Final shape check before set_data
+        if I_bal.shape != t.shape:
+            logging.warning(f"I_bal shape {I_bal.shape} doesn't match t {t.shape}, skipping energy balance error plot")
+            self._balance_lines["abs_err"].set_data([], [])
+        else:
+            self._balance_lines["abs_err"].set_data(t, np.abs(I_bal) + 1e-12)
         ax1.set_ylabel('|Error| (µA/cm²)')
         ax1.set_title(f'Current Balance Error (log) — max|error| = {err:.5f} µA/cm²  '
                       f'{"✓ Good" if err < 0.05 else "⚠ Check solver"}')
@@ -2495,9 +2657,34 @@ class AnalyticsWidget(QTabWidget):
             return
 
         for name, curr in result.currents.items():
+            # Handle 2D current arrays (n_comp, n_time) - sum across compartments
+            curr_arr = np.asarray(curr, dtype=float)
+            if curr_arr.ndim == 2:
+                curr_arr = np.sum(curr_arr, axis=0)
+            
+            # Ensure curr_arr is 1D and matches t shape
+            if curr_arr.ndim != 1:
+                curr_arr = curr_arr.flatten()
+            
+            # If curr_arr size doesn't match t, try to truncate or reshape
+            if curr_arr.size != t.size:
+                # If curr_arr is larger, truncate to match t
+                if curr_arr.size > t.size:
+                    curr_arr = curr_arr[:t.size]
+                # If curr_arr is smaller, pad with zeros
+                else:
+                    curr_arr_padded = np.zeros_like(t)
+                    curr_arr_padded[:curr_arr.size] = curr_arr
+                    curr_arr = curr_arr_padded
+            
+            # Final shape check - skip if still mismatched
+            if curr_arr.shape != t.shape:
+                logging.warning(f"Skipping current {name}: shape {curr_arr.shape} doesn't match t {t.shape}")
+                continue
+            
             color = CHAN_COLORS.get(name, '#888888')
             E_rev = _get_E_rev(name, result.config.channels)
-            Q_cum = np.cumsum(np.abs(curr)) * dt
+            Q_cum = np.cumsum(np.abs(curr_arr)) * dt
             q_key = f"Q_{name}"
             p_key = f"P_{name}"
             active_q.add(q_key)
@@ -2506,10 +2693,32 @@ class AnalyticsWidget(QTabWidget):
                 self._energy_lines[q_key] = ax2.plot([], [], color=color, lw=1.5, label=f'Q_{name}')[0]
             if p_key not in self._energy_lines:
                 self._energy_lines[p_key] = ax3.plot([], [], color=color, lw=1, alpha=0.8, label=f'P_{name}')[0]
-            self._energy_lines[q_key].set_data(t, Q_cum)
-            P = np.abs(curr * (result.v_soma - E_rev))
-            self._energy_lines[p_key].set_data(t, P)
-            P_total += P
+            Q_cum_safe = _ensure_shape_compatible(Q_cum, t, f"Q_cum_{name}")
+            if Q_cum_safe is not None:
+                self._energy_lines[q_key].set_data(t, Q_cum_safe)
+            else:
+                self._energy_lines[q_key].set_data([], [])
+            # Ensure v_soma is 1D array compatible with curr_arr
+            v_soma = np.asarray(result.v_soma, dtype=float)
+            if v_soma.ndim != 1:
+                v_soma = v_soma.flatten()
+            # Ensure v_soma matches t shape
+            if v_soma.shape != t.shape:
+                if v_soma.size == t.size:
+                    v_soma = v_soma.reshape(t.shape)
+                elif v_soma.size > t.size:
+                    v_soma = v_soma[:t.size]
+                else:
+                    v_soma_padded = np.zeros_like(t)
+                    v_soma_padded[:v_soma.size] = v_soma
+                    v_soma = v_soma_padded
+            P = np.abs(curr_arr * (v_soma - E_rev))
+            P_safe = _ensure_shape_compatible(P, t, f"P_{name}")
+            if P_safe is not None:
+                self._energy_lines[p_key].set_data(t, P_safe)
+                P_total += P_safe
+            else:
+                self._energy_lines[p_key].set_data([], [])
 
         for key, line in self._energy_lines.items():
             if key.startswith("Q_") and key not in active_q:
@@ -2528,7 +2737,11 @@ class AnalyticsWidget(QTabWidget):
         # ── Row 3: Instantaneous Power P ────────────────────────────────
         if "P_total" not in self._energy_lines:
             self._energy_lines["P_total"] = ax3.plot([], [], 'k-', lw=2, label='Total', zorder=5)[0]
-        self._energy_lines["P_total"].set_data(t, P_total)
+        P_total_safe = _ensure_shape_compatible(P_total, t, "P_total")
+        if P_total_safe is not None:
+            self._energy_lines["P_total"].set_data(t, P_total_safe)
+        else:
+            self._energy_lines["P_total"].set_data([], [])
 
         ax3.set_xlabel('Time (ms)')
         ax3.set_ylabel('Power (µW/cm²)')
@@ -2560,21 +2773,29 @@ class AnalyticsWidget(QTabWidget):
             if self._atp_threshold_line is None:
                 self._atp_threshold_line = ax4.axhline(y=0.5, color='#FF6B6B', linestyle='--', lw=1.5, label='Ischemic Threshold')
 
-            self._atp_line.set_data(t, atp_data)
+            atp_data_safe = _ensure_shape_compatible(atp_data, t, "atp_data")
+            if atp_data_safe is not None:
+                self._atp_line.set_data(t, atp_data_safe)
+                ax4.set_ylim(0, max(3.0, np.max(atp_data_safe) * 1.1))
+            else:
+                self._atp_line.set_data([], [])
             ax4.set_ylabel('[ATP]i (mM)')
             ax4.set_xlabel('Time (ms)')
             ax4.set_title('Intracellular ATP Pool (Metabolic Breath)')
             ax4.legend(fontsize=8, loc='upper right')
             ax4.grid(alpha=0.3)
-            ax4.set_ylim(0, max(3.0, np.max(atp_data) * 1.1))
-            ax4.relim()
-            ax4.autoscale_view()
         else:
             ax4.text(0.5, 0.5, 'Enable dynamic ATP in config\nto see metabolic dynamics',
                      ha='center', va='center', transform=ax4.transAxes, fontsize=10, color='gray')
             ax4.set_xlabel('Time (ms)')
             ax4.set_ylabel('[ATP]i (mM)')
             ax4.set_title('Intracellular ATP Pool (Disabled)')
+        
+        try:
+            self.fig_energy.tight_layout()
+        except Exception:
+            pass  # Skip tight_layout if axes are incompatible
+        self.cvs_energy.draw_idle()
 
         # Add crosshair and zoom to time-series axes only (not pie chart)
         for i, ax in enumerate(self.ax_energy[:4]):  # First 4 axes (time-series plots)
@@ -2621,7 +2842,10 @@ class AnalyticsWidget(QTabWidget):
         ax5.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cm²){title_suffix}', fontsize=10)
         ax5.axis('equal')
 
-        self.fig_energy.tight_layout()
+        try:
+            self.fig_energy.tight_layout()
+        except Exception:
+            pass  # Skip tight_layout if axes are incompatible
         self.cvs_energy.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
@@ -2743,9 +2967,9 @@ class AnalyticsWidget(QTabWidget):
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
         n_sp = len(spike_times)
 
-        if n_sp < 2:
+        if n_sp < 3:
             ax.clear()
-            ax.text(0.5, 0.5, 'Need ≥2 spikes for Poincaré plot', ha='center', va='center',
+            ax.text(0.5, 0.5, 'Need ≥3 spikes for Poincaré plot', ha='center', va='center',
                    transform=ax.transAxes, fontsize=12)
             self.cvs_poincare.draw_idle()
             return
@@ -2791,7 +3015,11 @@ class AnalyticsWidget(QTabWidget):
         # Top: raw Vm trace
         if self._spectro_vm_line is None:
             self._spectro_vm_line = ax_v.plot([], [], color='#2060C0', lw=0.8)[0]
-        self._spectro_vm_line.set_data(t, v)
+        v_safe = _ensure_shape_compatible(v, t, "v_soma_spectro")
+        if v_safe is not None:
+            self._spectro_vm_line.set_data(t, v_safe)
+        else:
+            self._spectro_vm_line.set_data([], [])
         ax_v.set_ylabel('V (mV)', fontsize=9)
         ax_v.set_title('Membrane potential — soma', fontsize=10)
         ax_v.grid(alpha=0.25)
