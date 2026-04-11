@@ -78,6 +78,8 @@ def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
     _copy_defaults(cfg.dendritic_filter,  DendriticFilterParams())
     _copy_defaults(cfg.analysis,          AnalysisParams())
     _copy_defaults(cfg.preset_modes,      PresetModeParams())
+    cfg.dual_stimulation = None
+    cfg.notes = ""
 
 
 def _copy_defaults(target, source) -> None:
@@ -216,12 +218,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
     Полностью сбрасывает все поля до значений по умолчанию перед применением
     пресета, предотвращая смешивание параметров между пресетами.
     """
-    # Keep user-selected preset modes across preset reloads.
-    selected_modes = cfg.preset_modes.model_copy(deep=True)
-
     # ПОЛНЫЙ СБРОС: все поля возвращаются к умолчаниям Pydantic
     _reset_cfg_to_defaults(cfg)
-    _copy_defaults(cfg.preset_modes, selected_modes)
     
     # --- 1. КЛАССИКА: ГИГАНТСКИЙ АКСОН КАЛЬМАРА ---
     if "Squid" in name:
@@ -351,7 +349,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # IA channel: Moderate for frequency adaptation and spike-frequency accommodation
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.25  # Moderate IA for adaptation dynamics
-        cfg.channels.E_A = -77.0    # K+ reversal potential
+        cfg.channels.EK = -77.0    # K+ reversal potential
         
         # Alpha stimulus: represents one synaptic volley from descending pathways
         # Multi-comp with AIS produces burst of ~16 spikes, Vmax ≈ 34 mV
@@ -840,24 +838,10 @@ def get_synaptic_stimulus_names():
 
 
 def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
-    """
-    Применяет конфигурацию синаптического стимула к уже установленному нейрону.
-    
-    Параметры:
-    -----------
-    cfg : FullModelConfig
-        Конфигурация нейрона (уже должна иметь membrane parameters)
-    stimulus_type : str
-        Тип синаптического входа (из get_synaptic_stimulus_names())
-    
-    Примечание:
-    -----------
-    Эта функция ТОЛЬКО переопределяет параметры стимуляции (alpha_tau, Iext).
-    Не трогает саму морфологию и каналы нейрона.
-    
-    ВАЖНО: Амплитуды масштабированы для soma (soma diameter ~20-30 µm).
-    Для многокомпартментных моделей нужны относительно высокие значения (~5-20 µA)
-    чтобы преодолеть кабельную утечку и вызвать деполяризацию.
+    """Apply a synaptic stimulus profile on top of the current neuron config.
+
+    Only stimulation fields are modified (`stim_type`, `alpha_tau`, `Iext`,
+    timing/simulation window). Morphology and channel parameters are left intact.
     """
     
     # Default fallback is alpha, but known receptor presets below

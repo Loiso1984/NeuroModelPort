@@ -63,9 +63,9 @@ def test_purkinje_dual_stimulation():
     
     # Verify dual stimulation is configured
     assert cfg.dual_stimulation.enabled, "Purkinje should have dual stimulation enabled"
-    assert cfg.dual_stimulation.primary_location == "soma", "Primary should be soma"
-    assert cfg.dual_stimulation.primary_stim_type == "const", "Primary should be const"
-    assert cfg.dual_stimulation.primary_Iext == 30.0, "Primary Iext should be 30.0"
+    assert cfg.stim_location.location == "soma", "Primary should be soma"
+    assert cfg.stim.stim_type == "const", "Primary should be const"
+    assert cfg.stim.Iext == 30.0, "Primary Iext should be 30.0"
     assert cfg.dual_stimulation.secondary_location == "dendritic_filtered", "Secondary should be dendritic"
     assert cfg.dual_stimulation.secondary_stim_type == "GABAA", "Secondary should be GABAA"
     assert cfg.dual_stimulation.secondary_train_type == "poisson", "Secondary should be poisson"

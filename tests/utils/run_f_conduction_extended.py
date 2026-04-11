@@ -139,10 +139,6 @@ def _acceptance_ok(
 
 
 def main() -> int:
-    if _IMPORT_ERROR is not None:
-        print(dependency_diagnostic("f-conduction-extended", _IMPORT_ERROR), file=sys.stderr)
-        return 2
-
     parser = argparse.ArgumentParser(description="Extended F-vs-D conduction validation")
     parser.add_argument("--temps", type=str, default="23,30,37")
     parser.add_argument("--f-ra-mults", type=str, default="0.9,1.0,1.2")
