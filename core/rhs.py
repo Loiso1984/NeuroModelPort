@@ -184,7 +184,7 @@ def compute_ionic_currents_scalar(
     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, sk_gate,
     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
     gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar,
-    ena, ek, el, eih, ea,
+    ena, ek, el, eih,
     ca_i_val, ca_ext, ca_rest, t_kelvin,
 ):
     """Shared ionic-current math (deterministic RHS + stochastic EM path)."""
@@ -237,18 +237,23 @@ def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
     
     Args:
         stype: Synapse type (4=AMPA, 5=NMDA, 6=GABAA, 7=GABAB, 8=Kainate, 9=Nicotinic)
-        e_rev_primary: Primary stimulus synaptic reversal (for pathology)
-        e_rev_secondary: Secondary stimulus synaptic reversal (for pathology)
+        e_rev_primary: Reversal for excitatory synapses (AMPA/NMDA/Kainate/Nicotinic)
+        e_rev_secondary: Reversal for inhibitory GABA-A synapses (pathology-configurable)
     
     Returns:
         Reversal potential in mV
     """
-    if stype == 6:   # GABA-A (Cl⁻, Bormann 1988)
-        return e_rev_primary  # Use flexible reversal for pathology
-    elif stype == 7:  # GABA-B (K⁺ via GIRK, Lüscher 1997)
-        return -95.0  # GABA-B is K+-mediated, fixed near EK
-    # Excitatory: AMPA(4), NMDA(5), Kainate(8), Nicotinic(9) — cation, ~0 mV
-    return e_rev_primary  # Use flexible reversal for pathology
+    # Excitatory: AMPA(4), NMDA(5), Kainate(8), Nicotinic(9)
+    if stype == 4 or stype == 5 or stype == 8 or stype == 9:
+        return e_rev_primary
+    # Inhibitory GABA-A (Cl-), pathology-configurable
+    if stype == 6:
+        return e_rev_secondary
+    # Inhibitory GABA-B (K+ via GIRK), fixed biophysical reversal
+    if stype == 7:
+        return E_GABA_B
+    # Fallback for unknown synaptic code
+    return e_rev_primary
 
 @njit(float64(float64, int32, float64, float64[:], int32, float64), cache=True)
 def get_event_driven_conductance(t: float64, stype: int32, iext: float64, 
@@ -335,7 +340,6 @@ def rhs_multicompartment(
     ek = physics_params.ek
     el = physics_params.el
     eih = physics_params.eih
-    ea = physics_params.ea
     
     # Morphology and axial coupling
     cm_v = physics_params.cm_v
@@ -472,7 +476,7 @@ def rhs_multicompartment(
         base_current = get_event_driven_conductance(t, stype, iext, event_times_arr, n_events, atau)
     else:
         base_current = get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz)
-    e_syn = _get_syn_reversal(stype, physics.e_rev_syn_primary, physics.e_rev_syn_secondary) if is_conductance_based else 0.0
+    e_syn = _get_syn_reversal(stype, physics_params.e_rev_syn_primary, physics_params.e_rev_syn_secondary) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
     v_filtered_primary = 0.0
@@ -498,7 +502,7 @@ def rhs_multicompartment(
     base_current_2 = 0.0
     if dual_stim_enabled == 1:
         is_cond_2 = (stype_2 >= 4)
-        e_syn_2 = _get_syn_reversal(stype_2, physics.e_rev_syn_secondary, physics.e_rev_syn_primary) if is_cond_2 else 0.0
+        e_syn_2 = _get_syn_reversal(stype_2, physics_params.e_rev_syn_primary, physics_params.e_rev_syn_secondary) if is_cond_2 else 0.0
         is_nmda_2 = (stype_2 == 5)
         # Stage 6.3 symmetry: use event-driven conductance for secondary stim if queue is non-empty
         if n_events_2 > 0 and is_cond_2:
@@ -542,7 +546,7 @@ def rhs_multicompartment(
             ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
             en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
             gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i], gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
-            ena, ek, el, eih, ea,
+            ena, ek, el, eih,
             ca_i_val, ca_ext, ca_rest, t_kelvin,
         )
 

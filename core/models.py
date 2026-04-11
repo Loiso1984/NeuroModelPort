@@ -72,6 +72,11 @@ class ChannelParams(BaseModel):
         """A-current reversal potential (mV) - always equals EK since A-current is a K+ channel."""
         return self.EK
 
+    @E_A.setter
+    def E_A(self, value: float) -> None:
+        """Backward-compatible alias: writing E_A updates EK."""
+        self.EK = float(value)
+
     enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated K⁺, spike adaptation)")
     gSK_max:   float = Field(default=2.0,  description="Max SK conductance (mS/cm²)")
     tau_SK:    float = Field(default=10.0,  description="SK gate time constant (ms, Hirschberg 1998: 5-50 ms)")
@@ -406,6 +411,10 @@ class PresetModeParams(BaseModel):
     dravet_mode: Literal['normal', 'febrile'] = Field(
         default='normal',
         description="Dravet syndrome mode: normal or febrile (temperature-triggered failure)"
+    )
+    delay_target: Literal['Soma', 'AIS', 'Terminal', 'Custom'] = Field(
+        default='Terminal',
+        description="Default delay target for conduction visualizations"
     )
 
 
