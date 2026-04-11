@@ -42,7 +42,7 @@ def _compute_ionic_currents_vectorized(
     r_arr, s_arr, u_arr, a_arr, b_arr, p_arr, q_arr, w_arr, x_arr, y_arr, j_arr, z_arr,
     ca_arr,
     gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-    ena, ek, el, eih, ea,
+    ena, ek, el, eih,
     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
     ca_ext, t_kelvin, ca_rest,
     n_comp,
@@ -204,7 +204,6 @@ def run_native_loop(
     ek  = physics.ek
     el  = physics.el
     eih = physics.eih
-    ea  = physics.ea
 
     # ── Calcium / SK ──
     ca_rest  = physics.ca_rest
@@ -321,8 +320,8 @@ def run_native_loop(
     # ── Stimulus flags (computed once) ──
     is_cond   = (physics.stype >= 4)
     is_cond_2 = (physics.stype_2 >= 4)
-    e_syn     = _get_syn_reversal(physics.stype)   if is_cond   else 0.0
-    e_syn_2   = _get_syn_reversal(physics.stype_2) if is_cond_2 else 0.0
+    e_syn     = _get_syn_reversal(physics.stype, physics.e_rev_syn_primary, physics.e_rev_syn_secondary)   if is_cond   else 0.0
+    e_syn_2   = _get_syn_reversal(physics.stype_2, physics.e_rev_syn_primary, physics.e_rev_syn_secondary) if is_cond_2 else 0.0
     is_nmda   = (physics.stype == 5)
     is_nmda_2 = (physics.stype_2 == 5)
 
@@ -396,7 +395,7 @@ def run_native_loop(
             w_arr_buf, x_arr_buf, y_arr_buf, j_arr_buf, z_arr_buf,
             ca_arr_buf,
             gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-            ena, ek, el, eih, ea,
+            ena, ek, el, eih,
             en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
             ca_ext, t_kelvin, ca_rest,
             n_comp,
@@ -528,7 +527,7 @@ def run_native_loop(
             w_arr_buf, x_arr_buf, y_arr_buf, j_arr_buf, z_arr_buf,
             ca_arr_buf,
             gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-            ena, ek, el, eih, ea,
+            ena, ek, el, eih,
             en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
             ca_ext, t_kelvin, ca_rest,
             n_comp,

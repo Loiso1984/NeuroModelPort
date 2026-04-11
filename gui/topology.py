@@ -641,7 +641,7 @@ class TopologyWidget(QWidget):
                 symbol="s",
             )
 
-            e_curr = abs(dual_config.primary_Iext)
+            e_curr = abs(float(getattr(cfg.stim, "Iext", 0.0)))
             i_curr = abs(dual_config.secondary_Iext) if s_type in ("GABAA", "GABAB") else 0
             if i_curr > 0:
                 ei = e_curr / i_curr

@@ -458,7 +458,6 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         ek = physics_params.ek
         el = physics_params.el
         eih = physics_params.eih
-        ea = physics_params.ea
         
         # Morphology and axial coupling
         cm_v = physics_params.cm_v
@@ -625,8 +624,8 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
             if en_ia:
                 d_iion_dv += ga_v[i] * a[i] * b[i]
-                _add(v_row, idx["a"].start + i, -(ga_v[i] * b[i] * (v[i] - ea)) / cm)
-                _add(v_row, idx["b"].start + i, -(ga_v[i] * a[i] * (v[i] - ea)) / cm)
+                _add(v_row, idx["a"].start + i, -(ga_v[i] * b[i] * (v[i] - ek)) / cm)
+                _add(v_row, idx["b"].start + i, -(ga_v[i] * a[i] * (v[i] - ek)) / cm)
 
             i_tca_val = 0.0
             if en_itca and idx["p"] is not None:
