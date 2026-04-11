@@ -228,14 +228,6 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
 
 def apply_preset(cfg: FullModelConfig, name: str):
     """
-    Apply a named full model preset (morphology and membrane parameters) to the provided configuration.
-    
-    Resets all top-level fields of `cfg` to their Pydantic defaults (while preserving the user's `cfg.preset_modes` selections), then configures morphology, channel densities, ionic reversal potentials, stimulation, calcium/metabolic settings, and pathology overlays according to `name`. Some presets apply additional mode overlays (e.g., L5 pyramidal, thalamic k-mode, hypoxia/alzheimer overlays) or call other presets as bases; unrecognized names leave the configuration at the post-reset state with only `preset_modes` restored.
-    
-    Parameters:
-        cfg (FullModelConfig): Mutable configuration object to modify in-place.
-        name (str): Preset name or substring used to select which preset to apply.
-    """
     # ПОЛНЫЙ СБРОС: все поля возвращаются к умолчаниям Pydantic
     _reset_cfg_to_defaults(cfg)
     

@@ -15,7 +15,7 @@ Features:
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, 
-    QComboBox, QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit,
+    QComboBox, QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit, QLineEdit,
     QGridLayout, QFrame, QPushButton
 )
 from PySide6.QtCore import Qt, Signal
