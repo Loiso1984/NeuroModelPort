@@ -69,8 +69,8 @@ def apply_dual_preset(config, preset_name: str):
         
         dual_config.secondary_location = "dendritic_filtered"
         dual_config.secondary_stim_type = "GABAA"
-        dual_config.secondary_Iext = 12.0
-        dual_config.secondary_start = 15.0  # Slightly delayed
+        dual_config.secondary_Iext = 1.5
+        dual_config.secondary_start = 11.5  # Feedforward delay ~1.5 ms
         dual_config.secondary_duration = 50.0
         dual_config.secondary_alpha_tau = 3.0
         
@@ -89,7 +89,7 @@ def apply_dual_preset(config, preset_name: str):
         
         dual_config.secondary_location = "dendritic_filtered"
         dual_config.secondary_stim_type = "GABAA"
-        dual_config.secondary_Iext = 15.0
+        dual_config.secondary_Iext = 1.5
         dual_config.secondary_start = 12.0
         dual_config.secondary_duration = 40.0
         dual_config.secondary_alpha_tau = 4.0
@@ -103,14 +103,14 @@ def apply_dual_preset(config, preset_name: str):
         # Demonstrates spatial integration and coincidence detection
         config.stim_location.location = "dendritic_filtered"
         config.stim.stim_type = "AMPA"
-        config.stim.Iext = 1.5
+        config.stim.Iext = 0.5
         config.stim.pulse_start = 10.0
         config.stim.pulse_dur = 5.0
         config.stim.alpha_tau = 2.0
         
         dual_config.secondary_location = "dendritic_filtered"
         dual_config.secondary_stim_type = "AMPA"
-        dual_config.secondary_Iext = 1.2
+        dual_config.secondary_Iext = 0.4
         dual_config.secondary_start = 15.0  # Slightly delayed
         dual_config.secondary_duration = 5.0
         dual_config.secondary_alpha_tau = 2.0
@@ -127,10 +127,12 @@ def apply_dual_preset(config, preset_name: str):
         # Rhythmic theta burst with constant background input
         # Models hippocampal theta rhythm with ongoing activity
         config.stim_location.location = "soma"
-        config.stim.stim_type = "pulse"
-        config.stim.Iext = 1.5
+        config.stim.stim_type = "AMPA"
+        config.stim.Iext = 1.0
         config.stim.pulse_start = 10.0
-        config.stim.pulse_dur = 0.5  # Short pulses
+        config.stim.synaptic_train_type = "regular"
+        config.stim.synaptic_train_freq_hz = 7.0
+        config.stim.synaptic_train_duration_ms = 1000.0
         config.stim.alpha_tau = 2.0
         
         dual_config.secondary_location = "dendritic_filtered"
@@ -190,7 +192,7 @@ def apply_dual_preset(config, preset_name: str):
     elif preset_name == "Theta-Gamma Modulation":
         # Cross-frequency coupling: theta (7Hz) and gamma (40Hz) synaptic trains
         # Models hippocampal theta-gamma coupling for memory encoding
-        config.stim_location.location = "soma"
+        config.stim_location.location = "dendritic_filtered"
         config.stim.stim_type = "AMPA"
         config.stim.Iext = 1.0
         config.stim.pulse_start = 10.0
@@ -198,6 +200,8 @@ def apply_dual_preset(config, preset_name: str):
         config.stim.synaptic_train_type = "regular"
         config.stim.synaptic_train_freq_hz = 7.0  # Theta rhythm
         config.stim.alpha_tau = 2.0
+        config.dendritic_filter.distance_um = 250.0
+        config.dendritic_filter.tau_dendritic_ms = 20.0
         
         dual_config.secondary_location = "soma"
         dual_config.secondary_stim_type = "AMPA"
@@ -253,8 +257,8 @@ def get_preset_description(preset_name: str) -> str:
             "with ongoing network activity.",
 
         "Theta-Gamma Modulation":
-            "Cross-frequency coupling: theta (7Hz) and gamma (40Hz) synaptic "
-            "trains to soma. Models hippocampal theta-gamma coupling for "
+            "Cross-frequency coupling: dendritic theta (7Hz) modulation with "
+            "somatic gamma (40Hz) drive. Models hippocampal theta-gamma coupling for "
             "memory encoding and information processing.",
             
         "Spike-Timing Control":

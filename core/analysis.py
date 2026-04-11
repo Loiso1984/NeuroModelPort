@@ -11,7 +11,7 @@ import hashlib
 from numba import njit
 from scipy.signal import butter, find_peaks, hilbert, sosfiltfilt
 from scipy.spatial import cKDTree
-from core.rhs import get_stim_current, get_event_driven_conductance, _get_syn_reversal
+from core.rhs import get_stim_current, get_event_driven_conductance, _get_syn_reversal, nmda_mg_block
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -889,6 +889,7 @@ def _compute_stim_array(
     el: float,
     e_rev_primary: float,
     e_rev_secondary: float,
+    mg_ext: float,
 ) -> np.ndarray:
     """
     Compute a time-series stimulus current proxy for a single stimulus source.
@@ -936,10 +937,12 @@ def _compute_stim_array(
         if 4 <= stype <= 9:
             if n_events > 0:
                 base = get_event_driven_conductance(ti, stype, iext, event_times, n_events, atau)
-                e_rev = _get_syn_reversal(stype, e_rev_primary, e_rev_secondary)
-                current_val = abs(base) * (e_rev - el)
             else:
-                current_val = 0.0
+                base = 0.0
+            e_rev = _get_syn_reversal(stype, e_rev_primary, e_rev_secondary)
+            if stype == 5:
+                base *= nmda_mg_block(el, mg_ext)
+            current_val = abs(base) * (e_rev - el)
 
             # Apply dendritic filtering
             if mode == 2 and tau_dend > 0:
@@ -1050,6 +1053,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             el=float(cfg.channels.EL),
             e_rev_primary=float(cfg.channels.e_rev_syn_primary),
             e_rev_secondary=float(cfg.channels.e_rev_syn_secondary),
+            mg_ext=float(cfg.env.Mg_ext),
         )
 
     dual_cfg = getattr(cfg, "dual_stimulation", None)
@@ -1110,6 +1114,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             el=float(cfg.channels.EL),
             e_rev_primary=float(cfg.channels.e_rev_syn_primary),
             e_rev_secondary=float(cfg.channels.e_rev_syn_secondary),
+            mg_ext=float(cfg.env.Mg_ext),
         )
 
     return stim

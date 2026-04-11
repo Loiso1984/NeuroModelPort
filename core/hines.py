@@ -59,6 +59,7 @@ def update_gates_analytic(
     off_p, off_q, off_w, off_x, off_y, off_j, off_zsk, off_ca,
     # phi temperature vectors [n_comp]
     phi_na, phi_k, phi_ih, phi_ca, phi_k2,   # phi_k2 = phi_k (IA, IM use K family)
+    im_speed_multiplier,
     # calcium / SK
     ca_rest, tau_ca, tau_sk, b_ca,
     # I_Ca influx array written by caller before this function (size n_comp)
@@ -112,7 +113,12 @@ def update_gates_analytic(
 
         # ── IM gate (w) — phi_k2 ──
         if en_im:
-            y[off_w + i] = _gate_step(y[off_w + i], aw_IM_lut(vi), bw_IM_lut(vi), eff_dt_k)
+            y[off_w + i] = _gate_step(
+                y[off_w + i],
+                aw_IM_lut(vi),
+                bw_IM_lut(vi),
+                eff_dt_k * im_speed_multiplier,
+            )
 
         # ── NaP gate (x) — phi_na family ──
         if en_nap:

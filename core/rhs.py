@@ -162,9 +162,12 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     elif stype == 10:  # ZAP/Chirp current (frequency sweep)
         if td <= 0.0 or t < t0 or t > (t0 + td):
             return 0.0
-        dt = t - t0  # ms
-        k_hz_per_ms = (zap_f1_hz - zap_f0_hz) / td
-        phase = 2.0 * np.pi * ((zap_f0_hz * dt / 1000.0) + 0.5 * (k_hz_per_ms * dt * dt / 1000.0))
+        dt = t - t0  # in ms
+        dt_sec = dt / 1000.0  # Convert to seconds for frequency math
+        td_sec = td / 1000.0
+        # Phase = 2*pi * integral(f0 + k*t) dt = 2*pi * (f0*t + 0.5*k*t^2)
+        k_hz_per_sec = (zap_f1_hz - zap_f0_hz) / td_sec
+        phase = 2.0 * np.pi * (zap_f0_hz * dt_sec + 0.5 * k_hz_per_sec * dt_sec * dt_sec)
         return iext * np.sin(phase)
     # Default: const (stype == 0)
     return iext
@@ -367,6 +370,7 @@ def rhs_multicompartment(
     b_ca = physics_params.b_ca
     mg_ext = physics_params.mg_ext
     tau_sk = physics_params.tau_sk
+    im_speed_multiplier = physics_params.im_speed_multiplier
 
     # ATP metabolism parameters
     g_katp_max = physics_params.g_katp_max
@@ -467,10 +471,10 @@ def rhs_multicompartment(
         cursor += n_comp
 
     # Dendritic filter state offsets
-    off_vfilt_primary = cursor
+    off_ifilt_primary = cursor
     if use_dfilter_primary == 1:
         cursor += 1
-    off_vfilt_secondary = cursor
+    off_ifilt_secondary = cursor
     if use_dfilter_secondary == 1:
         cursor += 1
 
@@ -487,26 +491,26 @@ def rhs_multicompartment(
     e_syn = _get_syn_reversal(stype, physics_params.e_rev_syn_primary, physics_params.e_rev_syn_secondary) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
-    v_filtered_primary = 0.0
+    i_filtered_primary = 0.0
     if use_dfilter_primary == 1:
-        v_filtered_primary = y[off_vfilt_primary]
+        i_filtered_primary = y[off_ifilt_primary]
 
-    v_filtered_secondary = 0.0
+    i_filtered_secondary = 0.0
     if use_dfilter_secondary == 1:
-        v_filtered_secondary = y[off_vfilt_secondary]
+        i_filtered_secondary = y[off_ifilt_secondary]
 
-    d_vfiltered_dt_primary = 0.0
+    d_ifiltered_dt_primary = 0.0
     # Validate filter parameters before use
     if stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 1e-12:
         attenuated_current = dfilter_attenuation * base_current
-        d_vfiltered_dt_primary = (attenuated_current - v_filtered_primary) / dfilter_tau_ms
+        d_ifiltered_dt_primary = (attenuated_current - i_filtered_primary) / dfilter_tau_ms
     # Disable filter if tau is invalid (below epsilon threshold)
     use_dfilter_primary_eff = 1 if (stim_mode == 2 and use_dfilter_primary == 1 and dfilter_tau_ms > 1e-12) else 0
 
     is_cond_2 = False
     e_syn_2 = 0.0
     is_nmda_2 = False
-    d_vfiltered_dt_secondary = 0.0
+    d_ifiltered_dt_secondary = 0.0
     base_current_2 = 0.0
     if dual_stim_enabled == 1:
         is_cond_2 = (stype_2 >= 4)
@@ -519,7 +523,7 @@ def rhs_multicompartment(
             base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2)
         if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 1e-12:
             attenuated_current_2 = dfilter_attenuation_2 * base_current_2
-            d_vfiltered_dt_secondary = (attenuated_current_2 - v_filtered_secondary) / dfilter_tau_ms_2
+            d_ifiltered_dt_secondary = (attenuated_current_2 - i_filtered_secondary) / dfilter_tau_ms_2
     # Disable filter if tau is invalid or stim_mode is not 2 (below epsilon threshold)
     use_dfilter_secondary_eff = 1 if (dual_stim_enabled == 1 and stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 1e-12) else 0
 
@@ -576,7 +580,7 @@ def rhs_multicompartment(
         # Stimulus current: evaluate distributed contribution per-compartment.
         i_stim_primary = distributed_stimulus_current_for_comp(
             i, n_comp, base_current, stim_comp, stim_mode,
-            use_dfilter_primary_eff, dfilter_attenuation, dfilter_tau_ms, v_filtered_primary,
+            use_dfilter_primary_eff, dfilter_attenuation, dfilter_tau_ms, i_filtered_primary,
         )
         if is_conductance_based:
             g_syn = i_stim_primary  # distributed conductance [mS/cm²]
@@ -590,7 +594,7 @@ def rhs_multicompartment(
         if dual_stim_enabled == 1:
             i_stim_secondary = distributed_stimulus_current_for_comp(
                 i, n_comp, base_current_2, stim_comp_2, stim_mode_2,
-                use_dfilter_secondary_eff, dfilter_attenuation_2, dfilter_tau_ms_2, v_filtered_secondary,
+                use_dfilter_secondary_eff, dfilter_attenuation_2, dfilter_tau_ms_2, i_filtered_secondary,
             )
             if is_cond_2:
                 g2 = i_stim_secondary
@@ -636,7 +640,9 @@ def rhs_multicompartment(
         if en_im:
             wi = y[off_w + i]
             # M-type K is a K channel — scale with phi_k (not phi_im)
-            dydt[off_w + i] = phi_k[i] * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
+            dydt[off_w + i] = (
+                phi_k[i] * im_speed_multiplier * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
+            )
 
         if en_nap:
             xi = y[off_x + i]
@@ -708,8 +714,8 @@ def rhs_multicompartment(
 
     # Dendritic filter ODEs (outside main loop — not per-compartment)
     if use_dfilter_primary == 1:
-        dydt[off_vfilt_primary] = d_vfiltered_dt_primary
+        dydt[off_ifilt_primary] = d_ifiltered_dt_primary
     if use_dfilter_secondary == 1:
-        dydt[off_vfilt_secondary] = d_vfiltered_dt_secondary
+        dydt[off_ifilt_secondary] = d_ifiltered_dt_secondary
 
     return dydt

@@ -69,7 +69,10 @@ class ChannelRegistry:
         
         # 7. SK (Ca2+-activated K+)
         # Gate z_sk: ODE-based with tau_SK (Hirschberg 1998), z_inf depends on [Ca²⁺]
-        self.channels.append(Channel(name="SK", color=(0.9, 0.1, 0.9)))
+        self.channels.append(Channel(
+            name="SK", color=(0.9, 0.1, 0.9),
+            gates=[GateInfo('z', 1, None, None)]
+        ))
 
         # 8. I_T (T-type Ca2+, low-threshold, CaV3.x — Destexhe 1998)
         self.channels.append(Channel(
@@ -107,43 +110,27 @@ class ChannelRegistry:
         else:
             N = 1 + mc.N_ais + mc.N_trunk + mc.N_b1 + mc.N_b2
         y0_list = [np.full(N, V0)]
-        # Базовые гейты Na и K
-        for gate in self.channels[0].gates + self.channels[1].gates:
-            a_val, b_val = gate.alpha_fn(V0), gate.beta_fn(V0)
-            y0_list.append(np.full(N, a_val / (a_val + b_val)))
-            
-        # Опциональные гейты
-        if config.channels.enable_Ih:
-            a_val, b_val = ar_Ih(V0), br_Ih(V0)
-            y0_list.append(np.full(N, a_val / (a_val + b_val)))
-            
-        if config.channels.enable_ICa:
-            for alpha, beta in [(as_Ca, bs_Ca), (au_Ca, bu_Ca)]:
-                a_val, b_val = alpha(V0), beta(V0)
-                y0_list.append(np.full(N, a_val / (a_val + b_val)))
-                
-        if config.channels.enable_IA:
-            for alpha, beta in [(aa_IA, ba_IA), (ab_IA, bb_IA)]:
-                a_val, b_val = alpha(V0), beta(V0)
-                y0_list.append(np.full(N, a_val / (a_val + b_val)))
 
-        if config.channels.enable_ITCa:
-            for alpha, beta in [(am_TCa, bm_TCa), (ah_TCa, bh_TCa)]:
-                a_val, b_val = alpha(V0), beta(V0)
-                y0_list.append(np.full(N, a_val / (a_val + b_val)))
-
-        if config.channels.enable_IM:
-            a_val, b_val = aw_IM(V0), bw_IM(V0)
+        def _append_gate(alpha_fn, beta_fn):
+            a_val, b_val = alpha_fn(V0), beta_fn(V0)
             y0_list.append(np.full(N, a_val / (a_val + b_val)))
 
-        if config.channels.enable_NaP:
-            a_val, b_val = ax_NaP(V0), bx_NaP(V0)
-            y0_list.append(np.full(N, a_val / (a_val + b_val)))
-
-        if config.channels.enable_NaR:
-            for alpha, beta in [(ay_NaR, by_NaR), (aj_NaR, bj_NaR)]:
-                a_val, b_val = alpha(V0), beta(V0)
-                y0_list.append(np.full(N, a_val / (a_val + b_val)))
+        # Gate order must match native_loop/rhs cursor offsets exactly.
+        gate_specs = [
+            (True, [(am, bm), (ah, bh), (an, bn)]),  # Na m/h, then K n
+            (config.channels.enable_Ih, [(ar_Ih, br_Ih)]),
+            (config.channels.enable_ICa, [(as_Ca, bs_Ca), (au_Ca, bu_Ca)]),
+            (config.channels.enable_IA, [(aa_IA, ba_IA), (ab_IA, bb_IA)]),
+            (config.channels.enable_ITCa, [(am_TCa, bm_TCa), (ah_TCa, bh_TCa)]),
+            (config.channels.enable_IM, [(aw_IM, bw_IM)]),
+            (config.channels.enable_NaP, [(ax_NaP, bx_NaP)]),
+            (config.channels.enable_NaR, [(ay_NaR, by_NaR), (aj_NaR, bj_NaR)]),
+        ]
+        for enabled, gate_pairs in gate_specs:
+            if not enabled:
+                continue
+            for alpha_fn, beta_fn in gate_pairs:
+                _append_gate(alpha_fn, beta_fn)
 
         # SK gate z_sk: initialise at steady-state z_inf(Ca_rest)
         if config.channels.enable_SK:

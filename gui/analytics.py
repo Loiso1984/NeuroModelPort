@@ -1,21 +1,21 @@
 """
-gui/analytics.py — Full Scientific Analytics Suite v10.1
+gui/analytics.py â€” Full Scientific Analytics Suite v10.1
 
 Analytical tabs using matplotlib embedded in Qt:
-  0. Neuron Passport     — rich biophysical report
-  1. Oscilloscope detail — multi-compartment traces
-  2. Gate Dynamics       — m, h, n, r, s, u vs time
-  3. Equilibrium Curves  — x_inf(V), τ(V) for all gates
-  4. Phase Plane         — V vs n + nullclines
-  5. Kymograph           — spatiotemporal V(x,t) heatmap
-  6. Current Balance     — Cm·dV/dt − (I_stim − I_ion + I_ax)
-  7. Energy / Power      — cumulative charge & instantaneous power
-  8. Bifurcation         — spike peaks vs parameter
-  9. Sweep               — traces + f-I curve
- 10. S-D Curve           — strength-duration + Weiss fit
- 11. Excitability Map    — 2-D heatmap (I × duration)
- 12. Spectrogram         — STFT of soma Vm
- 13. Impedance Z(f)      — membrane frequency response (|Z|, phase)
+  0. Neuron Passport     â€” rich biophysical report
+  1. Oscilloscope detail â€” multi-compartment traces
+  2. Gate Dynamics       â€” m, h, n, r, s, u vs time
+  3. Equilibrium Curves  â€” x_inf(V), Ď„(V) for all gates
+  4. Phase Plane         â€” V vs n + nullclines
+  5. Kymograph           â€” spatiotemporal V(x,t) heatmap
+  6. Current Balance     â€” CmÂ·dV/dt â’ (I_stim â’ I_ion + I_ax)
+  7. Energy / Power      â€” cumulative charge & instantaneous power
+  8. Bifurcation         â€” spike peaks vs parameter
+  9. Sweep               â€” traces + f-I curve
+ 10. S-D Curve           â€” strength-duration + Weiss fit
+ 11. Excitability Map    â€” 2-D heatmap (I Ă— duration)
+ 12. Spectrogram         â€” STFT of soma Vm
+ 13. Impedance Z(f)      â€” membrane frequency response (|Z|, phase)
 
 Lyapunov computation is explicit via `Compute LLE` action.
 """
@@ -35,6 +35,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+from scipy.integrate import cumulative_trapezoid
+from gui.text_sanitize import repair_text, repair_widget_tree
 
 # Import plot themes for global color consistency
 try:
@@ -50,7 +52,7 @@ except ImportError:
         }
     }
 
-# ── colour palette (matches plots.py) ──────────────────────────────
+# â”€â”€ colour palette (matches plots.py) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 CHAN_COLORS = {
     'Na':   '#DC3232', 'K':   '#3264DC', 'Leak': '#32A050',
     'Ih':   '#9632C8', 'ICa': '#FA9600', 'IA':   '#00C8C8',
@@ -118,7 +120,7 @@ def _tab_with_toolbar(canvas, fullscreen_callback=None, extra_widget=None) -> QW
     toolbar_row.addWidget(toolbar)
 
     if fullscreen_callback is not None:
-        btn_fullscreen = QPushButton("⛶ Fullscreen")
+        btn_fullscreen = QPushButton("Fullscreen")
         btn_fullscreen.setToolTip("Open plot in fullscreen window with crosshair")
         btn_fullscreen.setMaximumWidth(120)
         btn_fullscreen.clicked.connect(fullscreen_callback)
@@ -235,7 +237,7 @@ class FullscreenPlotViewer(QMainWindow):
     def __init__(self, fig: Figure, title: str = "Plot Viewer", parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        self.setWindowTitle(f"NeuroModelPort — {title}")
+        self.setWindowTitle(repair_text(f"NeuroModelPort - {title}"))
         self.fig = fig
         self.canvas = FigureCanvas(fig)
         self.crosshair_lines = []
@@ -315,9 +317,9 @@ class FullscreenPlotViewer(QMainWindow):
         super().closeEvent(event)
 
 
-# ════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 class AnalyticsWidget(QTabWidget):
-    """Main analytics widget — updated by MainWindow after each run."""
+    """Main analytics widget â€” updated by MainWindow after each run."""
 
     def __init__(self, parent=None):
         """
@@ -350,10 +352,11 @@ class AnalyticsWidget(QTabWidget):
         self._tab_figures = {}  # Store figures for fullscreen access
         self._time_marker = None  # Store vertical line marker for linked cursor
         self._build_tabs()
+        repair_widget_tree(self)
     
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     #  TAB CONSTRUCTION
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _open_fullscreen_plot(self, tab_name: str):
         """Open a fullscreen viewer for the specified tab's plot."""
         if tab_name not in self._tab_figures:
@@ -375,7 +378,7 @@ class AnalyticsWidget(QTabWidget):
             # Fallback: if pickle fails, use original (may have conflicts)
             fig_copy = fig
 
-        viewer = FullscreenPlotViewer(fig_copy, title=f"Analytics — {tab_name}", parent=self)
+        viewer = FullscreenPlotViewer(fig_copy, title=f"Analytics - {tab_name}", parent=self)
         self._fullscreen_windows.append(viewer)
         
         def _cleanup(*_):
@@ -415,14 +418,14 @@ class AnalyticsWidget(QTabWidget):
         self._btn_compute_lle.clicked.connect(self._compute_lle_now)
         corner_l.addWidget(self._btn_compute_lle)
 
-        self._btn_fullscreen = QPushButton("Full Screen")
+        self._btn_fullscreen = QPushButton("Fullscreen")
         self._btn_fullscreen.setToolTip("Open analytics in a maximized window")
         self._btn_fullscreen.clicked.connect(self.open_fullscreen)
         corner_l.addWidget(self._btn_fullscreen)
 
         self.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
-        # ── Tab 0: Passport — always built (pure text, zero MPL cost) ──
+        # â”€â”€ Tab 0: Passport â€” always built (pure text, zero MPL cost) â”€â”€
         self.passport_view = QTextEdit()
         self.passport_view.setReadOnly(True)
         self.passport_view.setFont(QFont("Consolas", 10))
@@ -432,26 +435,26 @@ class AnalyticsWidget(QTabWidget):
         )
         self.addTab(self.passport_view, "Passport")
 
-        # ── Tabs 1–15: lazy placeholders — MPL canvas built on first visit ──
+        # â”€â”€ Tabs 1â€“15: lazy placeholders â€” MPL canvas built on first visit â”€â”€
         # Each entry: builder (creates attrs + returns QWidget), updater (may be None),
         # needs_stats (updater takes (result, stats)), needs_morph (skip if no morph).
         self._all_tab_specs: dict[int, dict] = {
-            1:  {'builder': '_build_tab_spike_mech', 'updater': '_update_spike_mechanism', 'title': '🧪 Spike Mechanism', 'needs_stats': True},
-            2:  {'builder': '_build_tab_phase',      'updater': '_update_phase',           'title': '🔄 Phase Plane', 'needs_stats': True},
-            3:  {'builder': '_build_tab_chaos',      'updater': '_update_chaos',           'title': '🦋 Chaos & LLE', 'needs_stats': True},
-            4:  {'builder': '_build_tab_kymo',       'updater': '_update_kymo',            'title': '🌊 Kymograph'},
-            5:  {'builder': '_build_tab_spectro',    'updater': '_update_spectrogram',     'title': '🌈 Spectrogram'},
-            6:  {'builder': '_build_tab_impedance',  'updater': '_update_impedance',       'title': '🧲 Impedance'},
-            7:  {'builder': '_build_tab_modulation', 'updater': '_update_modulation',      'title': '🎡 Phase-Locking', 'needs_stats': True},
-            8:  {'builder': '_build_tab_sweep',      'updater': None,                      'title': '↔ f-I Curve'},
-            9:  {'builder': '_build_tab_sd',         'updater': None,                      'title': '⏱ S-D Curve'},
-            10: {'builder': '_build_tab_excmap',     'updater': None,                      'title': '🗺 Excit. Map'},
-            11: {'builder': '_build_tab_bif',        'updater': None,                      'title': '🔀 Bifurcation'},
-            12: {'builder': '_build_tab_currents',   'updater': '_update_currents',        'title': '⚡ Currents'},
-            13: {'builder': '_build_tab_gates',      'updater': '_update_gates',           'title': '⚙ Gates'},
-            14: {'builder': '_build_tab_energy_balance', 'updater': '_update_energy_balance', 'title': '🔋 Energy & Balance', 'needs_morph': True},
-            15: {'builder': '_build_tab_spike_shape', 'updater': '_update_spike_shape', 'title': '📊 Spike Shape', 'needs_stats': True},
-            16: {'builder': '_build_tab_poincare',    'updater': '_update_poincare',       'title': '🔵 Poincaré (ISI)', 'needs_stats': True},
+            1:  {'builder': '_build_tab_spike_mech', 'updater': '_update_spike_mechanism', 'title': 'Spike Mechanism', 'needs_stats': True},
+            2:  {'builder': '_build_tab_phase',      'updater': '_update_phase',           'title': 'Phase Plane', 'needs_stats': True},
+            3:  {'builder': '_build_tab_chaos',      'updater': '_update_chaos',           'title': 'Chaos & LLE', 'needs_stats': True},
+            4:  {'builder': '_build_tab_kymo',       'updater': '_update_kymo',            'title': 'Kymograph'},
+            5:  {'builder': '_build_tab_spectro',    'updater': '_update_spectrogram',     'title': 'Spectrogram'},
+            6:  {'builder': '_build_tab_impedance',  'updater': '_update_impedance',       'title': 'Impedance'},
+            7:  {'builder': '_build_tab_modulation', 'updater': '_update_modulation',      'title': 'Phase-Locking', 'needs_stats': True},
+            8:  {'builder': '_build_tab_sweep',      'updater': None,                      'title': 'f-I Curve'},
+            9:  {'builder': '_build_tab_sd',         'updater': None,                      'title': 'S-D Curve'},
+            10: {'builder': '_build_tab_excmap',     'updater': None,                      'title': 'Excit. Map'},
+            11: {'builder': '_build_tab_bif',        'updater': None,                      'title': 'Bifurcation'},
+            12: {'builder': '_build_tab_currents',   'updater': '_update_currents',        'title': 'Currents'},
+            13: {'builder': '_build_tab_gates',      'updater': '_update_gates',           'title': 'Gates'},
+            14: {'builder': '_build_tab_energy_balance', 'updater': '_update_energy_balance', 'title': 'Energy & Balance', 'needs_morph': True},
+            15: {'builder': '_build_tab_spike_shape', 'updater': '_update_spike_shape', 'title': 'Spike Shape', 'needs_stats': True},
+            16: {'builder': '_build_tab_poincare',    'updater': '_update_poincare',       'title': 'Poincare (ISI)', 'needs_stats': True},
         }
         self._tab_specs = self._all_tab_specs.copy()  # Current visible tabs
         for idx, spec in self._tab_specs.items():
@@ -488,15 +491,15 @@ class AnalyticsWidget(QTabWidget):
                     self.setCurrentIndex(i)
                     break
 
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     #  LAZY TAB ACTIVATION
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _show_missing_data_message(self, tab_title: str, missing_data: str):
         """Show error message on tab when required data is missing."""
         # Map tab title to figure name
         tab_to_fig = {
-            '🧪 Spike Mechanism': 'Spike Mechanism',
-            '🔋 Energy & Balance': 'Energy & Balance',
+            'Spike Mechanism': 'Spike Mechanism',
+            'Energy & Balance': 'Energy & Balance',
         }
         fig_name = tab_to_fig.get(tab_title)
         if fig_name and fig_name in self._tab_figures:
@@ -505,7 +508,7 @@ class AnalyticsWidget(QTabWidget):
                 # Add text annotation to the figure
                 for ax in fig.axes:
                     ax.clear()
-                    ax.text(0.5, 0.5, f"⚠ {missing_data} required", 
+                    ax.text(0.5, 0.5, f"Warning: {missing_data} required", 
                             transform=ax.transAxes, ha='center', va='center',
                             fontsize=14, fontweight='bold', color='#dc3545',
                             bbox=dict(boxstyle='round', facecolor='#f8d7da', alpha=0.8))
@@ -517,8 +520,8 @@ class AnalyticsWidget(QTabWidget):
     def _show_updater_error_message(self, tab_title: str, error: str):
         """Show error message on tab when updater fails."""
         tab_to_fig = {
-            '🧪 Spike Mechanism': 'Spike Mechanism',
-            '🔋 Energy & Balance': 'Energy & Balance',
+            'Spike Mechanism': 'Spike Mechanism',
+            'Energy & Balance': 'Energy & Balance',
         }
         fig_name = tab_to_fig.get(tab_title)
         if fig_name and fig_name in self._tab_figures:
@@ -527,7 +530,7 @@ class AnalyticsWidget(QTabWidget):
                 # Add text annotation to the figure
                 for ax in fig.axes:
                     ax.clear()
-                    ax.text(0.5, 0.5, f"⚠ Update failed:\n{error}", 
+                    ax.text(0.5, 0.5, f"Warning: update failed\n{error}", 
                             transform=ax.transAxes, ha='center', va='center',
                             fontsize=12, fontweight='bold', color='#dc3545',
                             bbox=dict(boxstyle='round', facecolor='#f8d7da', alpha=0.8))
@@ -569,7 +572,8 @@ class AnalyticsWidget(QTabWidget):
             new_widget = getattr(self, spec['builder'])()
             self.removeTab(index)
             self.insertTab(index, new_widget, title)
-            self.setCurrentIndex(index)   # restore — removeTab may shift focus
+            self.setCurrentIndex(index)
+            repair_widget_tree(new_widget)
             
             # Force a geometric refresh and draw
             new_widget.show()
@@ -594,9 +598,10 @@ class AnalyticsWidget(QTabWidget):
         except Exception as e:
             # Show error in a simple label widget
             from PySide6.QtWidgets import QLabel
-            error_widget = QLabel(f"⚠ Tab build failed:\n{str(e)}")
+            error_widget = QLabel(f"Tab build failed:\n{str(e)}")
             error_widget.setStyleSheet("QLabel { color: #dc3545; padding: 20px; }")
             error_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            repair_widget_tree(error_widget)
             self.removeTab(index)
             self.insertTab(index, error_widget, title)
             self.setCurrentIndex(index)
@@ -646,7 +651,7 @@ class AnalyticsWidget(QTabWidget):
             return
         idx = int(np.argmin(np.abs(t_arr - t_ms)))
 
-        # ── Phase Plane: yellow ghost dot ────────────────────────────
+        # â”€â”€ Phase Plane: yellow ghost dot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if hasattr(self, 'ax_phase') and hasattr(self, 'fig_phase'):
             n_comp = int(self._last_result.n_comp)
             if n_comp > 0:
@@ -668,7 +673,7 @@ class AnalyticsWidget(QTabWidget):
                 if hasattr(self, 'cvs_phase'):
                     self.cvs_phase.draw_idle()
 
-        # ── Currents tab: vertical line ──────────────────────────────
+        # â”€â”€ Currents tab: vertical line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if hasattr(self, 'ax_currents'):
             if hasattr(self, '_currents_time_marker') and self._currents_time_marker is not None:
                 try:
@@ -681,7 +686,7 @@ class AnalyticsWidget(QTabWidget):
             if hasattr(self, 'cvs_currents'):
                 self.cvs_currents.draw_idle()
 
-        # ── Gates tab: vertical line ─────────────────────────────────
+        # â”€â”€ Gates tab: vertical line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if hasattr(self, 'ax_gates'):
             if hasattr(self, '_gates_time_marker') and self._gates_time_marker is not None:
                 try:
@@ -694,7 +699,7 @@ class AnalyticsWidget(QTabWidget):
             if hasattr(self, 'cvs_gates'):
                 self.cvs_gates.draw_idle()
 
-        # ── Spike Shape tab: nearest spike vertical marker ───────────
+        # â”€â”€ Spike Shape tab: nearest spike vertical marker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if hasattr(self, 'ax_spike_shape'):
             try:
                 from core.analysis import detect_spikes
@@ -715,9 +720,9 @@ class AnalyticsWidget(QTabWidget):
             except Exception:
                 pass
 
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     #  PER-TAB BUILDER METHODS  (called once on first visit)
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_gates(self) -> QWidget:
         # Refactored: Single large plot with checkboxes for toggling individual gates
         self.fig_gates, cvs = _mpl_fig(1, 1)
@@ -887,11 +892,31 @@ class AnalyticsWidget(QTabWidget):
         self._phase_warning_text = None
 
         # Add time slider for trajectory evolution
-        from PySide6.QtWidgets import QSlider, QHBoxLayout, QLabel, QWidget
+        from PySide6.QtWidgets import QSlider, QHBoxLayout, QLabel, QWidget, QComboBox
         slider_widget = QWidget()
         slider_layout = QHBoxLayout(slider_widget)
         slider_layout.setContentsMargins(0, 0, 0, 0)
         slider_layout.setSpacing(5)
+
+        # Add Y-axis selector for Phase Plane
+        lbl_y_axis = QLabel("Y-Axis:")
+        lbl_y_axis.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        slider_layout.insertWidget(0, lbl_y_axis)
+
+        self._phase_y_combo = QComboBox()
+        self._phase_y_combo.addItems([
+            "n (K act)", "h (Na inact)", "m (Na act)",
+            "q (ITCa inact)", "r (Ih act)", "w (IM act)", "a (IA act)"
+        ])
+        self._phase_y_combo.setStyleSheet("""
+            QComboBox {
+                background:#313244; color:#CDD6F4; border:1px solid #45475A;
+                padding:2px; font-size:11px; min-width:90px;
+            }
+        """)
+        self._phase_y_combo.currentTextChanged.connect(self._on_phase_y_changed)
+        slider_layout.insertWidget(1, self._phase_y_combo)
+        slider_layout.insertSpacing(2, 15)
 
         slider_label = QLabel("Time Window (ms):")
         slider_label.setStyleSheet("color:#CDD6F4; font-size:11px;")
@@ -937,6 +962,11 @@ class AnalyticsWidget(QTabWidget):
 
         # Store full trajectory data for slider
         self._phase_full_data = None  # Will store (t, V, n_t)
+        self._phase_warning_text = self.ax_phase.text(
+            0.02, 0.98, '', transform=self.ax_phase.transAxes,
+            ha='left', va='top', color='#F38BA8', fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8)
+        )
 
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase Plane'), extra_widget=slider_widget)
 
@@ -1123,10 +1153,10 @@ class AnalyticsWidget(QTabWidget):
         self.ax_poincare = self.fig_poincare.add_subplot(1, 1, 1)
         self.fig_poincare.set_tight_layout({'pad': 2.5})
         self.cvs_poincare = cvs
-        self._tab_figures['Poincaré (ISI)'] = self.fig_poincare
+        self._tab_figures['Poincare (ISI)'] = self.fig_poincare
         self._poincare_init_done = False
         self._poincare_lines: dict[str, object] = {}
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Poincaré (ISI)'))
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Poincare (ISI)'))
 
     def _build_tab_bif(self) -> QWidget:
         self.fig_bif, cvs = _mpl_fig(2, 2)
@@ -1215,13 +1245,13 @@ class AnalyticsWidget(QTabWidget):
                                                  transform=self.ax_mod.transAxes, fontsize=12, color='#666666', visible=False)
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
 
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     #  MAIN UPDATE ENTRY POINT
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def update_analytics(self, result):
         """Update all already-built tabs from a SimulationResult.
 
-        Lazy tabs that haven't been visited yet are skipped — their guard
+        Lazy tabs that haven't been visited yet are skipped â€” their guard
         at the top of each _update_* method returns immediately if the
         corresponding figure attribute doesn't exist yet.  They will be
         populated in _on_tab_changed when the user first clicks the tab.
@@ -1233,10 +1263,10 @@ class AnalyticsWidget(QTabWidget):
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
 
-        # Tab 0 — always built
+        # Tab 0 â€” always built
         self._update_passport(result, stats)
 
-        # Tabs 1–17 — each guard-checks hasattr(self, 'fig_*') and returns
+        # Tabs 1â€“17 â€” each guard-checks hasattr(self, 'fig_*') and returns
         # early if the canvas hasn't been created yet.
         self._update_spike_mechanism(result, stats)
         self._update_phase(result, stats)
@@ -1273,50 +1303,49 @@ class AnalyticsWidget(QTabWidget):
         if hasattr(self, 'cvs_chaos'):
             self.cvs_chaos.draw()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  0 — NEURON PASSPORT
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  0 â€” NEURON PASSPORT
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_passport(self, result, stats: dict):
         cfg = result.config
-        ch  = cfg.channels
-        mc  = cfg.morphology
+        ch = cfg.channels
+        mc = cfg.morphology
 
-        ns   = stats['n_spikes']
+        ns = stats['n_spikes']
         V_th = stats['V_threshold']
         V_pk = stats['V_peak']
         V_ah = stats['V_ahp']
-        hw   = stats['halfwidth_ms']
-        fi   = stats['f_initial_hz']
-        fs   = stats['f_steady_hz']
-        AI   = stats['adaptation_index']
-        nt   = stats['neuron_type']
+        hw = stats['halfwidth_ms']
+        fi = stats['f_initial_hz']
+        fs = stats['f_steady_hz']
+        AI = stats['adaptation_index']
+        nt = stats['neuron_type']
         nt_rule = stats.get('neuron_type_rule', nt)
-        nt_ml = stats.get('neuron_type_ml', '—')
+        nt_ml = stats.get('neuron_type_ml', 'N/A')
         nt_ml_conf = stats.get('neuron_type_ml_confidence', np.nan)
         nt_hybrid = stats.get('neuron_type_hybrid', nt)
         nt_source = stats.get('neuron_type_hybrid_source', 'rule_only')
         nt_hybrid_conf = stats.get('neuron_type_hybrid_confidence', np.nan)
-        cv   = stats['conduction_vel_ms']
-        tau  = stats['tau_m_ms']
-        Rin  = stats['Rin_kohm_cm2']
-        lam  = stats['lambda_um']
-        Q    = stats['Q_per_channel']
-        atp  = stats['atp_nmol_cm2']
-        
-        # ── NEW: Advanced firing analysis (Phase 7.1) ──
+        cv = stats['conduction_vel_ms']
+        tau = stats['tau_m_ms']
+        Rin = stats['Rin_kohm_cm2']
+        lam = stats['lambda_um']
+        Q = stats['Q_per_channel']
+        atp = stats['atp_nmol_cm2']
+
         isi_mean = stats.get('isi_mean_ms', np.nan)
-        isi_std  = stats.get('isi_std_ms', np.nan)
-        isi_min  = stats.get('isi_min_ms', np.nan)
-        isi_max  = stats.get('isi_max_ms', np.nan)
-        cv_isi   = stats.get('cv_isi', np.nan)
-        lat_1st  = stats.get('first_spike_latency_ms', np.nan)
+        isi_std = stats.get('isi_std_ms', np.nan)
+        isi_min = stats.get('isi_min_ms', np.nan)
+        isi_max = stats.get('isi_max_ms', np.nan)
+        cv_isi = stats.get('cv_isi', np.nan)
+        lat_1st = stats.get('first_spike_latency_ms', np.nan)
         refr_per = stats.get('refractory_period_ms', np.nan)
         firing_rel = stats.get('firing_reliability', np.nan)
         lyap_class = stats.get('lyapunov_class', 'disabled')
         lyap_lle_s = stats.get('lle_per_s', np.nan)
         lyap_pairs = int(stats.get('lyapunov_valid_pairs', 0) or 0)
         modulation_valid = bool(stats.get('modulation_valid', False))
-        modulation_source = stats.get('modulation_source', '—')
+        modulation_source = stats.get('modulation_source', 'N/A')
         modulation_plv = stats.get('modulation_plv', np.nan)
         modulation_phase_deg = stats.get('modulation_preferred_phase_deg', np.nan)
         modulation_depth = stats.get('modulation_depth', np.nan)
@@ -1328,28 +1357,25 @@ class AnalyticsWidget(QTabWidget):
         modulation_high_hz = stats.get('modulation_band_high_hz', np.nan)
         dt_val = float(np.mean(np.diff(result.t))) if len(result.t) > 1 else 0.0
         current_stats = {}
-        
-        # Safety check for currents dictionary
+
         if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
             logging.error("SimulationResult missing or invalid currents attribute")
             return
-            
+
         for name, curr in result.currents.items():
             if curr is None or len(curr) == 0:
                 continue
-            # Handle 2D current arrays (n_comp, n_time) - sum across compartments
             curr_arr = np.asarray(curr, dtype=float)
             if curr_arr.ndim == 2:
                 curr_arr = np.sum(curr_arr, axis=0)
-            # Safety check for empty arrays
             if curr_arr.size == 0:
                 continue
             i_min = float(np.min(curr_arr))
             i_max = float(np.max(curr_arr))
             q_abs = float(np.sum(np.abs(curr_arr)) * dt_val) if dt_val > 0 else np.nan
             current_stats[name] = (i_min, i_max, q_abs)
-        dominant_current = "—"
-        # Fix np capture in lambda
+
+        dominant_current = 'N/A'
         isfinite = np.isfinite
         if current_stats:
             dominant_current = max(
@@ -1386,100 +1412,87 @@ class AnalyticsWidget(QTabWidget):
 
         def _fmt(v, fmt='.2f', unit=''):
             if v is None or (isinstance(v, float) and np.isnan(v)):
-                return '—'
+                return 'N/A'
             return f"{v:{fmt}} {unit}".strip()
 
+        line_major = '=' * 88
+        line_minor = '-' * 88
+        channels_enabled = ' '.join(
+            c for c, en in [
+                ('Na', True), ('K', True), ('Leak', True),
+                ('Ih', ch.enable_Ih), ('ICa', ch.enable_ICa),
+                ('IA', ch.enable_IA), ('SK', ch.enable_SK),
+            ]
+            if en
+        )
+
         lines = [
-            "╔══════════════════════════════════════════════════════════════════╗",
-            "║                    NEURON PASSPORT  v10.1                       ║",
-            "╠══════════════════════════════════════════════════════════════════╣",
-            f"║  Preset: {cfg.channels.__class__.__name__:<20}  "
-            f"T = {cfg.env.T_celsius:.1f}°C  φ = {cfg.env.phi:.3f}          ║",
-            f"║  Channels: " + " ".join(
-                c for c, en in [('Na', True), ('K', True), ('Leak', True),
-                                 ('Ih', ch.enable_Ih), ('ICa', ch.enable_ICa),
-                                 ('IA', ch.enable_IA), ('SK', ch.enable_SK)]
-                if en
-            ) + " " * 30,
-            "╠══════════════════════════════════════════════════════════════════╣",
-            "║  PASSIVE MEMBRANE PROPERTIES                                    ║",
-            f"║    τ_m   = {_fmt(tau, '.3f', 'ms'):<12}  "
-            f"Rin   = {_fmt(Rin, '.3f', 'kΩ·cm²'):<16}  λ = {_fmt(lam, '.1f', 'µm')}  ║",
-            "╠══════════════════════════════════════════════════════════════════╣",
-            f"║  SPIKE COUNT: {ns:<3}  {'(no spikes)' if ns == 0 else ''}",
+            'NEURON PASSPORT v11.3',
+            line_major,
+            f'Preset class: {cfg.channels.__class__.__name__}',
+            f'Temperature: {cfg.env.T_celsius:.1f} C | phi: {cfg.env.phi:.3f}',
+            f'Channels: {channels_enabled}',
+            line_minor,
+            'PASSIVE MEMBRANE PROPERTIES',
+            f'tau_m={_fmt(tau, ".3f", "ms")} | Rin={_fmt(Rin, ".3f", "kOhm*cm^2")} | lambda={_fmt(lam, ".1f", "um")}',
+            line_minor,
+            f'SPIKE COUNT: {ns} {"(no spikes)" if ns == 0 else ""}',
         ]
 
         if ns > 0:
             lines += [
-                f"║    Threshold  = {_fmt(V_th, '+.1f', 'mV'):<12}  "
-                f"Peak  = {_fmt(V_pk, '+.1f', 'mV'):<12}  "
-                f"AHP   = {_fmt(V_ah, '+.1f', 'mV')}  ║",
-                f"║    Halfwidth  = {_fmt(hw, '.3f', 'ms'):<12}  "
-                f"dV/dt = +{_fmt(stats['dvdt_max'], '.0f', 'mV/ms')} / "
-                f"{_fmt(stats['dvdt_min'], '.0f', 'mV/ms')}  ║",
+                f'Threshold={_fmt(V_th, "+.1f", "mV")} | Peak={_fmt(V_pk, "+.1f", "mV")} | AHP={_fmt(V_ah, "+.1f", "mV")}',
+                f'Halfwidth={_fmt(hw, ".3f", "ms")} | dV/dt={_fmt(stats["dvdt_max"], ".0f", "mV/ms")} / {_fmt(stats["dvdt_min"], ".0f", "mV/ms")}',
             ]
         if ns > 1:
             lines += [
-                f"║    f_initial  = {_fmt(fi, '.1f', 'Hz'):<12}  "
-                f"f_steady = {_fmt(fs, '.1f', 'Hz'):<12}  "
-                f"AI = {_fmt(AI, '+.3f')}  ║",
-                f"║    Type (rule): {nt_rule:<28}  ║",
-                f"║    Type (ML): {nt_ml:<13} conf={_fmt(nt_ml_conf, '.2f'):<8} source={nt_source:<10} ║",
-                f"║    Type (hybrid): {nt_hybrid:<19} conf={_fmt(nt_hybrid_conf, '.2f')}        ║",
+                f'f_initial={_fmt(fi, ".1f", "Hz")} | f_steady={_fmt(fs, ".1f", "Hz")} | AI={_fmt(AI, "+.3f")}',
+                f'Type(rule)={nt_rule}',
+                f'Type(ML)={nt_ml} conf={_fmt(nt_ml_conf, ".2f")} source={nt_source}',
+                f'Type(hybrid)={nt_hybrid} conf={_fmt(nt_hybrid_conf, ".2f")}',
             ]
         if cv > 0:
-            lines.append(
-                f"║    Cond. vel. = {_fmt(cv, '.3f', 'm/s'):<12}  ║"
-            )
+            lines.append(f'Conduction velocity={_fmt(cv, ".3f", "m/s")}')
 
-        # ──────────────────────────────────────────────────────────────
-        # NEW SECTION: FIRING DYNAMICS (Phase 7.1)
-        # ──────────────────────────────────────────────────────────────
         if ns > 1:
             lines += [
-                "╠══════════════════════════════════════════════════════════════════╣",
-                "║  FIRING DYNAMICS (Advanced Analysis)                            ║",
-                f"║    1st spike latency = {_fmt(lat_1st, '.2f', 'ms'):<20}  "
-                f"Refr. period = {_fmt(refr_per, '.3f', 'ms')}  ║",
-                f"║    ISI (mean ± std)  = {_fmt(isi_mean, '.3f', 'ms'):<8} ± "
-                f"{_fmt(isi_std, '.3f', 'ms'):<8}  CV = {_fmt(cv_isi, '.3f')}  ║",
-                f"║    ISI range: [{_fmt(isi_min, '.3f', 'ms'):<8}, "
-                f"{_fmt(isi_max, '.3f', 'ms'):<8}]   "
-                f"Reliability = {_fmt(firing_rel, '.3f')}  ║",
+                line_minor,
+                'FIRING DYNAMICS',
+                f'First spike latency={_fmt(lat_1st, ".2f", "ms")} | Refractory period={_fmt(refr_per, ".3f", "ms")}',
+                f'ISI mean/std={_fmt(isi_mean, ".3f", "ms")} / {_fmt(isi_std, ".3f", "ms")} | CV={_fmt(cv_isi, ".3f")}',
+                f'ISI range=[{_fmt(isi_min, ".3f", "ms")}, {_fmt(isi_max, ".3f", "ms")}] | Reliability={_fmt(firing_rel, ".3f")}',
             ]
 
         lines += [
-            "╠══════════════════════════════════════════════════════════════════╣",
-            "║  DYNAMICAL STABILITY (LLE/FTLE)                                 ║",
+            line_minor,
+            'DYNAMICAL STABILITY (LLE/FTLE)',
         ]
         if lyap_class == 'disabled':
-            lines.append("║    LLE not computed. Use `Compute LLE` button.                  ║")
+            lines.append('LLE not computed. Use "Compute LLE" button.')
         else:
             lines += [
-                f"║    Class = {lyap_class:<21}  LLE = {_fmt(lyap_lle_s, '+.4f', '1/s'):<14}  ║",
-                f"║    Valid trajectory pairs = {lyap_pairs:<5}                              ║",
+                f'Class={lyap_class} | LLE={_fmt(lyap_lle_s, "+.4f", "1/s")}',
+                f'Valid trajectory pairs={lyap_pairs}',
             ]
 
         lines += [
-            "╠══════════════════════════════════════════════════════════════════╣",
-            "║  MODULATION DECOMPOSITION (NON-FFT)                             ║",
+            line_minor,
+            'MODULATION DECOMPOSITION (NON-FFT)',
         ]
         if not modulation_valid:
-            lines.append("║    Disabled or insufficient spikes for robust estimate           ║")
+            lines.append('Disabled or insufficient spikes for robust estimate.')
         else:
             lines += [
-                f"║    Source={modulation_source:<9} Band={_fmt(modulation_low_hz, '.1f', 'Hz')}..{_fmt(modulation_high_hz, '.1f', 'Hz'):<10}  ║",
-                f"║    PLV={_fmt(modulation_plv, '.3f'):<10} Phase={_fmt(modulation_phase_deg, '.1f', 'deg'):<14} Nsp={modulation_spikes_used:<5}  ║",
-                f"║    Depth={_fmt(modulation_depth, '.3f'):<10} MI={_fmt(modulation_index, '.3f'):<10} p={_fmt(modulation_p, '.3f'):<9} z={_fmt(modulation_z, '.2f')}  ║",
+                f'Source={modulation_source} | Band={_fmt(modulation_low_hz, ".1f", "Hz")}..{_fmt(modulation_high_hz, ".1f", "Hz")}',
+                f'PLV={_fmt(modulation_plv, ".3f")} | Phase={_fmt(modulation_phase_deg, ".1f", "deg")} | Nsp={modulation_spikes_used}',
+                f'Depth={_fmt(modulation_depth, ".3f")} | MI={_fmt(modulation_index, ".3f")} | p={_fmt(modulation_p, ".3f")} | z={_fmt(modulation_z, ".2f")}',
             ]
 
         lines += [
-            "╠══════════════════════════════════════════════════════════════════╣",
-            "║  CHANNEL ENGAGEMENT                                              ║",
-            f"║    Dominant |Q| channel: {dominant_current:<10}                        ║",
+            line_minor,
+            'CHANNEL ENGAGEMENT',
+            f'Dominant |Q| channel: {dominant_current}',
         ]
-        # Fix np capture in lambda
-        isfinite = np.isfinite
         top_channels = sorted(
             current_stats.items(),
             key=lambda kv: kv[1][2] if isfinite(kv[1][2]) else -1.0,
@@ -1487,31 +1500,30 @@ class AnalyticsWidget(QTabWidget):
         )[:4]
         for name, (i_min, i_max, q_abs) in top_channels:
             lines.append(
-                f"║    {name:<5} Imin={_fmt(i_min, '.2f', 'uA/cm²'):<14} "
-                f"Imax={_fmt(i_max, '.2f', 'uA/cm²'):<14} Qabs={_fmt(q_abs, '.2f', 'nC/cm²')}  ║"
+                f'{name}: Imin={_fmt(i_min, ".2f", "uA/cm^2")} | Imax={_fmt(i_max, ".2f", "uA/cm^2")} | Qabs={_fmt(q_abs, ".2f", "nC/cm^2")}'
             )
         if result.n_comp > 1:
             lines.append(
-                f"║    Delay soma->junction={_fmt(delay_junction_ms, '.2f', 'ms'):<10} "
-                f"soma->terminal={_fmt(delay_terminal_ms, '.2f', 'ms')}  ║"
+                f'Delay soma->junction={_fmt(delay_junction_ms, ".2f", "ms")} | soma->terminal={_fmt(delay_terminal_ms, ".2f", "ms")}'
             )
 
         lines += [
-            "╠══════════════════════════════════════════════════════════════════╣",
-            "║  ENERGY                                                         ║",
+            line_minor,
+            'ENERGY',
         ]
         for name, q in Q.items():
-            lines.append(f"║    Q_{name:<5} = {q:.2f} nC/cm²" + " " * 30 + "║")
+            lines.append(f'Q_{name}={q:.2f} nC/cm^2')
+
         atp_bd = stats.get('atp_breakdown', {})
-        atp_na_s = f"{atp_bd.get('Na_pump', 0.0):.3e}" if atp_bd else "—"
-        atp_ca_s = f"{atp_bd.get('Ca_pump', 0.0):.3e}" if atp_bd else "—"
-        atp_bl_s = f"{atp_bd.get('baseline', 0.0):.3e}" if atp_bd else "—"
+        atp_na_s = f"{atp_bd.get('Na_pump', 0.0):.3e}" if atp_bd else 'N/A'
+        atp_ca_s = f"{atp_bd.get('Ca_pump', 0.0):.3e}" if atp_bd else 'N/A'
+        atp_bl_s = f"{atp_bd.get('baseline', 0.0):.3e}" if atp_bd else 'N/A'
         lines += [
-            f"║    ATP total  = {atp:.4e} nmol/cm²" + " " * 22 + "║",
-            f"║      Na⁺ pump = {atp_na_s} nmol/cm²" + " " * 23 + "║",
-            f"║      Ca²⁺pump = {atp_ca_s} nmol/cm²" + " " * 23 + "║",
-            f"║      baseline = {atp_bl_s} nmol/cm²" + " " * 23 + "║",
-            "╚══════════════════════════════════════════════════════════════════╝",
+            f'ATP total={atp:.4e} nmol/cm^2',
+            f'Na+ pump={atp_na_s} nmol/cm^2',
+            f'Ca2+ pump={atp_ca_s} nmol/cm^2',
+            f'Baseline={atp_bl_s} nmol/cm^2',
+            line_major,
         ]
 
         self.passport_view.setPlainText("\n".join(lines))
@@ -1526,7 +1538,7 @@ class AnalyticsWidget(QTabWidget):
         if not self._impedance_lines:
             self._impedance_lines["zmag"] = ax_mag.plot([], [], color="#2E86DE", lw=1.8, label="|Z(f)|")[0]
             self._impedance_lines["fres"] = ax_mag.axvline(0.0, color="#E67E22", ls="--", lw=1.2, visible=False)
-            self._impedance_lines["zph"] = ax_phase.plot([], [], color="#8E44AD", lw=1.5, label="∠Z(f)")[0]
+            self._impedance_lines["zph"] = ax_phase.plot([], [], color="#8E44AD", lw=1.5, label="â Z(f)")[0]
             self._impedance_lines["zero"] = ax_phase.axhline(0.0, color="#7f8c8d", lw=0.8, ls=":")
 
         if not self._impedance_texts:
@@ -1550,7 +1562,7 @@ class AnalyticsWidget(QTabWidget):
             self._impedance_texts["mag"].set_visible(True)
             self._impedance_texts["phase"].set_text("Need dynamic stimulus content")
             self._impedance_texts["phase"].set_visible(True)
-            _configure_ax_interactive(ax_mag, title="Impedance Magnitude", xlabel="Frequency (Hz)", ylabel="|Z| (kΩ·cm²)", show_legend=False)
+            _configure_ax_interactive(ax_mag, title="Impedance Magnitude", xlabel="Frequency (Hz)", ylabel="|Z| (kÎ©Â·cmÂ˛)", show_legend=False)
             _configure_ax_interactive(ax_phase, title="Impedance Phase", xlabel="Frequency (Hz)", ylabel="Phase (deg)", show_legend=False)
             self.cvs_impedance.draw_idle()
             return
@@ -1572,9 +1584,9 @@ class AnalyticsWidget(QTabWidget):
         ax_mag.autoscale_view()
         _configure_ax_interactive(
             ax_mag,
-            title=f"Membrane Impedance |Z(f)|  (peak={zres:.2f} kΩ·cm² @ {fres:.2f} Hz)" if np.isfinite(fres) else "Membrane Impedance |Z(f)|",
+            title=f"Membrane Impedance |Z(f)|  (peak={zres:.2f} kÎ©Â·cmÂ˛ @ {fres:.2f} Hz)" if np.isfinite(fres) else "Membrane Impedance |Z(f)|",
             xlabel="Frequency (Hz)",
-            ylabel="|Z| (kΩ·cm²)",
+            ylabel="|Z| (kÎ©Â·cmÂ˛)",
             show_legend=True,
         )
 
@@ -1602,7 +1614,7 @@ class AnalyticsWidget(QTabWidget):
         _no_data = (len(t) == 0 or len(div) == 0
                     or stats.get('lyapunov_class') in ('disabled', None))
         if _no_data:
-            msg = ("LLE not computed — run ≥1000 ms simulation, then click 'Compute LLE'."
+            msg = ("LLE not computed â€” run â‰Ą1000 ms simulation, then click 'Compute LLE'."
                    if stats.get('lyapunov_class') != 'disabled'
                    else "LLE not computed. Click 'Compute LLE' button.")
             if 'div' not in self._chaos_texts:
@@ -1718,9 +1730,9 @@ class AnalyticsWidget(QTabWidget):
         self.ax_mod.set_title("Spike Phase-Locking (Firing Rate vs LFP Phase)", fontsize=11, fontweight='bold', pad=15)
         self.cvs_mod.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  2 — GATE DYNAMICS
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  2 â€” GATE DYNAMICS
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_gates(self, result):
         """
         Plot gate-variable time series overlaid with soma membrane potential and update interactive checkbox controls.
@@ -1822,9 +1834,9 @@ class AnalyticsWidget(QTabWidget):
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_gates(self._last_result)
 
-    # ─────────────────────────────────────────────────────────────────
-    #  2.5 — CHANNEL CURRENTS (NEW)
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  2.5 â€” CHANNEL CURRENTS (NEW)
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_currents(self, result):
         """Plot channel currents with membrane potential overlay on single plot with checkboxes."""
         if not hasattr(self, 'fig_currents'):
@@ -1922,7 +1934,7 @@ class AnalyticsWidget(QTabWidget):
             ylabel="V (mV)",
             show_legend=True,
         )
-        self._currents_ax2.set_ylabel("Current (µA/cm²)", fontsize=10, fontweight="bold")
+        self._currents_ax2.set_ylabel("Current (ÂµA/cmÂ˛)", fontsize=10, fontweight="bold")
 
         self.cvs_currents.draw_idle()
 
@@ -2022,7 +2034,7 @@ class AnalyticsWidget(QTabWidget):
             if ca_nM_safe is not None:
                 self._spike_mech_lines["ax1_ca"].set_data(t, ca_nM_safe)
                 self._spike_mech_lines["ax1_ca"].set_visible(True)
-                self._spike_mech_ax2b.set_ylabel("[Ca²+]_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
+                self._spike_mech_ax2b.set_ylabel("[CaÂ˛+]_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
                 self._spike_mech_ax2b.tick_params(axis="y", labelcolor="#D62728")
                 self._spike_mech_ax2b.relim()
                 self._spike_mech_ax2b.autoscale_view()
@@ -2032,10 +2044,10 @@ class AnalyticsWidget(QTabWidget):
 
             # Compute dynamic E_Ca Nernst potential
             # E_Ca = (RT/zF) * ln([Ca]_out / [Ca]_in)
-            # At 37°C: RT/F = 26.7 mV, for Ca2+ (z=2): RT/(zF) = 13.35 mV
+            # At 37Â°C: RT/F = 26.7 mV, for Ca2+ (z=2): RT/(zF) = 13.35 mV
             ca_in_M = np.asarray(result.ca_i[0, :], dtype=float)
             ca_out_M = result.config.calcium.Ca_ext if hasattr(result.config.calcium, 'Ca_ext') else 2.0
-            RT_over_zF = 13.35  # mV at 37°C for Ca2+
+            RT_over_zF = 13.35  # mV at 37Â°C for Ca2+
             e_ca = RT_over_zF * np.log(ca_out_M / (ca_in_M + 1e-12))
             e_ca_safe = _ensure_shape_compatible(e_ca, t, "e_ca")
             if e_ca_safe is not None:
@@ -2061,7 +2073,7 @@ class AnalyticsWidget(QTabWidget):
 
         # Row 2: Channel activity with explanation
         if n_sp < 2:
-            self._spike_mech_texts["ax2_reasons"].set_text("Channel activity shown below.\n(Attenuation analysis requires ≥2 spikes)")
+            self._spike_mech_texts["ax2_reasons"].set_text("Channel activity shown below.\n(Attenuation analysis requires â‰Ą2 spikes)")
             self._spike_mech_texts["ax2_error"].set_visible(False)
             # Continue to plot channel activity even with < 2 spikes
 
@@ -2152,7 +2164,7 @@ class AnalyticsWidget(QTabWidget):
                           f"Active channels: {', '.join(active_channels)}\n"
                           f"Attenuation mechanisms: Na+ inactivation, K+ activation")
             if 'ICa' in active_channels or 'SK' in active_channels:
-                explanation += ", Ca²+-dependent SK"
+                explanation += ", CaÂ˛+-dependent SK"
             if 'IA' in active_channels:
                 explanation += ", A-type K+ adaptation"
         else:
@@ -2232,7 +2244,7 @@ class AnalyticsWidget(QTabWidget):
             ax3.text(0.5, 0.5, 'Need spikes for threshold analysis', ha='center', va='center',
                    transform=ax3.transAxes, fontsize=10)
 
-        # ── ATP Overlay (Metabolic Status) ───────────────────────────────
+        # â”€â”€ ATP Overlay (Metabolic Status) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if hasattr(result, 'config') and result.config.metabolism.enable_dynamic_atp:
             atp_data = None
             if hasattr(result, 'atp_level') and result.atp_level is not None:
@@ -2246,7 +2258,7 @@ class AnalyticsWidget(QTabWidget):
                 atp_color = '#FF6B6B' if atp_final < 0.5 else '#A6E3A1'
                 atp_text = f"Current ATP: {atp_final:.3f} mM"
                 if atp_final < 0.5:
-                    atp_text += "\n⚠ METABOLIC EXHAUSTION"
+                    atp_text += "\nâš  METABOLIC EXHAUSTION"
                 
                 # Add text overlay in corner of ax1 (voltage trace)
                 if 'atp_overlay' not in self._spike_mech_texts:
@@ -2286,9 +2298,9 @@ class AnalyticsWidget(QTabWidget):
 
         self.cvs_spike_mech.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  3 — EQUILIBRIUM CURVES
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  3 â€” EQUILIBRIUM CURVES
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_equil(self, result):
         if not hasattr(self, 'fig_equil'):
             return  # tab not yet visited
@@ -2302,13 +2314,13 @@ class AnalyticsWidget(QTabWidget):
 
         ax1, ax2, ax3, ax4 = self.ax_equil
         if not self._equil_init_done:
-            self._equil_lines["m_inf"] = ax1.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='m∞ (Na act)', alpha=0.9)[0]
-            self._equil_lines["h_inf"] = ax1.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='h∞ (Na inact)', alpha=0.9)[0]
-            self._equil_lines["n_inf"] = ax1.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='n∞ (K act)', alpha=0.9)[0]
+            self._equil_lines["m_inf"] = ax1.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='mâž (Na act)', alpha=0.9)[0]
+            self._equil_lines["h_inf"] = ax1.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='hâž (Na inact)', alpha=0.9)[0]
+            self._equil_lines["n_inf"] = ax1.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='nâž (K act)', alpha=0.9)[0]
 
-            self._equil_lines["tau_m"] = ax2.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='τₘ', alpha=0.9)[0]
-            self._equil_lines["tau_h"] = ax2.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='τₕ', alpha=0.9)[0]
-            self._equil_lines["tau_n"] = ax2.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='τₙ', alpha=0.9)[0]
+            self._equil_lines["tau_m"] = ax2.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='Ď„â‚', alpha=0.9)[0]
+            self._equil_lines["tau_h"] = ax2.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='Ď„â‚•', alpha=0.9)[0]
+            self._equil_lines["tau_n"] = ax2.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='Ď„â‚™', alpha=0.9)[0]
 
             self._equil_lines["phase_m"] = ax3.plot([], [], color=GATE_COLORS['m'], lw=2, label='m (Na act)', alpha=0.9)[0]
             self._equil_lines["phase_h"] = ax3.plot([], [], color=GATE_COLORS['h'], lw=2, label='h (Na inact)', alpha=0.9)[0]
@@ -2317,14 +2329,14 @@ class AnalyticsWidget(QTabWidget):
             self._equil_lines["g_k"] = ax4.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='g_K(t)', alpha=0.9)[0]
             self._equil_init_done = True
 
-        # x_inf(V) — improved layout
+        # x_inf(V) â€” improved layout
         self._equil_lines["m_inf"].set_data(V_rng, eq['m_inf'])
         self._equil_lines["h_inf"].set_data(V_rng, eq['h_inf'])
         self._equil_lines["n_inf"].set_data(V_rng, eq['n_inf'])
         active_opt_inf = set()
         for k in ('r_inf', 's_inf', 'u_inf', 'a_inf', 'b_inf'):
             if k in opt:
-                lbl = k.replace('_inf', '∞')
+                lbl = k.replace('_inf', 'âž')
                 key = f"opt_{k}"
                 if key not in self._equil_lines:
                     self._equil_lines[key] = ax1.plot([], [], lw=1.8, ls='--', label=lbl, alpha=0.8)[0]
@@ -2336,10 +2348,10 @@ class AnalyticsWidget(QTabWidget):
         ax1.relim()
         ax1.autoscale_view()
         ax1.set_ylim(-0.05, 1.05)
-        _configure_ax_interactive(ax1, title='Steady-state gating (x∞)', 
-                                  xlabel='V (mV)', ylabel='x∞', show_legend=True)
+        _configure_ax_interactive(ax1, title='Steady-state gating (xâž)', 
+                                  xlabel='V (mV)', ylabel='xâž', show_legend=True)
 
-        # τ(V) — main gating time constants
+        # Ď„(V) â€” main gating time constants
         self._equil_lines["tau_m"].set_data(V_rng, eq['tau_m'])
         self._equil_lines["tau_h"].set_data(V_rng, eq['tau_h'])
         self._equil_lines["tau_n"].set_data(V_rng, eq['tau_n'])
@@ -2356,8 +2368,8 @@ class AnalyticsWidget(QTabWidget):
                 self._equil_lines[key].set_data([], [])
         ax2.relim()
         ax2.autoscale_view()
-        _configure_ax_interactive(ax2, title=f'Time constants (φ = {phi:.2f})',
-                                  xlabel='V (mV)', ylabel='τ (ms)', show_legend=True)
+        _configure_ax_interactive(ax2, title=f'Time constants (Ď† = {phi:.2f})',
+                                  xlabel='V (mV)', ylabel='Ď„ (ms)', show_legend=True)
 
         # Phase portrait V-m and V-h
         v_soma_safe = _ensure_shape_compatible(result.v_soma, result.y[result.n_comp, :], "v_soma_phase")
@@ -2377,7 +2389,7 @@ class AnalyticsWidget(QTabWidget):
             self._equil_lines["phase_h"].set_data([], [])
         ax3.relim()
         ax3.autoscale_view()
-        _configure_ax_interactive(ax3, title='V – Gate Phase Portraits',
+        _configure_ax_interactive(ax3, title='V â€“ Gate Phase Portraits',
                                   xlabel='V (mV)', ylabel='Gate variable', show_legend=True)
 
         # Effective conductances over time
@@ -2400,204 +2412,143 @@ class AnalyticsWidget(QTabWidget):
         ax4.relim()
         ax4.autoscale_view()
         _configure_ax_interactive(ax4, title='Effective Conductances',
-                                  xlabel='Time (ms)', ylabel='g (mS/cm²)', show_legend=True)
+                                  xlabel='Time (ms)', ylabel='g (mS/cmÂ˛)', show_legend=True)
 
         self.cvs_equil.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  4 — PHASE PLANE + NULLCLINES
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  4 â€” PHASE PLANE + NULLCLINES
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    def _on_phase_y_changed(self, text: str):
+        if hasattr(self, '_last_result') and self._last_result is not None:
+            self._update_phase(self._last_result, self._last_stats)
+
     def _update_phase(self, result, stats: dict):
         if not hasattr(self, 'fig_phase'):
             return  # tab not yet visited
-        from core.analysis import compute_nullclines
+        from core.analysis import compute_nullclines, extract_gate_traces, detect_spikes
 
-        t     = result.t
-        V     = result.v_soma
-        n_t   = result.y[3 * result.n_comp, :]   # n gate
-        cfg   = result.config
+        t = np.asarray(result.t)
+        V = np.asarray(result.v_soma)
+        cfg = result.config
         I_stm = cfg.stim.Iext if cfg.stim.stim_type == 'const' else 0.0
 
-        # Store full trajectory data for slider
-        self._phase_full_data = (t, V, n_t, cfg, I_stm, stats)
+        gate_key = 'n'
+        if hasattr(self, '_phase_y_combo'):
+            gate_key = self._phase_y_combo.currentText().split(' ')[0]
 
-        # Update slider range based on simulation duration
-        if hasattr(self, '_phase_time_slider') and len(t) > 0:
-            max_time = t[-1]
-            self._phase_time_slider.blockSignals(True)
-            self._phase_time_slider.setRange(0, int(max_time))
-            self._phase_time_slider.setValue(int(max_time))  # Default to full range
-            self._phase_time_slider.blockSignals(False)
-            self._phase_time_label.setText(f"{int(max_time)} ms")
+        gates = extract_gate_traces(result)
+        if gate_key not in gates:
+            gate_key = 'n'
+            if hasattr(self, '_phase_y_combo'):
+                self._phase_y_combo.blockSignals(True)
+                self._phase_y_combo.setCurrentText('n (K act)')
+                self._phase_y_combo.blockSignals(False)
 
-        # Get current time window from slider
+        gate_t = np.asarray(gates[gate_key])
+        self._phase_full_data = (t, V, gate_t, cfg, I_stm, stats, gate_key)
+
         time_window = None
-        if hasattr(self, '_phase_time_slider') and hasattr(self, '_phase_full_data'):
-            time_window = self._phase_time_slider.value()
-            if time_window == self._phase_time_slider.maximum():
-                time_window = None  # Show all
+        if hasattr(self, '_phase_time_slider') and len(t) > 0:
+            max_time = int(t[-1])
+            old_max = int(self._phase_time_slider.maximum())
+            cur_val = int(self._phase_time_slider.value())
+            self._phase_time_slider.blockSignals(True)
+            self._phase_time_slider.setRange(0, max_time)
+            if cur_val >= old_max or cur_val > max_time:
+                self._phase_time_slider.setValue(max_time)
+            self._phase_time_slider.blockSignals(False)
+            cur_val = int(self._phase_time_slider.value())
+            if cur_val < max_time:
+                time_window = cur_val
+                self._phase_time_label.setText(f'{cur_val} ms')
+            else:
+                self._phase_time_label.setText('All')
 
-        # Apply time window if set
         if time_window is not None and time_window > 0:
-            idx_end = np.searchsorted(t, time_window)
+            idx_end = np.searchsorted(t, time_window, side='right')
             V = V[:idx_end]
-            n_t = n_t[:idx_end]
+            gate_t = gate_t[:idx_end]
             t = t[:idx_end]
-
-        # v12.0: Plot 3 distinct segments to visualize trajectory collapse during adaptation
-        V_rng               = np.linspace(-100, 60, 500)
-        n_V_null, n_n_null  = compute_nullclines(V_rng, cfg, I_stm)
 
         ax = self.ax_phase
         if not self._phase_lines:
-            self._phase_lines["traj_initial"] = ax.plot([], [], color='#2060CC', lw=1.5, zorder=3, label='Initial Spike (blue)')[0]
-            self._phase_lines["traj_middle"] = ax.plot([], [], color='#888888', lw=1.5, zorder=3, label='Middle (gray)')[0]
-            self._phase_lines["traj_final"] = ax.plot([], [], color='#DC5A10', lw=1.5, zorder=3, label='Final Spike (red)')[0]
-            self._phase_lines["rest"] = ax.plot([], [], 'go', ms=8, zorder=5, label='Resting state')[0]
-            self._phase_lines["spikes"] = ax.plot([], [], 'r*', ms=12, zorder=6, label='Spike peaks')[0]
-            self._phase_lines["n_null"] = ax.plot([], [], color='#40CC40', lw=2, ls='--', label='dn/dt = 0  (n\u221e)')[0]
-            self._phase_lines["v_null"] = ax.plot([], [], color='#CC4040', lw=2, ls='--', label='dV/dt = 0')[0]
+            self._phase_lines['traj_initial'] = ax.plot([], [], color='#2060CC', lw=1.5, zorder=3, label='Initial Spike (blue)')[0]
+            self._phase_lines['traj_middle'] = ax.plot([], [], color='#888888', lw=1.5, zorder=3, label='Middle (gray)')[0]
+            self._phase_lines['traj_final'] = ax.plot([], [], color='#DC5A10', lw=1.5, zorder=3, label='Final Spike (red)')[0]
+            self._phase_lines['rest'] = ax.plot([], [], 'go', ms=8, zorder=5, label='Resting state')[0]
+            self._phase_lines['spikes'] = ax.plot([], [], 'r*', ms=12, zorder=6, label='Spike peaks')[0]
+            self._phase_lines['n_null'] = ax.plot([], [], color='#40CC40', lw=2, ls='--', label='dn/dt = 0  (n∞)')[0]
+            self._phase_lines['v_null'] = ax.plot([], [], color='#CC4040', lw=2, ls='--', label='dV/dt = 0')[0]
 
-        # Divide trajectory into 3 segments based on time
         if len(t) > 0 and t[-1] > 100:
-            # Initial segment: first 100ms or first third
             t_end_initial = min(100, t[-1] / 3)
             idx_initial = np.searchsorted(t, t_end_initial)
             V_initial = V[:idx_initial]
-            n_initial = n_t[:idx_initial]
+            n_initial = gate_t[:idx_initial]
 
-            # Middle segment: middle third
             t_start_middle = t_end_initial
             t_end_middle = t_start_middle + (t[-1] - t_start_middle) / 3
             idx_start_middle = np.searchsorted(t, t_start_middle)
             idx_end_middle = np.searchsorted(t, t_end_middle)
             V_middle = V[idx_start_middle:idx_end_middle]
-            n_middle = n_t[idx_start_middle:idx_end_middle]
+            n_middle = gate_t[idx_start_middle:idx_end_middle]
 
-            # Final segment: last third
             idx_final = idx_end_middle
             V_final = V[idx_final:]
-            n_final = n_t[idx_final:]
+            n_final = gate_t[idx_final:]
         else:
-            # Short simulation: just plot all as initial, hide middle/final lines
-            V_initial, n_initial = V, n_t
-            self._phase_lines["traj_middle"].set_visible(False)
-            self._phase_lines["traj_final"].set_visible(False)
-            V_middle, n_middle = V[0:0], n_t[0:0]
-            V_final, n_final = V[0:0], n_t[0:0]
+            V_initial, n_initial = V, gate_t
+            self._phase_lines['traj_middle'].set_visible(False)
+            self._phase_lines['traj_final'].set_visible(False)
+            V_middle, n_middle = V[0:0], gate_t[0:0]
+            V_final, n_final = V[0:0], gate_t[0:0]
 
-        # Plot the three segments
-        self._phase_lines["traj_initial"].set_data(V_initial, n_initial)
-        self._phase_lines["traj_middle"].set_data(V_middle, n_middle)
-        self._phase_lines["traj_final"].set_data(V_final, n_final)
-        self._phase_lines["rest"].set_data([V[0]], [n_t[0]])
+        self._phase_lines['traj_initial'].set_data(V_initial, n_initial)
+        self._phase_lines['traj_middle'].set_data(V_middle, n_middle)
+        self._phase_lines['traj_final'].set_data(V_final, n_final)
+        if len(V) > 0:
+            self._phase_lines['rest'].set_data([V[0]], [gate_t[0]])
+        else:
+            self._phase_lines['rest'].set_data([], [])
 
-        # Ensure middle/final lines are visible for long simulations
         if len(t) > 0 and t[-1] > 100:
-            self._phase_lines["traj_middle"].set_visible(True)
-            self._phase_lines["traj_final"].set_visible(True)
+            self._phase_lines['traj_middle'].set_visible(True)
+            self._phase_lines['traj_final'].set_visible(True)
 
-        # Spike detection markers (all spikes)
-        if stats['n_spikes'] > 0:
-            from core.analysis import detect_spikes
+        if stats['n_spikes'] > 0 and len(V) > 1 and len(t) > 1:
             pk_idx, _, _ = detect_spikes(V, t, **_spike_detect_kwargs_from_stats(stats))
-            self._phase_lines["spikes"].set_data(V[pk_idx], n_t[pk_idx])
+            self._phase_lines['spikes'].set_data(V[pk_idx], gate_t[pk_idx])
         else:
-            self._phase_lines["spikes"].set_data([], [])
+            self._phase_lines['spikes'].set_data([], [])
 
-        # Nullclines (unchanged)
-        self._phase_lines["n_null"].set_data(V_rng, n_n_null)
-        valid = ~np.isnan(n_V_null)
-        self._phase_lines["v_null"].set_data(V_rng[valid], n_V_null[valid])
+        ch = cfg.channels
+        complex_active = (
+            ch.enable_Ih or ch.enable_ICa or ch.enable_IA or ch.enable_SK
+            or ch.enable_ITCa or ch.enable_IM or ch.enable_NaP or ch.enable_NaR
+        )
+        nullclines_valid = (gate_key == 'n') and not complex_active
 
-        ax.set_xlabel('V (mV)',  fontsize=11)
-        ax.set_ylabel('n  [K\u207a activation]', fontsize=11)
-
-        title_suffix = f" (0-{time_window} ms)" if time_window is not None else ""
-        ax.set_title(f'Phase Plane Trajectory{title_suffix}', fontsize=12, fontweight='bold')
-
-        self.cvs_phase.draw_idle()
-
-    def _on_phase_time_slider_changed(self, value: int):
-        """Handle time slider change to update phase plane plot with selected time window."""
-        if self._phase_full_data is None:
-            return
-
-        t, V, n_t, cfg, I_stm, stats = self._phase_full_data
-
-        # Update label
-        if hasattr(self, '_phase_time_label'):
-            if value == self._phase_time_slider.maximum():
-                self._phase_time_label.setText("All")
-            else:
-                self._phase_time_label.setText(f"{value} ms")
-
-        # Apply time window
-        if value > 0 and value < self._phase_time_slider.maximum():
-            idx_end = np.searchsorted(t, value)
-            V_window = V[:idx_end]
-            n_t_window = n_t[:idx_end]
-            t_window = t[:idx_end]
+        if nullclines_valid:
+            V_rng = np.linspace(-100, 60, 500)
+            n_V_null, n_n_null = compute_nullclines(V_rng, cfg, I_stm)
+            self._phase_lines['n_null'].set_visible(True)
+            self._phase_lines['v_null'].set_visible(True)
+            self._phase_lines['n_null'].set_data(V_rng, n_n_null)
+            valid_idx = ~np.isnan(n_V_null)
+            self._phase_lines['v_null'].set_data(V_rng[valid_idx], n_V_null[valid_idx])
+            if self._phase_warning_text is not None:
+                self._phase_warning_text.set_text('')
         else:
-            V_window = V
-            n_t_window = n_t
-            t_window = t
+            self._phase_lines['n_null'].set_visible(False)
+            self._phase_lines['v_null'].set_visible(False)
+            if self._phase_warning_text is not None:
+                self._phase_warning_text.set_text('⚠ Nullclines hidden (complex channels active or non-Na/K projection)')
 
-        # Update plot with time window
-        from core.analysis import compute_nullclines
-        V_rng = np.linspace(-100, 60, 500)
-        n_V_null, n_n_null = compute_nullclines(V_rng, cfg, I_stm)
+        ax.set_xlabel('V (mV)', fontsize=11)
+        ax.set_ylabel(f'Gate: {gate_key}', fontsize=11)
 
-        ax = self.ax_phase
-
-        # Divide trajectory into 3 segments based on time window
-        if len(t_window) > 0 and t_window[-1] > 100:
-            t_end_initial = min(100, t_window[-1] / 3)
-            idx_initial = np.searchsorted(t_window, t_end_initial)
-            V_initial = V_window[:idx_initial]
-            n_initial = n_t_window[:idx_initial]
-
-            t_start_middle = t_end_initial
-            t_end_middle = t_start_middle + (t_window[-1] - t_start_middle) / 3
-            idx_start_middle = np.searchsorted(t_window, t_start_middle)
-            idx_end_middle = np.searchsorted(t_window, t_end_middle)
-            V_middle = V_window[idx_start_middle:idx_end_middle]
-            n_middle = n_t_window[idx_start_middle:idx_end_middle]
-
-            idx_final = idx_end_middle
-            V_final = V_window[idx_final:]
-            n_final = n_t_window[idx_final:]
-        else:
-            V_initial, n_initial = V_window, n_t_window
-            self._phase_lines["traj_middle"].set_visible(False)
-            self._phase_lines["traj_final"].set_visible(False)
-            V_middle, n_middle = V_window[0:0], n_t_window[0:0]
-            V_final, n_final = V_window[0:0], n_t_window[0:0]
-
-        # Update trajectory lines
-        self._phase_lines["traj_initial"].set_data(V_initial, n_initial)
-        self._phase_lines["traj_middle"].set_data(V_middle, n_middle)
-        self._phase_lines["traj_final"].set_data(V_final, n_final)
-        self._phase_lines["rest"].set_data([V_window[0]], [n_t_window[0]])
-
-        if len(t_window) > 0 and t_window[-1] > 100:
-            self._phase_lines["traj_middle"].set_visible(True)
-            self._phase_lines["traj_final"].set_visible(True)
-
-        # Update spike markers (only within time window)
-        if stats['n_spikes'] > 0:
-            from core.analysis import detect_spikes
-            pk_idx, _, _ = detect_spikes(V_window, t_window, **_spike_detect_kwargs_from_stats(stats))
-            self._phase_lines["spikes"].set_data(V_window[pk_idx], n_t_window[pk_idx])
-        else:
-            self._phase_lines["spikes"].set_data([], [])
-
-        # Nullclines (unchanged)
-        self._phase_lines["n_null"].set_data(V_rng, n_n_null)
-        valid = ~np.isnan(n_V_null)
-        self._phase_lines["v_null"].set_data(V_rng[valid], n_V_null[valid])
-
-        title_suffix = f" (0-{value} ms)" if value < self._phase_time_slider.maximum() else ""
+        title_suffix = f' (0-{time_window} ms)' if time_window is not None else ''
         ax.set_title(f'Phase Plane Trajectory{title_suffix}', fontsize=12, fontweight='bold')
         ax.set_xlim(-100, 60)
         ax.set_ylim(-0.05, 1.05)
@@ -2606,9 +2557,13 @@ class AnalyticsWidget(QTabWidget):
 
         self.cvs_phase.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  5 — KYMOGRAPH
-    # ─────────────────────────────────────────────────────────────────
+    def _on_phase_time_slider_changed(self, value: int):
+        """Handle time slider change to update phase plane plot with selected time window."""
+        if self._phase_full_data is None:
+            return
+        if hasattr(self, '_last_result') and self._last_result is not None:
+            self._update_phase(self._last_result, self._last_stats)
+
     def _update_kymo(self, result):
         if not hasattr(self, 'fig_kymo'):
             return  # tab not yet visited
@@ -2642,7 +2597,7 @@ class AnalyticsWidget(QTabWidget):
         t  = result.t
         V  = result.v_all      # shape (N_comp, N_time)
 
-        # Build two axonal paths: soma → Branch1 tip, soma → Branch2 tip
+        # Build two axonal paths: soma â†’ Branch1 tip, soma â†’ Branch2 tip
         i_tr_s   = 1 + mc.N_ais
         i_branch = i_tr_s + mc.N_trunk
         i_b1s    = i_branch + 1
@@ -2668,8 +2623,8 @@ class AnalyticsWidget(QTabWidget):
             self._kymo_im1.set_clim(vmin=vmin, vmax=vmax)
             if self._kymo_cbar1 is not None:
                 self._kymo_cbar1.update_normal(self._kymo_im1)
-        ax1.set_ylabel('Compartment (soma → B1 tip)')
-        ax1.set_title('Kymograph — Path to Branch 1')
+        ax1.set_ylabel('Compartment (soma â†’ B1 tip)')
+        ax1.set_title('Kymograph â€” Path to Branch 1')
 
         if self._kymo_im2 is None:
             self._kymo_im2 = ax2.imshow(
@@ -2685,8 +2640,8 @@ class AnalyticsWidget(QTabWidget):
             if self._kymo_cbar2 is not None:
                 self._kymo_cbar2.update_normal(self._kymo_im2)
         ax2.set_xlabel('Time (ms)')
-        ax2.set_ylabel('Compartment (soma → B2 tip)')
-        ax2.set_title('Kymograph — Path to Branch 2')
+        ax2.set_ylabel('Compartment (soma â†’ B2 tip)')
+        ax2.set_title('Kymograph â€” Path to Branch 2')
 
         self.fig_kymo.tight_layout(pad=2.5)
         self.cvs_kymo.draw_idle()
@@ -2696,11 +2651,9 @@ class AnalyticsWidget(QTabWidget):
         if not hasattr(self, 'fig_energy'):
             return  # tab not yet visited
         t   = result.t
-        dt  = float(t[1] - t[0]) if len(t) > 1 else 0.05
-
         ax1, ax2, ax3, ax4, ax5 = self.ax_energy
 
-        # ── Row 1: Current Balance Error (semilog) ─────────────────────
+        # â”€â”€ Row 1: Current Balance Error (semilog) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from core.analysis import compute_current_balance
         try:
             I_bal = compute_current_balance(result, result.morph)
@@ -2729,15 +2682,15 @@ class AnalyticsWidget(QTabWidget):
             self._balance_lines["abs_err"].set_data([], [])
         else:
             self._balance_lines["abs_err"].set_data(t, np.abs(I_bal) + 1e-12)
-        ax1.set_ylabel('|Error| (µA/cm²)')
-        ax1.set_title(f'Current Balance Error (log) — max|error| = {err:.5f} µA/cm²  '
-                      f'{"✓ Good" if err < 0.05 else "⚠ Check solver"}')
+        ax1.set_ylabel('|Error| (ÂµA/cmÂ˛)')
+        ax1.set_title(f'Current Balance Error (log) â€” max|error| = {err:.5f} ÂµA/cmÂ˛  '
+                      f'{"âś“ Good" if err < 0.05 else "âš  Check solver"}')
         ax1.grid(alpha=0.3)
         ax1.relim()
         ax1.autoscale_view()
         ax1.tick_params(labelbottom=False)
 
-        # ── Row 2: Cumulative Charge Q ─────────────────────────────────
+        # â”€â”€ Row 2: Cumulative Charge Q â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         P_total = np.zeros_like(t)
         active_q = set()
         active_p = set()
@@ -2775,7 +2728,7 @@ class AnalyticsWidget(QTabWidget):
             
             color = CHAN_COLORS.get(name, '#888888')
             E_rev = _get_E_rev(name, result.config.channels)
-            Q_cum = np.cumsum(np.abs(curr_arr)) * dt
+            Q_cum = cumulative_trapezoid(np.abs(curr_arr), x=t, initial=0.0)
             q_key = f"Q_{name}"
             p_key = f"P_{name}"
             active_q.add(q_key)
@@ -2817,15 +2770,15 @@ class AnalyticsWidget(QTabWidget):
             if key.startswith("P_") and key not in active_p and key != "P_total":
                 line.set_data([], [])
 
-        ax2.set_ylabel('Cumulative charge (nC/cm²)')
-        ax2.set_title('Energy — Cumulative ionic charge transfer')
+        ax2.set_ylabel('Cumulative charge (nC/cmÂ˛)')
+        ax2.set_title('Energy â€” Cumulative ionic charge transfer')
         ax2.legend(fontsize=7, loc='upper left', bbox_to_anchor=(0, 1), framealpha=0.8)
         ax2.grid(alpha=0.3)
         ax2.relim()
         ax2.autoscale_view()
         ax2.tick_params(labelbottom=False)
 
-        # ── Row 3: Instantaneous Power P ────────────────────────────────
+        # â”€â”€ Row 3: Instantaneous Power P â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if "P_total" not in self._energy_lines:
             self._energy_lines["P_total"] = ax3.plot([], [], 'k-', lw=2, label='Total', zorder=5)[0]
         P_total_safe = _ensure_shape_compatible(P_total, t, "P_total")
@@ -2835,15 +2788,15 @@ class AnalyticsWidget(QTabWidget):
             self._energy_lines["P_total"].set_data([], [])
 
         ax3.set_xlabel('Time (ms)')
-        ax3.set_ylabel('Power (µW/cm²)')
-        ax3.set_title(f'Instantaneous power   ATP ≈ {result.atp_estimate:.3e} nmol/cm²')
+        ax3.set_ylabel('Power (ÂµW/cmÂ˛)')
+        ax3.set_title(f'Instantaneous power   ATP â‰ {result.atp_estimate:.3e} nmol/cmÂ˛')
         ax3.legend(fontsize=7, loc='upper left', bbox_to_anchor=(0, 1), framealpha=0.8)
         ax3.grid(alpha=0.3)
         ax3.relim()
         ax3.autoscale_view()
         ax3.tick_params(labelbottom=False)
 
-        # ── Row 4: ATP Pool Time Series ─────────────────────────────────
+        # â”€â”€ Row 4: ATP Pool Time Series â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # ATP pool from pre-extracted SimulationResult state
         atp_data = None
         if getattr(result, 'atp_level', None) is not None:
@@ -2893,7 +2846,7 @@ class AnalyticsWidget(QTabWidget):
             # Enable zoom
             ax.set_navigate(True)
 
-        # ── Row 5: ATP Breakdown Pie Chart (top-right corner) ───────
+        # â”€â”€ Row 5: ATP Breakdown Pie Chart (top-right corner) â”€â”€â”€â”€â”€â”€â”€
         atp_bd = getattr(result, 'atp_breakdown', None)
         if atp_bd is None or not isinstance(atp_bd, dict):
             atp_bd = {}
@@ -2925,7 +2878,7 @@ class AnalyticsWidget(QTabWidget):
         else:
             ax5.text(0.5, 0.5, 'No ATP data', ha='center', va='center', transform=ax5.transAxes)
 
-        ax5.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cm²){title_suffix}', fontsize=10)
+        ax5.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cmÂ˛){title_suffix}', fontsize=10)
         ax5.axis('equal')
 
         try:
@@ -2934,9 +2887,9 @@ class AnalyticsWidget(QTabWidget):
             pass  # Skip tight_layout if axes are incompatible
         self.cvs_energy.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  16 — SPIKE SHAPE OVERLAY
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  16 â€” SPIKE SHAPE OVERLAY
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_spike_shape(self, result, stats: dict):
         """Overlay selected spikes with color coding to show spike shape evolution."""
         if not hasattr(self, 'fig_spike_shape'):
@@ -3037,11 +2990,11 @@ class AnalyticsWidget(QTabWidget):
 
         self.cvs_spike_shape.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  17 — POINCARÉ PLOT (ISI DYNAMICS)
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  17 â€” POINCARĂ‰ PLOT (ISI DYNAMICS)
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_poincare(self, result, stats: dict):
-        """Poincaré plot of ISI dynamics: ISI[n+1] vs ISI[n]."""
+        """Poincare plot of ISI dynamics: ISI[n+1] vs ISI[n]."""
         if not hasattr(self, 'fig_poincare'):
             return  # tab not yet visited
         from core.analysis import detect_spikes
@@ -3056,7 +3009,7 @@ class AnalyticsWidget(QTabWidget):
 
         if n_sp < 3:
             ax.clear()
-            ax.text(0.5, 0.5, 'Need ≥3 spikes for Poincaré plot', ha='center', va='center',
+            ax.text(0.5, 0.5, 'Need >=3 spikes for Poincare plot', ha='center', va='center',
                    transform=ax.transAxes, fontsize=12)
             self.cvs_poincare.draw_idle()
             return
@@ -3064,7 +3017,7 @@ class AnalyticsWidget(QTabWidget):
         # Calculate ISIs
         isi = np.diff(spike_times)
 
-        # Poincaré plot: ISI[n+1] vs ISI[n]
+        # Poincare plot: ISI[n+1] vs ISI[n]
         isi_n = isi[:-1]
         isi_n_plus_1 = isi[1:]
 
@@ -3078,7 +3031,7 @@ class AnalyticsWidget(QTabWidget):
 
         _configure_ax_interactive(
             ax,
-            title=f'Poincaré Plot (ISI Dynamics, N={n_sp})',
+            title=f'Poincare Plot (ISI Dynamics, N={n_sp})',
             xlabel='ISI[n] (ms)',
             ylabel='ISI[n+1] (ms)',
             show_legend=True,
@@ -3088,9 +3041,9 @@ class AnalyticsWidget(QTabWidget):
 
         self.cvs_poincare.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  12 — SPECTROGRAM  (STFT of soma Vm)
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  12 â€” SPECTROGRAM  (STFT of soma Vm)
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_spectrogram(self, result):
         if not hasattr(self, 'fig_spectro'):
             return  # tab not yet visited
@@ -3108,13 +3061,13 @@ class AnalyticsWidget(QTabWidget):
         else:
             self._spectro_vm_line.set_data([], [])
         ax_v.set_ylabel('V (mV)', fontsize=9)
-        ax_v.set_title('Membrane potential — soma', fontsize=10)
+        ax_v.set_title('Membrane potential â€” soma', fontsize=10)
         ax_v.grid(alpha=0.25)
         ax_v.set_xlim(t[0], t[-1])
         ax_v.relim()
         ax_v.autoscale_view()
 
-        # STFT — fs in Hz, dt in ms → fs = 1000/dt
+        # STFT â€” fs in Hz, dt in ms â†’ fs = 1000/dt
         dt_ms = float(t[1] - t[0]) if len(t) > 1 else 0.05
         fs_hz = 1000.0 / dt_ms
 
@@ -3126,11 +3079,11 @@ class AnalyticsWidget(QTabWidget):
             freqs, times_stft, Zxx = stft(v, fs=fs_hz, nperseg=n_seg,
                                            noverlap=n_overlap, window='hann')
             # Convert STFT output times to simulation time axis
-            t_stft = t[0] + times_stft * 1000.0  # seconds → ms
+            t_stft = t[0] + times_stft * 1000.0  # seconds â†’ ms
 
             power_db = 10.0 * np.log10(np.abs(Zxx) ** 2 + 1e-12)
 
-            # Limit display to biologically relevant range: 0–1000 Hz
+            # Limit display to biologically relevant range: 0â€“1000 Hz
             f_max_disp = min(1000.0, freqs[-1])
             freq_mask = freqs <= f_max_disp
 
@@ -3181,9 +3134,9 @@ class AnalyticsWidget(QTabWidget):
         self.fig_spectro.tight_layout(pad=2.5)
         self.cvs_spectro.draw_idle()
 
-    # ─────────────────────────────────────────────────────────────────
-    #  8 — BIFURCATION
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  8 â€” BIFURCATION
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _ensure_built(self, builder_name: str):
         """Force initialization of a lazy tab by its builder name."""
         for i in range(self.count()):
@@ -3252,9 +3205,9 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_bif.draw_idle()
         self.setCurrentWidget(self.tab_bif)
 
-    # ─────────────────────────────────────────────────────────────────
-    #  9 — SWEEP
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  9 â€” SWEEP
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def update_sweep(self, sweep_results: list, param_name: str):
         """sweep_results: list of (param_value, SimulationResult|None)"""
         self._ensure_built('_build_tab_sweep')
@@ -3330,9 +3283,9 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_sweep.draw_idle()
         self.setCurrentWidget(self.tab_sweep)
 
-    # ─────────────────────────────────────────────────────────────────
-    #  10 — S-D CURVE
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  10 â€” S-D CURVE
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def update_sd_curve(self, sd: dict):
         self._ensure_built('_build_tab_sd')
         self._last_sd = sd
@@ -3348,10 +3301,10 @@ class AnalyticsWidget(QTabWidget):
             self._sd_lines["ith"] = ax1.plot([], [], 'b.-', lw=2, ms=8, label='I_threshold')[0]
             self._sd_lines["weiss"] = ax1.plot([], [], 'r--', lw=1.5, label="Weiss fit")[0]
             self._sd_lines["rh"] = ax1.axhline(I_rh, color='gray', ls=':', lw=1.5,
-                                               label=f'Rheobase = {I_rh:.2f} µA/cm²')
+                                               label=f'Rheobase = {I_rh:.2f} ÂµA/cmÂ˛')
             self._sd_lines["ch"] = ax1.axvline(0.0, color='orange', ls='--', lw=1.5)
             self._sd_lines["ch_point"] = ax1.plot([], [], 'go', ms=10, zorder=5)[0]
-            self._sd_lines["qth"] = ax2.plot([], [], 'm.-', lw=2, ms=8, label='Q = I·t')[0]
+            self._sd_lines["qth"] = ax2.plot([], [], 'm.-', lw=2, ms=8, label='Q = IÂ·t')[0]
 
         self._sd_lines["ith"].set_data(dur, I_th)
         if weiss is not None:
@@ -3367,13 +3320,13 @@ class AnalyticsWidget(QTabWidget):
         else:
             self._sd_lines["ch"].set_visible(False)
             self._sd_lines["ch_point"].set_visible(False)
-        ax1.set_xlabel('Pulse duration (ms)');  ax1.set_ylabel('I threshold (µA/cm²)')
+        ax1.set_xlabel('Pulse duration (ms)');  ax1.set_ylabel('I threshold (ÂµA/cmÂ˛)')
         ax1.set_title('Strength-Duration Curve');  ax1.legend(fontsize=8)
         ax1.grid(alpha=0.3)
         ax1.relim(); ax1.autoscale_view()
 
         self._sd_lines["qth"].set_data(dur, Q_th)
-        ax2.set_xlabel('Pulse duration (ms)');  ax2.set_ylabel('Charge threshold (nC/cm²)')
+        ax2.set_xlabel('Pulse duration (ms)');  ax2.set_ylabel('Charge threshold (nC/cmÂ˛)')
         ax2.set_title('Minimum charge vs duration')
         ax2.legend();  ax2.grid(alpha=0.3)
         ax2.relim(); ax2.autoscale_view()
@@ -3382,9 +3335,9 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_sd.draw_idle()
         self.setCurrentWidget(self.tab_sd)
 
-    # ─────────────────────────────────────────────────────────────────
-    #  11 — EXCITABILITY MAP
-    # ─────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    #  11 â€” EXCITABILITY MAP
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def update_excmap(self, exc: dict):
         self._ensure_built('_build_tab_excmap')
         self._last_exc = exc
@@ -3404,7 +3357,7 @@ class AnalyticsWidget(QTabWidget):
             self._excmap_mesh["spikes"].set_array(S.ravel())
             if self._excmap_cbar["spikes"] is not None:
                 self._excmap_cbar["spikes"].update_normal(self._excmap_mesh["spikes"])
-        ax1.set_xlabel('Duration (ms)');  ax1.set_ylabel('I_ext (µA/cm²)')
+        ax1.set_xlabel('Duration (ms)');  ax1.set_ylabel('I_ext (ÂµA/cmÂ˛)')
         ax1.set_title('Spike count map')
 
         # Mask zero-frequency cells
@@ -3418,7 +3371,7 @@ class AnalyticsWidget(QTabWidget):
             self._excmap_mesh["freq"].set_array(F_masked.ravel())
             if self._excmap_cbar["freq"] is not None:
                 self._excmap_cbar["freq"].update_normal(self._excmap_mesh["freq"])
-        ax2.set_xlabel('Duration (ms)');  ax2.set_ylabel('I_ext (µA/cm²)')
+        ax2.set_xlabel('Duration (ms)');  ax2.set_ylabel('I_ext (ÂµA/cmÂ˛)')
         ax2.set_title('Mean frequency map')
 
         self.fig_excmap.tight_layout()
@@ -3430,7 +3383,7 @@ class AnalyticsWidget(QTabWidget):
         idx = int(self.currentIndex())
         win = QMainWindow(self)
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        win.setWindowTitle("NeuroModelPort — Analytics (Full Screen)")
+        win.setWindowTitle("NeuroModelPort - Analytics (Full Screen)")
         full = AnalyticsWidget()
         win.setCentralWidget(full)
 
@@ -3455,9 +3408,9 @@ class AnalyticsWidget(QTabWidget):
         win.destroyed.connect(_cleanup)
 
 
-# ─────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #  HELPER
-# ─────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _get_E_rev(name: str, ch) -> float:
     mapping = {
         'Na':   ch.ENa, 'K': ch.EK, 'Leak': ch.EL,

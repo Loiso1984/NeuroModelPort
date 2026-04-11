@@ -7,7 +7,7 @@ it must be attenuated and temporally filtered before reaching soma.
 
 Physics:
 1. Amplitude attenuation: A = exp(-distance / space_constant)
-2. Temporal low-pass filter: dV_fil/dt = (V_in - V_fil) / tau_dendritic
+2. Temporal low-pass filter: dI_fil/dt = (I_in - I_fil) / tau_dendritic
 """
 
 import numpy as np
@@ -49,7 +49,7 @@ class DendriticFilterState:
         self.attenuation = np.exp(-distance_um / space_const_safe)
         
         # State: filtered (low-pass) version of input
-        self.V_filtered = 0.0  # Will be updated each step
+        self.I_filtered = 0.0  # Will be updated each step
     
     def get_attenuation(self) -> float:
         """Return amplitude attenuation factor [dimensionless]."""
@@ -60,12 +60,12 @@ class DendriticFilterState:
         Compute soma current from dendritic input.
         
         In practice, this uses the pre-filtered value from previous step:
-        I_soma = attenuation * V_filtered
+        I_soma = attenuation * I_filtered
         
-        where V_filtered evolves as:
-        dV_fil/dt = (I_dend - V_fil) / tau_dendritic
+        where I_filtered evolves as:
+        dI_fil/dt = (I_dend - I_fil) / tau_dendritic
         """
-        return self.attenuation * self.V_filtered
+        return self.attenuation * self.I_filtered
     
     def step(self, I_dend_input: float, dt: float):
         """
@@ -78,21 +78,17 @@ class DendriticFilterState:
         dt : float
             Integration time step (ms)
         """
-        # Low-pass filter: dV_fil/dt = (V_in - V_fil) / tau
-        # Simple Euler: V_fil_new ≈ V_fil_old + dt/tau * (V_in - V_fil_old)
         if self.tau_dendritic_ms > 0:
-            inv_tau = 1.0 / self.tau_dendritic_ms
-            dV_dt = (I_dend_input - self.V_filtered) * inv_tau
-            self.V_filtered += dV_dt * dt
+            f = dt / self.tau_dendritic_ms
+            self.I_filtered = (self.I_filtered + f * I_dend_input) / (1.0 + f)
         else:
-            # Zero tau = instantaneous response (no filtering)
-            self.V_filtered = I_dend_input
+            self.I_filtered = I_dend_input
 
 
 @njit(cache=True)
 def apply_dendritic_filter(
     I_dend: float,
-    V_filtered_prev: float,
+    I_filtered_prev: float,
     tau_dendritic_ms: float,
     attenuation: float,
     dt: float
@@ -104,23 +100,21 @@ def apply_dendritic_filter(
     
     Returns
     -------
-    (I_soma, V_filtered_new) : tuple
+    (I_soma, I_filtered_new) : tuple
         I_soma: current arriving at soma (attenuated, filtered)
-        V_filtered_new: updated low-pass filter state
+        I_filtered_new: updated low-pass filter state
     """
     
-    # Low-pass filter update (Euler method)
     if tau_dendritic_ms > 0.0:
-        inv_tau = 1.0 / max(tau_dendritic_ms, 1e-12)
-        dV_dt = (I_dend - V_filtered_prev) * inv_tau
-        V_filtered_new = V_filtered_prev + dV_dt * dt
+        f = dt / max(tau_dendritic_ms, 1e-12)
+        I_filtered_new = (I_filtered_prev + f * I_dend) / (1.0 + f)
     else:
-        V_filtered_new = I_dend
+        I_filtered_new = I_dend
     
     # Amplitude attenuation (cable decay with distance)
-    I_soma = attenuation * V_filtered_new
+    I_soma = attenuation * I_filtered_new
     
-    return I_soma, V_filtered_new
+    return I_soma, I_filtered_new
 
 
 def validate_dendritic_filter(distance_um: float, space_constant_um: float) -> bool:

@@ -61,6 +61,7 @@ class PhysicsParams(NamedTuple):
     b_ca: np.ndarray
     mg_ext: float64
     tau_sk: float64
+    im_speed_multiplier: float64
 
     # ATP metabolism parameters
     g_katp_max: float64
@@ -135,6 +136,7 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'atp_synthesis_rate': 0.6,
         'e_rev_syn_primary': 0.0,      # Default: 0 mV (excitatory)
         'e_rev_syn_secondary': -75.0,  # Default: -75 mV (inhibitory)
+        'im_speed_multiplier': 1.0,
     }
     for k, v in defaults.items():
         if k not in kwargs:

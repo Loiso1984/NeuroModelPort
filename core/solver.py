@@ -2,7 +2,7 @@ import numpy as np
 import copy
 import logging
 import hashlib
-from scipy.integrate import solve_ivp
+from scipy.integrate import solve_ivp, trapezoid
 from concurrent.futures import ProcessPoolExecutor
 
 from core.models import FullModelConfig
@@ -23,6 +23,25 @@ def _stable_seed_from_values(*values) -> int:
     payload = "|".join(str(v) for v in values).encode("utf-8")
     digest = hashlib.blake2s(payload, digest_size=4).digest()
     return int.from_bytes(digest, byteorder="little", signed=False)
+
+
+def _set_nested_attr(obj, path: str, val: float):
+    """Set nested attribute by dot notation (e.g. 'channels.gNa_max')."""
+    path = str(path)
+    if "." not in path:
+        for section_name in (
+            "stim", "channels", "env", "morphology",
+            "calcium", "analysis", "metabolism", "preset_modes",
+        ):
+            section = getattr(obj, section_name, None)
+            if section is not None and hasattr(section, path):
+                setattr(section, path, float(val))
+                return
+    parts = path.split(".")
+    target = obj
+    for part in parts[:-1]:
+        target = getattr(target, part)
+    setattr(target, parts[-1], float(val))
 
 
 class SimulationResult:
@@ -418,6 +437,7 @@ class NeuronSolver:
             "tau_ca": cfg.calcium.tau_Ca,
             "mg_ext": cfg.env.Mg_ext,
             "tau_sk": cfg.channels.tau_SK,
+            "im_speed_multiplier": cfg.channels.im_speed_multiplier,
             "b_ca": self._build_b_ca_vector(cfg, morph),
             "g_katp_max": cfg.metabolism.g_katp_max,
             "katp_kd_atp_mM": cfg.metabolism.katp_kd_atp_mM,
@@ -733,22 +753,29 @@ class NeuronSolver:
         # Ca²+-ATPase (PMCA): 1 Ca²+ pumped per ATP (Bhatt et al. 2005).
         # Baseline pump: resting Na+/K+-ATPase ≈ 50% of neuronal ATP even
         # without spiking (Attwell & Laughlin 2001, J Cereb Blood Flow Metab).
-        dt = cfg.stim.dt_eval
         F = 96485.33  # Faraday constant [C/mol]
 
         # 1. Na+ pump cost: |Q_Na| / (3·F)  [µC/cm²·ms → mol → nmol ATP/cm²]
-        q_na = float(np.sum(np.abs(res.currents['Na']))) * dt
+        t_arr = np.asarray(res.t, dtype=float)
+        i_na_total = np.abs(res.currents['Na'])
         if 'NaP' in res.currents:
-            q_na += float(np.sum(np.abs(res.currents['NaP']))) * dt
+            i_na_total += np.abs(res.currents['NaP'])
         if 'NaR' in res.currents:
-            q_na += float(np.sum(np.abs(res.currents['NaR']))) * dt
+            i_na_total += np.abs(res.currents['NaR'])
+        if i_na_total.ndim == 2:
+            i_na_spatial_sum = np.sum(i_na_total, axis=0)
+        else:
+            i_na_spatial_sum = i_na_total
+        q_na = float(trapezoid(i_na_spatial_sum, x=t_arr))
         atp_na = (q_na * 1e-9) / (3.0 * F) * 1e9  # nmol/cm²
 
         # 2. Ca²+ pump cost: |Q_Ca| / (1·2F)  [divalent ion, z=2]
         atp_ca = 0.0
         for ca_key in ('ICa', 'ITCa'):
             if ca_key in res.currents:
-                q_ca = float(np.sum(np.abs(res.currents[ca_key]))) * dt
+                i_ca_curr = np.abs(res.currents[ca_key])
+                i_ca_spatial_sum = np.sum(i_ca_curr, axis=0) if i_ca_curr.ndim == 2 else i_ca_curr
+                q_ca = float(trapezoid(i_ca_spatial_sum, x=t_arr))
                 atp_ca += (q_ca * 1e-9) / (1.0 * 2.0 * F) * 1e9
 
         # 3. Baseline Na+/K+-ATPase resting cost
@@ -1023,6 +1050,7 @@ class NeuronSolver:
             b_ca                = b_ca_v,
             mg_ext              = float(getattr(cfg.env, "Mg_ext", 1.0)),
             tau_sk              = float(getattr(cc, "tau_SK", 15.0)),
+            im_speed_multiplier = float(getattr(cc, "im_speed_multiplier", 1.0)),
             g_katp_max          = float(cfg.metabolism.g_katp_max),
             katp_kd_atp_mM      = float(cfg.metabolism.katp_kd_atp_mM),
             atp_max_mM          = float(cfg.metabolism.atp_max_mM),
@@ -1150,7 +1178,7 @@ class NeuronSolver:
 
         for val in param_values:
             tmp = copy.deepcopy(self.config)
-            setattr(tmp.stim, ana.bif_param, val)
+            _set_nested_attr(tmp, ana.bif_param, val)
             tmp.stim.t_sim = 300.0
             res = self.run_single(tmp)
             half = len(res.t) // 2

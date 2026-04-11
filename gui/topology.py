@@ -12,7 +12,7 @@ v10.3 additions:
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QLabel,
@@ -123,14 +123,23 @@ class TopologyWidget(QWidget):
         self._time_slider = QSlider(Qt.Orientation.Horizontal)
         self._time_slider.setEnabled(False)
         self._time_slider.valueChanged.connect(self._on_time_scrub)
+        self._btn_play_heatmap = QPushButton("▶")
+        self._btn_play_heatmap.setFixedWidth(30)
+        self._btn_play_heatmap.setEnabled(False)
+        self._btn_play_heatmap.setStyleSheet("background:#313244; color:#A6E3A1; border-radius:4px; font-weight:bold;")
+        self._btn_play_heatmap.clicked.connect(self._toggle_heatmap_playback)
 
         self._slider_layout.addWidget(self._lbl_time)
+        self._slider_layout.addWidget(self._btn_play_heatmap)
         self._slider_layout.addWidget(self._time_slider)
         layout.addLayout(self._slider_layout)
 
         self._heatmap_data = None
         self._heatmap_time = None
         self._soma_item = None   # direct reference for scrubber coloring
+        self._heatmap_timer = QTimer(self)
+        self._heatmap_timer.setInterval(50)
+        self._heatmap_timer.timeout.connect(self._step_heatmap_playback)
         
         # Enable mouse clicks for compartment selection
         self._plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
@@ -400,15 +409,29 @@ class TopologyWidget(QWidget):
                 _marker,
             )
             self._plot.autoRange()
+            # Ensure heatmap data matches current morphology dimensions
             if result is not None:
-                self._heatmap_data = result.v_all
-                self._heatmap_time = result.t
-                self._time_slider.setRange(0, len(result.t) - 1)
-                self._time_slider.setEnabled(True)
-                self._on_time_scrub(self._time_slider.value())
+                if result.v_all.shape[0] != n_comp_total:
+                    self._heatmap_data = None
+                    self._heatmap_time = None
+                    self._time_slider.setEnabled(False)
+                    self._btn_play_heatmap.setEnabled(False)
+                    self._btn_play_heatmap.setText("▶")
+                    self._heatmap_timer.stop()
+                else:
+                    self._heatmap_data = result.v_all
+                    self._heatmap_time = result.t
+                    self._time_slider.setRange(0, len(result.t) - 1)
+                    self._time_slider.setEnabled(True)
+                    self._btn_play_heatmap.setEnabled(True)
+                    self._on_time_scrub(self._time_slider.value())
             else:
                 self._heatmap_data = None
+                self._heatmap_time = None
                 self._time_slider.setEnabled(False)
+                self._btn_play_heatmap.setEnabled(False)
+                self._btn_play_heatmap.setText("▶")
+                self._heatmap_timer.stop()
             return
 
         ais_len = max(10, int(mc.N_ais) * 3) if int(mc.N_ais) > 0 else 0.0
@@ -641,7 +664,7 @@ class TopologyWidget(QWidget):
                 symbol="s",
             )
 
-            e_curr = abs(float(getattr(cfg.stim, "Iext", 0.0)))
+            e_curr = abs(float(getattr(config.stim, "Iext", 0.0)))
             i_curr = abs(dual_config.secondary_Iext) if s_type in ("GABAA", "GABAB") else 0
             if i_curr > 0:
                 ei = e_curr / i_curr
@@ -730,15 +753,29 @@ class TopologyWidget(QWidget):
         self._info.setText("  |  ".join(info_parts))
         self._plot.autoRange()
 
+        # Ensure heatmap data matches current morphology dimensions
         if result is not None:
-            self._heatmap_data = result.v_all
-            self._heatmap_time = result.t
-            self._time_slider.setRange(0, len(result.t) - 1)
-            self._time_slider.setEnabled(True)
-            self._on_time_scrub(self._time_slider.value())
+            if result.v_all.shape[0] != n_comp_total:
+                self._heatmap_data = None
+                self._heatmap_time = None
+                self._time_slider.setEnabled(False)
+                self._btn_play_heatmap.setEnabled(False)
+                self._btn_play_heatmap.setText("▶")
+                self._heatmap_timer.stop()
+            else:
+                self._heatmap_data = result.v_all
+                self._heatmap_time = result.t
+                self._time_slider.setRange(0, len(result.t) - 1)
+                self._time_slider.setEnabled(True)
+                self._btn_play_heatmap.setEnabled(True)
+                self._on_time_scrub(self._time_slider.value())
         else:
             self._heatmap_data = None
+            self._heatmap_time = None
             self._time_slider.setEnabled(False)
+            self._btn_play_heatmap.setEnabled(False)
+            self._btn_play_heatmap.setText("▶")
+            self._heatmap_timer.stop()
 
     @staticmethod
     def _get_heat_color(v: float) -> QColor:
@@ -753,6 +790,26 @@ class TopologyWidget(QWidget):
             g = int(2 * (1.0 - v_norm) * 200)
             b = int(2 * (1.0 - v_norm) * 250)
         return QColor(r, g, b)
+
+    def _toggle_heatmap_playback(self):
+        if self._heatmap_timer.isActive():
+            self._heatmap_timer.stop()
+            self._btn_play_heatmap.setText("▶")
+        else:
+            if self._time_slider.value() == self._time_slider.maximum():
+                self._time_slider.setValue(0)
+            self._heatmap_timer.start()
+            self._btn_play_heatmap.setText("⏸")
+
+    def _step_heatmap_playback(self):
+        cur = self._time_slider.value()
+        step = max(1, self._time_slider.maximum() // 200)
+        nxt = cur + step
+        if nxt >= self._time_slider.maximum():
+            nxt = self._time_slider.maximum()
+            self._heatmap_timer.stop()
+            self._btn_play_heatmap.setText("▶")
+        self._time_slider.setValue(nxt)
 
     def _on_time_scrub(self, idx: int):
         if self._heatmap_data is None or self._heatmap_time is None:

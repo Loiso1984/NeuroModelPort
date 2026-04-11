@@ -375,28 +375,6 @@ def bb_IA(V):
 # so that our standard phi_channel(Q10_M) handles temperature correctly.
 # =====================================================================
 
-# taumax at T_ref=6.3°C: raw kinetics are slow at cold temperature
-_IM_TAUMAX_RAW = 1000.0 * 2.3 ** ((36.0 - 6.3) / 10.0)  # ≈ 11870 ms
-
-@vectorize([float64(float64)], nopython=True, cache=True)
-def aw_M(V):
-    """I_M activation alpha (Yamada/Koch/Adams 1989). V½ = -35 mV."""
-    x = V + 35.0
-    w_inf = 1.0 / (1.0 + np.exp(-x / 10.0))
-    denom = 3.3 * np.exp(x / 20.0) + np.exp(-x / 20.0)
-    tau_w = _IM_TAUMAX_RAW / max(denom, 1e-12)
-    return w_inf / tau_w
-
-@vectorize([float64(float64)], nopython=True, cache=True)
-def bw_M(V):
-    """I_M activation beta (Yamada/Koch/Adams 1989)."""
-    x = V + 35.0
-    w_inf = 1.0 / (1.0 + np.exp(-x / 10.0))
-    denom = 3.3 * np.exp(x / 20.0) + np.exp(-x / 20.0)
-    tau_w = _IM_TAUMAX_RAW / max(denom, 1e-12)
-    return (1.0 - w_inf) / tau_w
-
-
 @vectorize([float64(float64)], nopython=True, cache=True)
 def z_inf_SK(Ca_i):
     """

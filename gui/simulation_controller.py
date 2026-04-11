@@ -92,24 +92,14 @@ class SimulationController(QObject):
         
     def run_stochastic(self, config, n_trials: int, on_success: Callable[[Any], None] = None,
                       on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None):
-        """Run stochastic Euler-Maruyama simulation."""
+        """Run stochastic simulation through the primary solver path."""
         self.simulation_started.emit()
         
         def run_simulation():
-            # Bypass run_euler_maruyama for native_hines mode - native solver now handles stochastics
-            if config.stim.jacobian_mode == "native_hines":
-                from core.solver import NeuronSolver
-                solver = NeuronSolver(config)
-                return {'single': solver.run_single()}
-            else:
-                # Warn if stochastic parameters are set but using non-native solver
-                if getattr(config.stim, 'stoch_gating', False) or getattr(config.stim, 'noise_sigma', 0.0) > 0:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning("Stochastic parameters set but jacobian_mode is not 'native_hines'. "
-                                 "Use jacobian_mode='native_hines' for full stochastic support.")
-                from core.advanced_sim import run_euler_maruyama
-                return {'single': run_euler_maruyama(config)}
+            from core.solver import NeuronSolver
+            config.stim.stoch_gating = True
+            solver = NeuronSolver(config)
+            return {'single': solver.run_single()}
             
         worker = Worker(run_simulation)
         

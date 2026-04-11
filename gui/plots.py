@@ -963,6 +963,11 @@ class OscilloscopeWidget(QWidget):
         else:
             self._restore_normal_mode()
 
+        self._p_v.enableAutoRange(axis=pg.ViewBox.XAxis)
+        self._p_g.enableAutoRange(axis=pg.ViewBox.XAxis)
+        self._p_i.enableAutoRange(axis=pg.ViewBox.XAxis)
+        self._p_ca.enableAutoRange(axis=pg.ViewBox.XAxis)
+        # Keep Y autoscale for new peaks.
         self._p_v.autoRange()
         self._p_g.autoRange()
         self._p_i.autoRange()

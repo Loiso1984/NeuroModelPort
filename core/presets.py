@@ -41,7 +41,7 @@ def get_preset_names():
         "H: Severe Hyperkalemia (High EK)",
         "I: In Vitro Slice (Mammalian 23°C)",
         "J: C-Fiber (Pain / Unmyelinated)",
-        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "K: Thalamic Relay (Ih + ITCa + Burst)",
         "L: Hippocampal CA1 Pyramidal (Adapting)",
         "M: Epilepsy (v10 SCN1A mutation)",
         "N: Alzheimer's (v10 Calcium Toxicity)",
@@ -134,6 +134,29 @@ def _apply_l5_mode(cfg: FullModelConfig) -> None:
     # Normal mode: use default IM (0.04) and SK (1.2) from preset
 
 
+def _apply_ach_mode(cfg: FullModelConfig) -> None:
+    """Apply ACh mode for preset R (sleep vs arousal)."""
+    mode = getattr(cfg.preset_modes, "ach_mode", "sleep")
+    cfg.channels.enable_IM = True
+    if mode == "arousal":
+        cfg.channels.gIM_max = 0.05
+        cfg.channels.im_speed_multiplier = 1.0
+        cfg.stim.Iext = 12.0
+    else:
+        cfg.channels.gIM_max = 0.5
+        cfg.channels.im_speed_multiplier = 0.15
+        cfg.stim.Iext = 5.0
+
+
+def _apply_purkinje_mode(cfg: FullModelConfig) -> None:
+    """Apply Purkinje firing mode overlays."""
+    mode = getattr(cfg.preset_modes, "purkinje_mode", "tonic")
+    if mode == "climbing_fiber":
+        cfg.stim.stim_type = "pulse"
+        cfg.stim.Iext = 150.0
+        cfg.stim.pulse_dur = 2.0
+
+
 def _apply_k_mode(cfg: FullModelConfig) -> None:
     """
     Configure the model's thalamic relay behavior according to cfg.preset_modes.k_mode.
@@ -200,11 +223,13 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
 
     # Enable dynamic ATP metabolism for hypoxia pathology
     cfg.metabolism.enable_dynamic_atp = True
+    cfg.metabolism.atp_synthesis_rate = 0.1
+    # Axonal failure under energy depletion: reduced effective Na conductance in trunk.
+    cfg.morphology.gNa_trunk_mult = 0.5
 
     if cfg.preset_modes.hypoxia_mode == "terminal":
         # Terminal stage: profound depolarization block and pump collapse.
         # ATP synthesis stops completely, K_ATP fully opens, pumps fail
-        cfg.metabolism.atp_synthesis_rate = 0.01  # Severe metabolic failure
         cfg.morphology.gL_trunk_mult = 10.0  # Massive demyelination-like leak in trunk
         cfg.channels.EK = -45.0
         cfg.channels.EL = -40.0
@@ -216,7 +241,6 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
     else:
         # Progressive stage: short early spiking epoch, then attenuation.
         # Reduced ATP synthesis causes gradual depletion, K_ATP opens, spiking slows
-        cfg.metabolism.atp_synthesis_rate = 0.15  # Reduced synthesis (nmol/cm²/s)
         cfg.channels.EK = -60.0
         cfg.channels.EL = -50.0
         cfg.channels.gL = 0.15
@@ -339,7 +363,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.N_trunk = 10     # Standardized reduced model
         cfg.morphology.d_ais = 4e-4    # Match large soma (60 μm)
         cfg.morphology.d_trunk = 5e-4  # Match large soma (60 μm)
-        cfg.morphology.N_ais = 5
+        cfg.morphology.N_ais = 10
+        cfg.morphology.l_ais = 100e-4
         cfg.morphology.Ra = 70.0
         
         # CALCIUM DYNAMICS: Enable for PICs and AHP
@@ -378,15 +403,15 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.d_soma = 25e-4
         cfg.morphology.N_trunk = 10     # Standardized reduced model
         cfg.morphology.N_ais = 3
-        cfg.morphology.gNa_ais_mult = 30.0
+        cfg.morphology.gNa_ais_mult = 15.0
         cfg.channels.enable_SK = True  # Re-enable SK - critical for Purkinje physiology
-        cfg.channels.gSK_max = 0.5  # Moderate SK for calcium-dependent adaptation
+        cfg.channels.gSK_max = 1.5  # Strong SK AHP in Purkinje physiology
         
         # CALCIUM DYNAMICS: Purkinje is calcium processing machine
         cfg.calcium.dynamic_Ca = True
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
-        cfg.calcium.tau_Ca = 80.0  # v12.0: Purkinje extreme calcium buffering (was 150.0)
+        cfg.calcium.tau_Ca = 60.0
         cfg.calcium.B_Ca = 1e-5  # v12.0: Reverted to 1e-5 (was 1e-7)
         cfg.channels.enable_ICa = True  # L-type calcium channels
         cfg.channels.gCa_max = 0.08  # Physiological L-type calcium conductance
@@ -443,6 +468,9 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # I_T: low-threshold T-type Ca²⁺ (CaV3.x) — replaces L-type for LTS bursting
         cfg.channels.enable_ITCa = True
         cfg.channels.gTCa_max = 2.0     # Destexhe 1998: 2.0 mS/cm² somatic density
+        cfg.morphology.single_comp = False
+        cfg.morphology.N_trunk = 5
+        cfg.morphology.gCa_ais_mult = 1.0  # Keep T-current distributed along soma+trunk
         cfg.channels.enable_ICa = False  # L-type NOT used in relay neurons
         cfg.channels.enable_SK = False
         cfg.calcium.dynamic_Ca = True
@@ -468,6 +496,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.gL_trunk_mult = 15.0  # Moderate leak in demyelinated segments (was 80.0)
         cfg.morphology.Cm_trunk_mult = 3.0  # Moderately increased capacitance (was 10.0)
         cfg.morphology.gNa_trunk_mult = 0.5  # Reduced sodium in internodes (was 0.2)
+        cfg.morphology.N_ais = 10
+        cfg.morphology.gNa_ais_mult = 50.0
         cfg.morphology.Ra = 400.0  # Elevated axial resistance (was 900.0)
         cfg.stim.jacobian_mode = 'native_hines'
         # Set delay target to Terminal to show the "Wow" effect of conduction block immediately
@@ -506,7 +536,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
             enabled=True,
             secondary_location="dendritic_filtered",
             secondary_stim_type="GABAA",
-            secondary_Iext=10.0,
+            secondary_Iext=15.0,
             secondary_train_type="poisson",
             secondary_train_freq_hz=100.0,
             secondary_train_duration_ms=5000.0,
@@ -529,6 +559,10 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 10. ПАТОЛОГИЯ: ГИПОКСИЯ (ATP-PUMP FAILURE - ION IMBALANCE + Ca overload) ---
     elif "Hypoxia" in name:
         apply_preset(cfg, "FS Interneuron (Wang-Buzsaki)")
+        cfg.morphology.single_comp = False
+        cfg.morphology.N_trunk = 10
+        cfg.morphology.N_ais = 5
+        cfg.morphology.gNa_ais_mult = 20.0
         # Ion imbalance from pump failure
         cfg.channels.EK = -50.0  # Reduced: -90 → -50 (K+ accumulation)
         cfg.channels.EL = -45.0  # Reduced: -65 → -45 (Na+ accumulation)
@@ -681,9 +715,12 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # spike due to strong I_A and hyperpolarized resting potential.
         # Reference: Nisenbaum & Wilson 1995, J Neurophysiol 74:1163;
         #            Surmeier et al. 1989, Brain Res 473:187
-        cfg.morphology.single_comp = True
-        cfg.stim_location.location = "soma"
-        cfg.dendritic_filter.enabled = False
+        cfg.morphology.single_comp = False
+        cfg.morphology.N_trunk = 15
+        cfg.stim_location.location = "dendritic_filtered"
+        cfg.dendritic_filter.enabled = True
+        cfg.dendritic_filter.distance_um = 220.0
+        cfg.dendritic_filter.tau_dendritic_ms = 15.0
         cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 80.0, 8.0, 0.04
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -80.0  # Very hyperpolarized rest
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
@@ -726,7 +763,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.jacobian_mode = 'native_hines'
         # Const stimulus: with I_M → adapting; user blocks gIM → tonic firing
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 8.0
+        cfg.stim.Iext = 5.0
 
     # --- 19. ПАТОЛОГИЯ: СИНДРОМ ДРАВЕ (SCN1A LOSS-OF-FUNCTION) ---
     elif "Dravet" in name:
@@ -820,8 +857,14 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # Stage/mode overlays for selected presets.
     if "Thalamic" in name:
         _apply_k_mode(cfg)
-    elif "Hypoxia" in name:
+    if "Hypoxia" in name:
         _apply_hypoxia_mode(cfg)
+    if "Alzheimer" in name:
+        _apply_alzheimer_mode(cfg)
+    if "Cholinergic" in name or "ACh" in name:
+        _apply_ach_mode(cfg)
+    if "Purkinje" in name:
+        _apply_purkinje_mode(cfg)
 
 
 
@@ -857,8 +900,8 @@ def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
     elif "NMDA" in stimulus_type:
         cfg.stim.stim_type = 'NMDA'
         cfg.stim.alpha_tau = 1.0
-        cfg.stim.Iext = 0.8
-        cfg.stim.t_sim = 300.0
+        cfg.stim.Iext = 6.0
+        cfg.stim.t_sim = 500.0
     elif "Kainate" in stimulus_type:
         cfg.stim.stim_type = 'Kainate'
         cfg.stim.alpha_tau = 1.0
@@ -872,7 +915,7 @@ def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
     elif "GABA-B" in stimulus_type:
         cfg.stim.stim_type = 'GABAB'
         cfg.stim.alpha_tau = 1.0
-        cfg.stim.Iext = -0.6
+        cfg.stim.Iext = -2.5
         cfg.stim.t_sim = 400.0
     elif "Nicotinic" in stimulus_type:
         cfg.stim.stim_type = 'Nicotinic'

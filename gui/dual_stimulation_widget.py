@@ -26,6 +26,8 @@ from core.dual_stimulation_presets import (
     validate_dual_preset
 )
 from core.dual_stimulation import DualStimulationConfig
+from gui.locales import T
+from gui.text_sanitize import repair_widget_tree
 
 
 class DualStimulationWidget(QWidget):
@@ -38,6 +40,7 @@ class DualStimulationWidget(QWidget):
         super().__init__(parent)
         self.config = DualStimulationConfig()
         self.setup_ui()
+        self.retranslate_ui()
         self.load_default_preset()
     
     def setup_ui(self):
@@ -50,11 +53,12 @@ class DualStimulationWidget(QWidget):
         layout.setSpacing(10)
         
         # ── Preset Selection ─────────────────────────────────────
-        preset_group = QGroupBox("Dual Stimulation Presets")
-        preset_layout = QVBoxLayout(preset_group)
+        self.preset_group = QGroupBox("Dual Stimulation Presets")
+        preset_layout = QVBoxLayout(self.preset_group)
         
         preset_select_layout = QHBoxLayout()
-        preset_select_layout.addWidget(QLabel("Preset:"))
+        self.lbl_preset = QLabel("Preset:")
+        preset_select_layout.addWidget(self.lbl_preset)
         self.combo_presets = QComboBox()
         self.combo_presets.addItems(["— Select preset —"] + get_dual_preset_names())
         self.combo_presets.currentTextChanged.connect(self.on_preset_changed)
@@ -79,27 +83,30 @@ class DualStimulationWidget(QWidget):
         """)
         preset_layout.addWidget(self.txt_description)
         
-        layout.addWidget(preset_group)
+        layout.addWidget(self.preset_group)
         
         # ── Secondary Stimulus ─────────────────────────────────────
-        secondary_group = QGroupBox("Secondary Stimulus (Inhibitory)")
-        secondary_layout = QGridLayout(secondary_group)
+        self.secondary_group = QGroupBox("Secondary Stimulus (Inhibitory)")
+        secondary_layout = QGridLayout(self.secondary_group)
         
         # Location and type
-        secondary_layout.addWidget(QLabel("Location:"), 0, 0)
+        self.lbl_secondary_location = QLabel("Location:")
+        secondary_layout.addWidget(self.lbl_secondary_location, 0, 0)
         self.combo_secondary_location = QComboBox()
         self.combo_secondary_location.addItems(["soma", "ais", "dendritic_filtered"])
         self.combo_secondary_location.currentTextChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.combo_secondary_location, 0, 1)
         
-        secondary_layout.addWidget(QLabel("Type:"), 0, 2)
+        self.lbl_secondary_type = QLabel("Type:")
+        secondary_layout.addWidget(self.lbl_secondary_type, 0, 2)
         self.combo_secondary_type = QComboBox()
         self.combo_secondary_type.addItems(["const", "pulse", "alpha", "ou_noise", "AMPA", "NMDA", "GABAA", "GABAB", "Kainate", "Nicotinic", "zap"])
         self.combo_secondary_type.currentTextChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.combo_secondary_type, 0, 3)
         
         # Current and timing
-        secondary_layout.addWidget(QLabel("Current (µA/cm²):"), 1, 0)
+        self.lbl_secondary_current = QLabel("Current (uA/cm2):")
+        secondary_layout.addWidget(self.lbl_secondary_current, 1, 0)
         self.spin_secondary_current = QDoubleSpinBox()
         self.spin_secondary_current.setRange(-5000, 5000)
         self.spin_secondary_current.setSingleStep(0.5)
@@ -107,14 +114,16 @@ class DualStimulationWidget(QWidget):
         self.spin_secondary_current.valueChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.spin_secondary_current, 1, 1)
         
-        secondary_layout.addWidget(QLabel("Start (ms):"), 1, 2)
+        self.lbl_secondary_start = QLabel("Start (ms):")
+        secondary_layout.addWidget(self.lbl_secondary_start, 1, 2)
         self.spin_secondary_start = QDoubleSpinBox()
         self.spin_secondary_start.setRange(0, 200)
         self.spin_secondary_start.setSingleStep(1)
         self.spin_secondary_start.valueChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.spin_secondary_start, 1, 3)
         
-        secondary_layout.addWidget(QLabel("Duration (ms):"), 2, 0)
+        self.lbl_secondary_duration = QLabel("Duration (ms):")
+        secondary_layout.addWidget(self.lbl_secondary_duration, 2, 0)
         self.spin_secondary_duration = QDoubleSpinBox()
         self.spin_secondary_duration.setRange(0.1, 200)
         self.spin_secondary_duration.setSingleStep(0.5)
@@ -164,7 +173,7 @@ class DualStimulationWidget(QWidget):
         self.spin_secondary_train_duration.valueChanged.connect(self.on_config_changed)
         secondary_layout.addWidget(self.spin_secondary_train_duration, 5, 1, 1, 3)
         
-        layout.addWidget(secondary_group)
+        layout.addWidget(self.secondary_group)
         
         # ── Dendritic Parameters ───────────────────────────────────
         dendritic_group = QGroupBox("Dendritic Parameters (Secondary)")
@@ -229,8 +238,21 @@ class DualStimulationWidget(QWidget):
         self.check_enabled = QCheckBox("Enable Dual Stimulation")
         self.check_enabled.stateChanged.connect(self.on_enabled_changed)
         layout.addWidget(self.check_enabled)
-        
         layout.addStretch()
+        repair_widget_tree(self)
+
+    def retranslate_ui(self):
+        self.preset_group.setTitle(T.tr('dual_presets'))
+        self.lbl_preset.setText(T.tr('preset_label'))
+        self.btn_load_preset.setText(T.tr('btn_load'))
+        self.secondary_group.setTitle(T.tr('secondary_group'))
+        self.lbl_secondary_location.setText(T.tr('lbl_location'))
+        self.lbl_secondary_type.setText(T.tr('lbl_type'))
+        self.lbl_secondary_current.setText(T.tr('lbl_current'))
+        self.lbl_secondary_start.setText(T.tr('lbl_start'))
+        self.lbl_secondary_duration.setText(T.tr('lbl_duration'))
+        self.check_enabled.setText(T.tr('lbl_enable_secondary'))
+        repair_widget_tree(self)
     
     def on_preset_changed(self, preset_name):
         """Handle preset selection change."""

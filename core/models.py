@@ -13,6 +13,7 @@ class MorphologyParams(BaseModel):
     # AIS (Axon Initial Segment)
     N_ais: int          = Field(default=2,   ge=0,  description="Number of AIS segments")
     d_ais: float        = Field(default=1.5e-4, gt=0, description="AIS diameter (cm)")
+    l_ais: float        = Field(default=0.002, gt=0, description="AIS segment length (cm)")
     gNa_ais_mult: float = Field(default=40.0, ge=1.0, description="gNa multiplier in AIS (40–100×)")
     gK_ais_mult:  float = Field(default=5.0,  ge=1.0, description="gK multiplier in AIS")
     gIh_ais_mult: float = Field(default=1.0,           description="gIh multiplier in AIS")
@@ -86,6 +87,11 @@ class ChannelParams(BaseModel):
 
     enable_IM: bool  = Field(default=False, description="Enable M-type K⁺ current (KCNQ2/3, muscarinic-sensitive)")
     gIM_max:   float = Field(default=0.5,   description="Max M-type K conductance (mS/cm², Yamada 1989)")
+    im_speed_multiplier: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Scales the kinetics of the M-current. 1.0=Awake, 0.1=Deep Sleep",
+    )
 
     enable_NaP: bool  = Field(default=False, description="Enable persistent Na⁺ current (subthreshold, non-inactivating)")
     gNaP_max:   float = Field(default=0.1,   description="Max persistent Na conductance (mS/cm², Magistretti 1999)")
@@ -309,7 +315,7 @@ class SimulationParams(BaseModel):
     )
 
     # Stochastic
-    stoch_gating: bool  = Field(default=False, description="Langevin gate noise (Euler-Maruyama solver)")
+    stoch_gating: bool  = Field(default=False, description="Langevin gate noise via Native Hines solver")
     noise_sigma:  float = Field(default=0.0,   description="Additive membrane current noise sigma (uA/cm2)")
 
 
@@ -407,6 +413,14 @@ class PresetModeParams(BaseModel):
     l5_mode: Literal['normal', 'high_ach'] = Field(
         default='normal',
         description="L5 Pyramidal neuromodulation mode: normal (standard IM/SK) or high_ach (IM disabled, SK reduced 50%)"
+    )
+    ach_mode: Literal['sleep', 'arousal'] = Field(
+        default='sleep',
+        description="Cholinergic preset mode: sleep (higher IM, lower drive) or arousal (IM blocked, stronger drive)"
+    )
+    purkinje_mode: Literal['tonic', 'climbing_fiber'] = Field(
+        default='tonic',
+        description="Purkinje mode: tonic firing baseline or climbing_fiber complex-spike pulse"
     )
     dravet_mode: Literal['normal', 'febrile'] = Field(
         default='normal',
