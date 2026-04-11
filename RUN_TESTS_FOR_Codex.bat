@@ -29,6 +29,7 @@ echo.
 echo [INFO] Logging to: %LOG%
 
 call :run_step "Core fast suite" "python -m pytest -q tests/core/test_p0_p1_gate_runner.py tests/core/test_run_f_conduction_extended_cli.py tests/core/test_preset_stress_validation_cli.py tests/core/test_jacobian_contract.py tests/core/test_dual_stimulation_distribution.py tests/core/test_delay_target_utils.py tests/core/test_unit_converter_current.py"
+call :run_step "Python syntax preflight" "python -m compileall -q core gui tests"
 call :run_step "MS branch attenuation test" "python -m pytest -q tests/branches/test_ms_conduction_block_branch.py"
 call :run_step "Consolidated P0/P1 gate" "python tests/utils/run_p0_p1_gate.py --out-dir tests/artifacts/p0_p1_gate_user --target-ratio 0.3 --step-timeout-sec %GATE_STEP_TIMEOUT_SEC%"
 call :run_step "F conduction diagnostic sweep" "python tests/utils/run_f_conduction_extended.py --target-ratio 0.3 --no-fail-on-anomaly --output tests/artifacts/f_conduction_user.json"
