@@ -848,24 +848,10 @@ def get_synaptic_stimulus_names():
 
 
 def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
-    """
-    Применяет конфигурацию синаптического стимула к уже установленному нейрону.
-    
-    Параметры:
-    -----------
-    cfg : FullModelConfig
-        Конфигурация нейрона (уже должна иметь membrane parameters)
-    stimulus_type : str
-        Тип синаптического входа (из get_synaptic_stimulus_names())
-    
-    Примечание:
-    -----------
-    Эта функция ТОЛЬКО переопределяет параметры стимуляции (alpha_tau, Iext).
-    Не трогает саму морфологию и каналы нейрона.
-    
-    ВАЖНО: Амплитуды масштабированы для soma (soma diameter ~20-30 µm).
-    Для многокомпартментных моделей нужны относительно высокие значения (~5-20 µA)
-    чтобы преодолеть кабельную утечку и вызвать деполяризацию.
+    """Apply a synaptic stimulus profile on top of the current neuron config.
+
+    Only stimulation fields are modified (`stim_type`, `alpha_tau`, `Iext`,
+    timing/simulation window). Morphology and channel parameters are left intact.
     """
     
     # Default fallback is alpha, but known receptor presets below
