@@ -83,9 +83,14 @@ def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
 
 
 def _copy_defaults(target, source) -> None:
-    """Copy every field from *source* (a fresh default instance) to *target*.
+    """
+    Copy field values from a fresh default `source` model into an existing `target` model while preserving nested object identity.
     
-    Uses deep recursive update to preserve object identity for nested Pydantic models.
+    Mutates `target` in place: for each field present on `source`, if both `target` and `source` attributes look like Pydantic models (have `model_fields`), the function recurses into those nested objects to update their fields rather than replacing the nested object; otherwise it assigns the `source` attribute value onto `target`.
+    
+    Parameters:
+        target: The existing Pydantic model instance to be updated in place.
+        source: A fresh/default Pydantic model instance whose field values will be copied into `target`.
     """
     for field_name in type(source).model_fields:
         target_val = getattr(target, field_name)
@@ -100,10 +105,18 @@ def _copy_defaults(target, source) -> None:
 
 
 def _apply_l5_mode(cfg: FullModelConfig) -> None:
-    """Apply L5 Pyramidal neuromodulation mode variants (v12.0).
-
-    Normal (progressive): Standard IM (0.04) and SK (1.2) for spike frequency adaptation.
-    High ACh (terminal): Disable IM, reduce SK by 50% → faster, more regular firing (arousal state).
+    """
+    Apply L5 pyramidal neuromodulation overlays according to cfg.preset_modes.l5_mode.
+    
+    If `l5_mode` is "high_ach", modifies the configuration to reflect high acetylcholine (arousal):
+    - disables the muscarinic-sensitive M current (`channels.enable_IM = False`) and sets `channels.gIM_max = 0.0`;
+    - reduces SK conductance (`channels.gSK_max = 0.6`);
+    - increases synaptic train frequency (`stim.synaptic_train_freq_hz = 40.0`) and external drive (`stim.Iext = 80.0`).
+    
+    If `l5_mode` is any other value, leaves channel and stimulation defaults from the current preset unchanged. The function returns immediately if `cfg` lacks `channels` or `stim`.
+     
+    Parameters:
+        cfg (FullModelConfig): Model configuration to modify in place.
     """
     # Validate config structure before modification
     if not hasattr(cfg, 'channels') or not hasattr(cfg, 'stim'):
@@ -122,11 +135,12 @@ def _apply_l5_mode(cfg: FullModelConfig) -> None:
 
 
 def _apply_k_mode(cfg: FullModelConfig) -> None:
-    """Apply thalamic relay mode variants (v12.0).
-
-    Baseline (sleep): Rest Vm = -75mV, bursty. Enable ITCa (2.0), Ih (0.02). Use alpha stimulus (8uA) at 20ms to trigger LTS burst.
-    Activated (awake): Rest Vm = -60mV, tonic relay. Iext = 8.0 (tonic drive), same channels, tonic firing because ITCa is inactivated.
-    Delta_oscillator: Self-sustained delta oscillations at ~2 Hz via Ih + I_T interaction with constant hyperpolarization.
+    """
+    Configure the model's thalamic relay behavior according to cfg.preset_modes.k_mode.
+    
+    For "baseline": set a hyperpolarizing pulse to promote post-inhibitory rebound bursting (bursty/sleep-like relay).
+    For "delta_oscillator": set a sustained hyperpolarizing drive with enhanced pacemaker currents to support slow (~delta) oscillations.
+    For other values ("activated"): set a tonic depolarizing drive to favor tonic relay (awake) behaviour.
     """
     if cfg.preset_modes.k_mode == "baseline":
         # Sleep/drowsy: hyperpolarizing pulse de-inactivates I_T → Post-Inhibitory Rebound burst
@@ -213,10 +227,14 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
 
 
 def apply_preset(cfg: FullModelConfig, name: str):
-    """Применяет полные наборы параметров (Мембрана + Морфология).
-
-    Полностью сбрасывает все поля до значений по умолчанию перед применением
-    пресета, предотвращая смешивание параметров между пресетами.
+    """
+    Apply a named full model preset (morphology and membrane parameters) to the provided configuration.
+    
+    Resets all top-level fields of `cfg` to their Pydantic defaults (while preserving the user's `cfg.preset_modes` selections), then configures morphology, channel densities, ionic reversal potentials, stimulation, calcium/metabolic settings, and pathology overlays according to `name`. Some presets apply additional mode overlays (e.g., L5 pyramidal, thalamic k-mode, hypoxia/alzheimer overlays) or call other presets as bases; unrecognized names leave the configuration at the post-reset state with only `preset_modes` restored.
+    
+    Parameters:
+        cfg (FullModelConfig): Mutable configuration object to modify in-place.
+        name (str): Preset name or substring used to select which preset to apply.
     """
     # ПОЛНЫЙ СБРОС: все поля возвращаются к умолчаниям Pydantic
     _reset_cfg_to_defaults(cfg)

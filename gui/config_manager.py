@@ -98,23 +98,37 @@ class ConfigManager(QObject):
     
     def load_config_from(self, file_path: str) -> bool:
         """
-        Load configuration from JSON file.
+        Apply a configuration from a JSON file onto the existing manager state.
+        
+        Loads a FullModelConfig from the given file and copies its field values into the existing
+        ConfigManager.config object in-place (preserving object identity). If the loaded config
+        contains a dual_stimulation section and a dual-stimulation widget is set, the widget's
+        config is updated in-place and its UI is refreshed. Emits the `config_changed` signal on success.
         
         Parameters
         ----------
         file_path : str
-            Path to load the configuration from
-            
+            Path to the JSON file containing the configuration to load.
+        
         Returns
         -------
         bool
-            True if successful, False otherwise
+            `True` if the configuration was applied successfully, `False` if an error occurred.
         """
         try:
             new_cfg = FullModelConfig.load_from_file(file_path)
             
             # Helper to recursively update Pydantic models without replacing them
             def _deep_update(target_obj, source_obj):
+                """
+                Recursively copy values from `source_obj` into `target_obj`, updating fields in-place.
+                
+                Iterates over `target_obj.model_fields`; for each field, if both the target and source values are Pydantic models (have `model_fields`), recurse into them, otherwise assign the source value onto the target attribute. This preserves the identity of parent objects while updating their contained data.
+                
+                Parameters:
+                    target_obj: A Pydantic model instance to be updated in-place.
+                    source_obj: A Pydantic model instance supplying values to copy.
+                """
                 for field_name in target_obj.model_fields:
                     target_val = getattr(target_obj, field_name)
                     source_val = getattr(source_obj, field_name)
@@ -142,12 +156,9 @@ class ConfigManager(QObject):
     
     def sync_dual_stim_into_config(self) -> bool:
         """
-        Sync dual-stimulation GUI config into main model config.
+        Synchronize the dual-stimulation widget's configuration into the active model configuration.
         
-        Returns
-        -------
-        bool
-            True if dual stimulation is enabled
+        @returns `true` if dual stimulation is enabled, `false` otherwise.
         """
         if self._dual_stim_widget is None:
             return False
@@ -161,12 +172,17 @@ class ConfigManager(QObject):
     
     def get_hint_text(self) -> str:
         """
-        Generate hint text for parameter priority display.
+        Builds a multi-part hint string describing preset-specific mode flags, dual-stimulation priority, stimulus notes, Jacobian guidance, and the absolute external current for UI display.
         
-        Returns
-        -------
-        str
-            Formatted hint text showing dual stim status, mode flags, etc.
+        The returned text summarizes:
+        - whether Dual Stim is enabled and which controls take priority,
+        - preset-specific mode flags (K/N/O/F) when applicable,
+        - a note about `const` stim_type for certain presets,
+        - Jacobian mode with recommendations for multi-compartment heavy presets,
+        - a read-only absolute Iext value in nA.
+        
+        Returns:
+            str: Formatted hint text suitable for showing parameter priorities and related recommendations in the UI.
         """
         dual_enabled = bool(
             self._dual_stim_widget is not None 

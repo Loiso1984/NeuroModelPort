@@ -112,6 +112,14 @@ class OscilloscopeWidget(QWidget):
     time_highlighted = Signal(float)
 
     def __init__(self, parent=None):
+        """
+        Initialize the OscilloscopeWidget, build its UI, and initialize visual and stateful plot elements.
+        
+        Sets default view and rendering settings (theme, line width, title font size, grid alpha, presentation and scale-bar modes), delay-target defaults, last-result caches, fullscreen window tracker, and containers for persistent and transient plot items. Builds the UI and adds a persistent, initially hidden reference voltage curve and its label to the voltage plot.
+        
+        Parameters:
+            parent: Optional parent widget for the widget.
+        """
         super().__init__(parent)
         self._theme_name = "Default"
         self._line_width_scale = 1.0
@@ -180,6 +188,11 @@ class OscilloscopeWidget(QWidget):
         self.cleanup()
 
     def _build_ui(self):
+        """
+        Construct and lay out the oscilloscope plotting area and its accompanying control panel.
+        
+        Creates the main graphics widget with four stacked plots (membrane potential, gate variables, ion currents, intracellular calcium), adds crosshair items and a mouse-move signal proxy for the voltage plot, and configures plot appearance (labels, legends, grid, row stretch factors, and view linking). Builds a scrollable right-hand control panel containing grouped checkboxes for voltage/gate/current/calcium traces and a "View" group with theme, line width, title font, grid alpha, reference toggle, presentation/scale-bar mode, spike/delay controls, delay-target selection and custom compartment selector, and a fullscreen button. Connects UI controls to the widget's handlers, stores commonly referenced widgets on self (plots, checkboxes, controls, proxy, reference widgets), sets initial splitter sizes, and updates row visibility.
+        """
         from PySide6.QtWidgets import QSplitter
         
         root = QHBoxLayout(self)
@@ -505,6 +518,11 @@ class OscilloscopeWidget(QWidget):
         self._p_ca.setVisible(any_ca)
 
     def _on_view_settings_changed(self, *_):
+        """
+        Apply the current view-related UI controls to the widget's internal state and refresh the displayed plots.
+        
+        Updates theme, line width scale, title font size, grid alpha, presentation and scale-bar modes, and the delay-target selection (including enabling the custom-index control). Emits the `delay_target_changed` signal with the new selection, reapplies grid transparency, and re-renders either the last single-result or Monte-Carlo plots if available; otherwise restores default plot titles.
+        """
         self._theme_name = self._combo_theme.currentText()
         line_scale_base = float(self._spin_line_width.value())
         title_px_base = int(self._spin_title_px.value())
@@ -645,6 +663,36 @@ class OscilloscopeWidget(QWidget):
     #  UPDATE — single result
     # ─────────────────────────────────────────────────────────────────
     def update_plots(self, result):
+        """
+        Update all oscilloscope panes to display data from a single simulation result.
+        
+        Parameters:
+            result: An object representing a single simulation result. Expected attributes:
+                - t: 1D array of time points (ms).
+                - v_soma: 1D array of soma membrane potential values.
+                - v_all: 2D array of membrane potentials per compartment (shape: n_comp × n_time).
+                - v_dendritic_filtered: 1D array or None for a filtered dendritic/stimulus trace.
+                - currents: dict mapping current names to 1D or 2D arrays (if 2D, summed across compartments).
+                - ca_i: 2D array or None for calcium concentrations (units: M); first row is used.
+                - atp_estimate: numeric ATP estimate used for currents pane title.
+                - n_comp: integer number of compartments.
+                - config.morphology: morphology object used to resolve delay targets.
+        
+        Behavior:
+            - Stores the given result for later reference and refreshes the voltage, gate, current,
+              and calcium plots to reflect its data.
+            - Preserves or updates a persistent reference voltage trace when the "keep reference"
+              option is enabled.
+            - Downsamples traces to the current viewport budgets, updates persistent plot items,
+              and manages transient plot items (threshold line, spike markers, delay markers,
+              Monte-Carlo cloud/mean bands are not affected by this function).
+            - Updates checkbox visibility and delay-control state based on the result's contents.
+            - Applies or restores publication-style scale bars when publication mode is active.
+            - Updates plot titles (spike count, firing rate, delay tag, ATP estimate) and autoscaling.
+        
+        Notes:
+            - This function mutates widget state and plot items; it does not return a value.
+        """
         self._last_result = result
         self._last_mc_results = None
         
@@ -921,7 +969,14 @@ class OscilloscopeWidget(QWidget):
         self._update_row_visibility()
     
     def _apply_scale_bar_mode(self, result):
-        """Hide axes and add scale bars for publication-ready figures."""
+        """
+        Hide axis ticks/labels on voltage, gate, and current plots and add publication-style scale bars to the voltage plot.
+        
+        Adds a horizontal time scale bar representing 50 ms and a vertical voltage scale bar representing 20 mV. Bars are placed near the lower-right region of the voltage plot using the provided result's time range; any previously added scale-bar items are removed before adding new ones.
+        
+        Parameters:
+            result: An object with a `t` attribute (array-like, time in milliseconds) used to determine the horizontal placement of the scale bars.
+        """
         # Hide axes
         for plot in [self._p_v, self._p_g, self._p_i]:
             plot.hideAxis('left')
@@ -965,7 +1020,11 @@ class OscilloscopeWidget(QWidget):
             self._p_v.addItem(self._scale_bar_v)
     
     def _restore_normal_mode(self):
-        """Restore normal axis visibility."""
+        """
+        Restore regular plot axes and remove any scale-bar items added to publication (scale-bar) mode.
+        
+        This re-shows the left and bottom axes for the voltage, gates, and currents plots and, if horizontal or vertical scale-bar items exist on the voltage plot, removes them and clears their references.
+        """
         for plot in [self._p_v, self._p_g, self._p_i]:
             plot.showAxis('left')
             plot.showAxis('bottom')

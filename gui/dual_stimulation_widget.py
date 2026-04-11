@@ -41,7 +41,11 @@ class DualStimulationWidget(QWidget):
         self.load_default_preset()
     
     def setup_ui(self):
-        """Setup the user interface."""
+        """
+        Construct and arrange all UI widgets and their signal connections for the DualStimulationWidget.
+        
+        Builds the full layout and creates the following labeled sections: a preset selector with description panel; controls for the secondary (inhibitory) stimulus (location, type, amplitude, timing, event-times input, and ephemeral train generator); dendritic parameters with attenuation display; a status panel showing E/I ratio and validation; and an enable checkbox. All widgets are created, configured (ranges, defaults, tooltips, styles), placed in layouts, and connected to the widget's handlers so the UI and internal configuration stay synchronized.
+        """
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         
@@ -257,8 +261,9 @@ class DualStimulationWidget(QWidget):
 
     def _refresh_ui(self):
         """
-        Push config → all widgets with signals blocked, then do one emit.
-        Prevents the N-widget-change cascade that caused multiple Load fires.
+        Synchronize all UI widgets from the current configuration while suppressing individual widget signals and emit a single `config_changed` after the update.
+        
+        Blocks signals for the widget set, writes values from `self.config` into each widget (secondary stimulus fields, secondary event times, train generator, dendritic parameters, and the enabled checkbox), re-enables signals, updates derived displays, and emits `config_changed` once to avoid cascading change handlers.
         """
         _all_widgets = [
             self.combo_secondary_location, self.combo_secondary_type,
@@ -310,7 +315,11 @@ class DualStimulationWidget(QWidget):
         self._refresh_ui()
     
     def update_config_from_ui(self):
-        """Update configuration from UI elements."""
+        """
+        Copy the current UI control values into the widget's DualStimulationConfig.
+        
+        This updates all secondary-stimulus fields, the train generator fields, dendritic parameters, and the widget's enabled flag from their corresponding UI controls. When parsing the secondary event times text field, valid comma-separated numeric values are converted to a list of floats and stored in `config.secondary_event_times`. If parsing fails, `config.secondary_event_times` is set to an empty list and the event-times field is given a red error border; an empty input clears the list and any error styling.
+        """
         # Secondary stimulus
         self.config.secondary_location = self.combo_secondary_location.currentText()
         self.config.secondary_stim_type = self.combo_secondary_type.currentText()
@@ -345,7 +354,18 @@ class DualStimulationWidget(QWidget):
         self.config.enabled = self.check_enabled.isChecked()
     
     def update_displays(self):
-        """Update status displays."""
+        """
+        Update the widget's derived status displays (attenuation and secondary E/I ratio).
+        
+        Attenuation: when `config.secondary_location` is "dendritic_filtered", sets the attenuation label to
+        exp(-distance / space_constant) formatted to three decimal places; otherwise sets the label to "N/A".
+        
+        Secondary E/I ratio: treats excitation as 0.0 and computes inhibition as the absolute value of
+        `config.secondary_Iext` when `config.secondary_stim_type` is "GABAA" or "GABAB". If inhibition > 0,
+        sets the E/I label to the ratio formatted to two decimal places and applies color-coded styling
+        (green when the ratio is between 0.5 and 3.0 inclusive, red otherwise). If inhibition is 0,
+        sets the E/I label to "N/A".
+        """
         # Calculate attenuation
         if self.config.secondary_location == "dendritic_filtered":
             atten = np.exp(-self.config.secondary_distance_um / self.config.secondary_space_constant_um)
