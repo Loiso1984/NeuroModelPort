@@ -78,6 +78,8 @@ def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
     _copy_defaults(cfg.dendritic_filter,  DendriticFilterParams())
     _copy_defaults(cfg.analysis,          AnalysisParams())
     _copy_defaults(cfg.preset_modes,      PresetModeParams())
+    cfg.dual_stimulation = None
+    cfg.notes = ""
 
 
 def _copy_defaults(target, source) -> None:
@@ -216,12 +218,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
     Полностью сбрасывает все поля до значений по умолчанию перед применением
     пресета, предотвращая смешивание параметров между пресетами.
     """
-    # Keep user-selected preset modes across preset reloads.
-    selected_modes = cfg.preset_modes.model_copy(deep=True)
-
     # ПОЛНЫЙ СБРОС: все поля возвращаются к умолчаниям Pydantic
     _reset_cfg_to_defaults(cfg)
-    _copy_defaults(cfg.preset_modes, selected_modes)
     
     # --- 1. КЛАССИКА: ГИГАНТСКИЙ АКСОН КАЛЬМАРА ---
     if "Squid" in name:
@@ -351,7 +349,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # IA channel: Moderate for frequency adaptation and spike-frequency accommodation
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.25  # Moderate IA for adaptation dynamics
-        cfg.channels.E_A = -77.0    # K+ reversal potential
+        cfg.channels.EK = -77.0    # K+ reversal potential
         
         # Alpha stimulus: represents one synaptic volley from descending pathways
         # Multi-comp with AIS produces burst of ~16 spikes, Vmax ≈ 34 mV
@@ -840,72 +838,39 @@ def get_synaptic_stimulus_names():
 
 
 def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
-    """
-    Применяет конфигурацию синаптического стимула к уже установленному нейрону.
-    
-    Параметры:
-    -----------
-    cfg : FullModelConfig
-        Конфигурация нейрона (уже должна иметь membrane parameters)
-    stimulus_type : str
-        Тип синаптического входа (из get_synaptic_stimulus_names())
-    
-    Примечание:
-    -----------
-    Эта функция ТОЛЬКО переопределяет параметры стимуляции (alpha_tau, Iext).
-    Не трогает саму морфологию и каналы нейрона.
-    
-    ВАЖНО: Амплитуды масштабированы для soma (soma diameter ~20-30 µm).
-    Для многокомпартментных моделей нужны относительно высокие значения (~5-20 µA)
-    чтобы преодолеть кабельную утечку и вызвать деполяризацию.
-    """
-    
-    # Default fallback is alpha, but known receptor presets below
-    # switch to dedicated synaptic stimulus kernels.
+    """Apply a synaptic stimulus profile on top of the current neuron config."""
     cfg.stim.stim_type = 'alpha'
-    cfg.stim.pulse_start = 10.0  # Стандартная задержка перед стимулом
-    
-    # --- AMPA receptors (быстрые возбуждающие синапсы) ---
+    cfg.stim.pulse_start = 10.0
+
     if "AMPA" in stimulus_type:
         cfg.stim.stim_type = 'AMPA'
-        cfg.stim.alpha_tau = 1.0        # 1 ms kinetics (fast rise/decay, Otis et al 1995)
-        cfg.stim.Iext = 1.5             # Current density [µA/cm²] (peak 50-100 pA / soma area)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 1.5
         cfg.stim.t_sim = 100.0
-
-    # --- NMDA receptors (медленные возбуждающие синапсы) ---
     elif "NMDA" in stimulus_type:
         cfg.stim.stim_type = 'NMDA'
-        cfg.stim.alpha_tau = 70.0       # 70 ms kinetics (slow, Mg-dependent, Jahr & Stevens 1990)
-        cfg.stim.Iext = 0.8             # Current density [µA/cm²] (lower than AMPA, voltage-dependent)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 0.8
         cfg.stim.t_sim = 300.0
-
-    # --- Kainate receptors (промежуточные возбуждающие синапсы) ---
     elif "Kainate" in stimulus_type:
         cfg.stim.stim_type = 'Kainate'
-        cfg.stim.alpha_tau = 12.0       # 10-15 ms kinetics (Ozawa et al 1998)
-        cfg.stim.Iext = 1.2             # Current density [µA/cm²] (intermediate)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 1.2
         cfg.stim.t_sim = 200.0
-
-    # --- GABA-A receptors (быстрое торможение) ---
     elif "GABA-A" in stimulus_type:
         cfg.stim.stim_type = 'GABAA'
-        cfg.stim.alpha_tau = 4.0        # 3-5 ms kinetics (fast, Thalmann 1986)
-        cfg.stim.Iext = -1.5            # Current density [µA/cm²] INHIBITORY (hyperpolarizing)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = -1.5
         cfg.stim.t_sim = 100.0
-
-    # --- GABA-B receptors (медленное торможение) ---
     elif "GABA-B" in stimulus_type:
         cfg.stim.stim_type = 'GABAB'
-        cfg.stim.alpha_tau = 150.0      # 100-300 ms kinetics (very slow, G-protein coupled)
-        cfg.stim.Iext = -0.6            # Current density [µA/cm²] INHIBITORY (longer effect)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = -0.6
         cfg.stim.t_sim = 400.0
-
-    # --- Nicotinic Acetylcholine receptors (быстрое возбуждение от ACh) ---
     elif "Nicotinic" in stimulus_type:
         cfg.stim.stim_type = 'Nicotinic'
-        cfg.stim.alpha_tau = 7.0        # 5-10 ms kinetics (Armstrong & Gilly 1992)
-        cfg.stim.Iext = 1.8             # Current density [µA/cm²] (similar to AMPA, cation channel)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 1.8
         cfg.stim.t_sim = 150.0
-    
     else:
         raise ValueError(f"Unknown synaptic stimulus type: {stimulus_type}")

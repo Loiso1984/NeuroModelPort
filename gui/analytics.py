@@ -343,93 +343,6 @@ class AnalyticsWidget(QTabWidget):
         self._time_marker = None  # Store vertical line marker for linked cursor
         self._build_tabs()
     
-    def highlight_time(self, t_ms: float):
-        """Show a vertical marker on analytics plots at the specified time.
-        
-        This enables cross-tab cursor synchronization with the Oscilloscope.
-        The marker is shown on time-domain plots (Single category).
-        Handles Currents, Gates, and Spike Shape tabs.
-        """
-        # Remove existing marker if any
-        if self._time_marker is not None:
-            try:
-                self._time_marker.remove()
-            except:
-                pass
-            self._time_marker = None
-        
-        current_idx = self.currentIndex()
-        if current_idx not in self._category_mapping:
-            return
-        
-        category = self._category_mapping[current_idx]
-        tab_name = self.tabText(current_idx)
-        
-        # Handle Spike Shape tab differently (highlight closest spike)
-        if "Spike Shape" in tab_name:
-            self._highlight_spike_shape(t_ms)
-            return
-        
-        # Only show marker on time-domain plots (Single category)
-        if category != 'Single':
-            return
-        
-        if tab_name not in self._tab_figures:
-            return
-        
-        fig = self._tab_figures[tab_name]
-        if fig is None:
-            return
-        
-        # Add vertical line marker at the specified time
-        for ax in fig.axes:
-            # Only add to axes with x-axis representing time (check label or data)
-            xlabel = ax.get_xlabel().lower()
-            if 'time' in xlabel or 't (ms)' in xlabel or 't_ms' in xlabel:
-                self._time_marker = ax.axvline(x=t_ms, color='#89B4FA', linestyle='--', linewidth=1.5, alpha=0.8)
-                break
-        
-        # Force redraw
-        fig.canvas.draw()
-    
-    def _highlight_spike_shape(self, t_ms: float):
-        """Highlight the spike closest to t_ms in Spike Shape tab."""
-        if not hasattr(self, '_last_result') or self._last_result is None:
-            return
-        
-        result = self._last_result
-        t = result.t
-        v = result.v_soma
-        
-        # Find spikes
-        from core.analysis import detect_spikes
-        peak_idx, spike_times, spike_amps = detect_spikes(v, t, threshold=-20.0)
-        
-        if len(spike_times) == 0:
-            return
-        
-        # Find spike closest to t_ms
-        closest_idx = np.argmin(np.abs(spike_times - t_ms))
-        closest_spike_time = spike_times[closest_idx]
-        
-        # Highlight this spike in the plot
-        tab_name = self.tabText(self.currentIndex())
-        if tab_name not in self._tab_figures:
-            return
-        
-        fig = self._tab_figures[tab_name]
-        if fig is None:
-            return
-        
-        # Add vertical marker at closest spike time
-        for ax in fig.axes:
-            xlabel = ax.get_xlabel().lower()
-            if 'time' in xlabel or 't (ms)' in xlabel:
-                self._time_marker = ax.axvline(x=closest_spike_time, color='#F9E2AF', linestyle='--', linewidth=2.0, alpha=0.9)
-                break
-        
-        fig.canvas.draw()
-
     # ─────────────────────────────────────────────────────────────────
     #  TAB CONSTRUCTION
     # ─────────────────────────────────────────────────────────────────
@@ -698,52 +611,83 @@ class AnalyticsWidget(QTabWidget):
             self._show_updater_error_message(spec['title'], str(e))
 
     def highlight_time(self, t_ms: float):
-        """Highlight a specific time point across analytics tabs (linked cursor).
-        
-        Draws a yellow dot on the Phase Plane trajectory at the specified time.
-        """
-        # Check if Phase Plane tab has been built
-        if not hasattr(self, 'fig_phase') or self.fig_phase is None:
-            return
-        
-        # Check if we have simulation data
+        """Highlight a time-point across built analytics tabs (linked cursor)."""
         if self._last_result is None:
             return
-        
-        # Find the index closest to the requested time
-        t = self._last_result.t
-        idx = np.argmin(np.abs(t - t_ms))
-        
-        # Get the phase plane data (V vs n for soma)
-        # V is already in result.v_soma, need to extract n gate
-        n_comp = self._last_result.n_comp
-        if n_comp == 0:
+
+        t_arr = np.asarray(self._last_result.t, dtype=float)
+        if len(t_arr) == 0:
             return
-            
-        # Extract n gate from state vector
-        # State layout: V(n_comp), m(n_comp), h(n_comp), n_K(n_comp), ...
-        off_n = 3 * n_comp
-        y = self._last_result.y
-        v_soma = y[0, :]
-        n_soma = y[off_n, :]
-        
-        # Remove existing highlight dot if any
-        if hasattr(self, '_phase_highlight_dot'):
+        idx = int(np.argmin(np.abs(t_arr - t_ms)))
+
+        # ── Phase Plane: yellow ghost dot ────────────────────────────
+        if hasattr(self, 'ax_phase') and hasattr(self, 'fig_phase'):
+            n_comp = int(self._last_result.n_comp)
+            if n_comp > 0:
+                off_n = 3 * n_comp
+                y = self._last_result.y
+                v_soma = y[0, :]
+                n_soma = y[off_n, :]
+                if hasattr(self, '_phase_highlight_dot') and self._phase_highlight_dot is not None:
+                    try:
+                        self._phase_highlight_dot[0].remove()
+                    except Exception:
+                        pass
+                self._phase_highlight_dot = self.ax_phase.plot(
+                    v_soma[idx], n_soma[idx],
+                    'o', color='#F9E2AF', markersize=10,
+                    markeredgecolor='black', markeredgewidth=1.5,
+                    zorder=10,
+                )
+                if hasattr(self, 'cvs_phase'):
+                    self.cvs_phase.draw_idle()
+
+        # ── Currents tab: vertical line ──────────────────────────────
+        if hasattr(self, 'ax_currents'):
+            if hasattr(self, '_currents_time_marker') and self._currents_time_marker is not None:
+                try:
+                    self._currents_time_marker.remove()
+                except Exception:
+                    pass
+            self._currents_time_marker = self.ax_currents.axvline(
+                x=t_ms, color='#89B4FA', linestyle='--', linewidth=1.4, alpha=0.85
+            )
+            if hasattr(self, 'cvs_currents'):
+                self.cvs_currents.draw_idle()
+
+        # ── Gates tab: vertical line ─────────────────────────────────
+        if hasattr(self, 'ax_gates'):
+            if hasattr(self, '_gates_time_marker') and self._gates_time_marker is not None:
+                try:
+                    self._gates_time_marker.remove()
+                except Exception:
+                    pass
+            self._gates_time_marker = self.ax_gates.axvline(
+                x=t_ms, color='#89B4FA', linestyle='--', linewidth=1.4, alpha=0.85
+            )
+            if hasattr(self, 'cvs_gates'):
+                self.cvs_gates.draw_idle()
+
+        # ── Spike Shape tab: nearest spike vertical marker ───────────
+        if hasattr(self, 'ax_spike_shape'):
             try:
-                self._phase_highlight_dot.remove()
-            except:
+                from core.analysis import detect_spikes
+                v = self._last_result.v_soma
+                peak_idx, spike_times, _ = detect_spikes(v, t_arr, threshold=-20.0)
+                if len(spike_times) > 0:
+                    nearest_t = float(spike_times[int(np.argmin(np.abs(spike_times - t_ms)))])
+                    if hasattr(self, '_spike_shape_time_marker') and self._spike_shape_time_marker is not None:
+                        try:
+                            self._spike_shape_time_marker.remove()
+                        except Exception:
+                            pass
+                    self._spike_shape_time_marker = self.ax_spike_shape.axvline(
+                        x=nearest_t, color='#F9E2AF', linestyle='--', linewidth=2.0, alpha=0.9
+                    )
+                    if hasattr(self, 'cvs_spike_shape'):
+                        self.cvs_spike_shape.draw_idle()
+            except Exception:
                 pass
-        
-        # Add yellow dot at the specified time point
-        self._phase_highlight_dot = self.ax_phase.plot(
-            v_soma[idx], n_soma[idx], 
-            'o', color='#F9E2AF', markersize=10, 
-            markeredgecolor='black', markeredgewidth=1.5,
-            zorder=10, label=f't={t_ms:.1f}ms'
-        )
-        
-        # Redraw the canvas
-        self.fig_phase.canvas.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
     #  PER-TAB BUILDER METHODS  (called once on first visit)
@@ -2249,15 +2193,9 @@ class AnalyticsWidget(QTabWidget):
 
         # ── ATP Overlay (Metabolic Status) ───────────────────────────────
         if hasattr(result, 'config') and result.config.metabolism.enable_dynamic_atp:
-            # Extract ATP from state vector
             atp_data = None
-            if hasattr(result, 'y_all') and result.config.metabolism.enable_dynamic_atp:
-                n_comp = result.n_comp
-                if n_comp == 1:
-                    atp_data = result.y_all[-1, :]  # Last row is ATP for single comp
-                else:
-                    atp_data = result.y_all[-n_comp:, :]  # Last n_comp rows are ATP
-                    atp_data = atp_data[0, :]  # Soma ATP
+            if hasattr(result, 'atp_level') and result.atp_level is not None:
+                atp_data = result.atp_level[0, :] if result.n_comp > 1 else result.atp_level.flatten()
 
             if atp_data is not None and len(atp_data) > 0:
                 # Get final ATP value
@@ -2865,19 +2803,14 @@ class AnalyticsWidget(QTabWidget):
         ax3.tick_params(labelbottom=False)
 
         # ── Row 4: ATP Pool Time Series ─────────────────────────────────
-        # Extract ATP from state vector if dynamic ATP is enabled
+        # ATP pool from pre-extracted SimulationResult state
         atp_data = None
-        if hasattr(result, 'y_all') and result.config.metabolism.enable_dynamic_atp:
-            # Find ATP offset (last variable in state vector)
-            n_comp = result.n_comp
-            # ATP is the last variable, so it's at the end of y_all
-            # For soma-only, it's the last element; for multi-comp, it's the last n_comp elements
-            if n_comp == 1:
-                atp_data = result.y_all[-1, :]  # Last row is ATP for single comp
+        if getattr(result, 'atp_level', None) is not None:
+            atp_arr = np.asarray(result.atp_level, dtype=float)
+            if atp_arr.ndim == 2:
+                atp_data = atp_arr[0, :] if atp_arr.shape[0] > 1 else atp_arr[0, :]
             else:
-                # Use soma ATP (index 0 of the last n_comp elements)
-                atp_data = result.y_all[-n_comp:, :]  # Last n_comp rows are ATP
-                atp_data = atp_data[0, :]  # Soma ATP
+                atp_data = atp_arr.reshape(-1)
 
         if atp_data is not None:
             if self._atp_line is None:
@@ -3488,6 +3421,9 @@ def _get_E_rev(name: str, ch) -> float:
     mapping = {
         'Na':   ch.ENa, 'K': ch.EK, 'Leak': ch.EL,
         'Ih':   ch.E_Ih, 'ICa': ch.E_Ca,
-        'IA':   ch.E_A,  'SK':  ch.EK,
+        'ITCa': ch.E_Ca,
+        'NaP':  ch.ENa,  'NaR': ch.ENa,
+        'IA':   ch.EK,   'IM':  ch.EK,
+        'SK':   ch.EK,   'KATP': ch.EK,
     }
     return mapping.get(name, 0.0)
