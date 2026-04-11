@@ -46,6 +46,20 @@ _THRESHOLD_MV = -20.0   # AP detection threshold (mV)
 _MAX_SPIKE_MARKERS = 150  # cap markers to avoid clutter at very high firing rates
 _MAX_PLOT_POINTS = 2500
 
+_OSC_LAYOUT_PROFILES = {
+    "Compact": (3.5, 1.0, 2.0, 0.8),
+    "Balanced": (4.0, 1.4, 3.0, 1.0),
+    "Voltage Focus": (6.0, 1.0, 2.2, 0.8),
+    "Currents Focus": (3.0, 1.0, 5.0, 0.8),
+    "Expanded": (5.0, 1.8, 4.5, 1.2),
+}
+
+_OSC_HEIGHT_PROFILES = {
+    "Fit": 720,
+    "Tall": 980,
+    "Very Tall": 1280,
+}
+
 
 def _plot_point_budget(plot, *, min_points: int = 800, max_points: int = 6000, oversample: float = 2.0) -> int:
     """Estimate draw-point budget from current viewport width."""
@@ -127,6 +141,8 @@ class OscilloscopeWidget(QWidget):
         self._grid_alpha = 0.15
         self._presentation_mode = False
         self._scale_bar_mode = False
+        self._layout_profile = "Balanced"
+        self._height_profile = "Fit"
         self._delay_target_name = "Terminal"
         self._delay_custom_index = 1
         self._last_result = None
@@ -164,6 +180,32 @@ class OscilloscopeWidget(QWidget):
         self._p_v.setTitle(self._title_html("Membrane Potential  V(t)", "#89B4FA"))
         self._p_g.setTitle(self._title_html("Gate Variables  m, h, n", "#A6E3A1"))
         self._p_i.setTitle(self._title_html("Ion Currents  (soma)", "#FAB387"))
+
+    def _target_plot_height(self) -> int:
+        base = _OSC_HEIGHT_PROFILES.get(self._height_profile, _OSC_HEIGHT_PROFILES["Fit"])
+        if self._presentation_mode:
+            base = int(base * 1.1)
+        return base
+
+    def _apply_plot_layout_profile(self) -> None:
+        weights = _OSC_LAYOUT_PROFILES.get(
+            self._layout_profile,
+            _OSC_LAYOUT_PROFILES["Balanced"],
+        )
+        row_visible = (
+            True,
+            self._p_g.isVisible(),
+            self._p_i.isVisible(),
+            self._p_ca.isVisible(),
+        )
+        for row_i, (weight, visible) in enumerate(zip(weights, row_visible)):
+            self._win.ci.layout.setRowStretchFactor(row_i, float(weight) if visible else 0.01)
+
+        target_height = self._target_plot_height()
+        if hasattr(self, "_plot_container"):
+            self._plot_container.setMinimumHeight(target_height)
+        if hasattr(self, "_plot_scroll"):
+            self._plot_scroll.setMinimumHeight(min(target_height + 16, 720))
 
     # ─────────────────────────────────────────────────────────────────
     def _mouse_moved(self, evt):
@@ -266,7 +308,20 @@ class OscilloscopeWidget(QWidget):
         self._win.ci.layout.setRowStretchFactor(2, 4)
         self._win.ci.layout.setRowStretchFactor(3, 1)
 
-        splitter.addWidget(self._win)
+        self._plot_container = QWidget()
+        plot_layout = QVBoxLayout(self._plot_container)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.setSpacing(0)
+        plot_layout.addWidget(self._win)
+
+        self._plot_scroll = QScrollArea()
+        self._plot_scroll.setWidgetResizable(True)
+        self._plot_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._plot_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._plot_scroll.setStyleSheet("QScrollArea { background: #0D1117; border: none; }")
+        self._plot_scroll.setWidget(self._plot_container)
+
+        splitter.addWidget(self._plot_scroll)
         splitter.setStretchFactor(0, 10)
 
         # ── Scrollable Checkbox panel ─────────────────────────────────
@@ -381,6 +436,18 @@ class OscilloscopeWidget(QWidget):
         self._spin_grid_alpha.valueChanged.connect(self._on_view_settings_changed)
         vl2.addRow("Grid Alpha", self._spin_grid_alpha)
 
+        self._combo_layout_profile = QComboBox()
+        self._combo_layout_profile.addItems(list(_OSC_LAYOUT_PROFILES.keys()))
+        self._combo_layout_profile.setCurrentText(self._layout_profile)
+        self._combo_layout_profile.currentTextChanged.connect(self._on_view_settings_changed)
+        vl2.addRow("Layout", self._combo_layout_profile)
+
+        self._combo_height_profile = QComboBox()
+        self._combo_height_profile.addItems(list(_OSC_HEIGHT_PROFILES.keys()))
+        self._combo_height_profile.setCurrentText(self._height_profile)
+        self._combo_height_profile.currentTextChanged.connect(self._on_view_settings_changed)
+        vl2.addRow("Plot Height", self._combo_height_profile)
+
         self._cb_keep_reference = QCheckBox("Keep as Reference")
         self._cb_keep_reference.setChecked(False)
         self._cb_keep_reference.setToolTip("Freeze current soma trace as a grey reference line for comparison")
@@ -405,6 +472,13 @@ class OscilloscopeWidget(QWidget):
         self._cb_show_spike_markers.setStyleSheet("color:#CDD6F4; font-size:11px;")
         self._cb_show_spike_markers.stateChanged.connect(self._on_view_settings_changed)
         vl2.addRow(self._cb_show_spike_markers)
+
+        self._cb_dense_spike_mode = QCheckBox("Dense-spike simplification")
+        self._cb_dense_spike_mode.setChecked(True)
+        self._cb_dense_spike_mode.setToolTip("Automatically simplify spike markers for long, high-rate traces")
+        self._cb_dense_spike_mode.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        self._cb_dense_spike_mode.stateChanged.connect(self._on_view_settings_changed)
+        vl2.addRow(self._cb_dense_spike_mode)
 
         self._cb_show_delay = QCheckBox("Show soma delay overlay")
         self._cb_show_delay.setChecked(True)
@@ -442,6 +516,7 @@ class OscilloscopeWidget(QWidget):
         
         root.addWidget(splitter)
         self._update_row_visibility()
+        self._apply_plot_layout_profile()
 
     def _copy_view_state_to(self, other: "OscilloscopeWidget"):
         """Copy current visual toggles/settings into another oscilloscope widget."""
@@ -449,7 +524,10 @@ class OscilloscopeWidget(QWidget):
         other._spin_line_width.setValue(self._spin_line_width.value())
         other._spin_title_px.setValue(self._spin_title_px.value())
         other._spin_grid_alpha.setValue(self._spin_grid_alpha.value())
+        other._combo_layout_profile.setCurrentText(self._combo_layout_profile.currentText())
+        other._combo_height_profile.setCurrentText(self._combo_height_profile.currentText())
         other._cb_show_spike_markers.setChecked(self._cb_show_spike_markers.isChecked())
+        other._cb_dense_spike_mode.setChecked(self._cb_dense_spike_mode.isChecked())
         other._cb_show_delay.setChecked(self._cb_show_delay.isChecked())
         other._combo_delay_target.setCurrentText(self._combo_delay_target.currentText())
         other._spin_delay_comp.setValue(self._spin_delay_comp.value())
@@ -516,6 +594,7 @@ class OscilloscopeWidget(QWidget):
 
         any_ca = self._cb_ca['calcium'].isChecked() if 'calcium' in self._cb_ca else False
         self._p_ca.setVisible(any_ca)
+        self._apply_plot_layout_profile()
 
     def _on_view_settings_changed(self, *_):
         """
@@ -529,6 +608,8 @@ class OscilloscopeWidget(QWidget):
         grid_alpha_base = float(self._spin_grid_alpha.value())
         self._presentation_mode = bool(self._cb_presentation.isChecked())
         self._scale_bar_mode = bool(self._cb_scale_bars.isChecked())
+        self._layout_profile = self._combo_layout_profile.currentText()
+        self._height_profile = self._combo_height_profile.currentText()
         if self._presentation_mode:
             self._line_width_scale = line_scale_base * 1.35
             self._title_font_px = title_px_base + 2
@@ -547,6 +628,7 @@ class OscilloscopeWidget(QWidget):
             self._delay_custom_index,
         )
         self._apply_grid_alpha()
+        self._apply_plot_layout_profile()
         if self._last_result is not None:
             self.update_plots(self._last_result)
         elif self._last_mc_results is not None:
@@ -795,7 +877,9 @@ class OscilloscopeWidget(QWidget):
         n_spikes = len(sp_t)
         spike_pen = pg.mkPen(QColor(theme["spike"]), width=max(1.0, 1.0 * lw),
                               style=Qt.PenStyle.DotLine)
-        if self._cb_show_spike_markers.isChecked():
+        dense_mode = bool(self._cb_dense_spike_mode.isChecked())
+        suppress_markers = dense_mode and (n_spikes > 80 or (n_spikes > 0 and len(t) > 12000))
+        if self._cb_show_spike_markers.isChecked() and not suppress_markers:
             # Cap markers to avoid visual clutter at very high firing rates
             markers_t = sp_t if n_spikes <= _MAX_SPIKE_MARKERS else sp_t[::max(1, n_spikes // _MAX_SPIKE_MARKERS)]
             for t_sp in markers_t:
@@ -836,6 +920,8 @@ class OscilloscopeWidget(QWidget):
             title_tag = f"{n_spikes} spikes  |  {rate_hz:.1f} Hz"
         else:
             title_tag = "no spikes"
+        if suppress_markers:
+            title_tag += "  |  dense trace mode"
         self._p_v.setTitle(
             self._title_html(f"Membrane Potential  V(t)  |  {title_tag}{delay_tag}", "#89B4FA")
         )

@@ -99,7 +99,15 @@ def _ensure_shape_compatible(arr, t, name="array"):
     return arr
 
 
-def _tab_with_toolbar(canvas, fullscreen_callback=None, extra_widget=None) -> QWidget:
+def _tab_with_toolbar(
+    canvas,
+    fullscreen_callback=None,
+    extra_widget=None,
+    *,
+    scroll_canvas: bool = False,
+    min_canvas_height: int | None = None,
+    extra_widget_position: str = "below",
+) -> QWidget:
     """Wrap a canvas in a QWidget with a matplotlib navigation toolbar.
 
     Args:
@@ -128,9 +136,32 @@ def _tab_with_toolbar(canvas, fullscreen_callback=None, extra_widget=None) -> QW
 
     toolbar_row.addStretch()
     lay.addLayout(toolbar_row)
-    lay.addWidget(canvas, 1)
-    if extra_widget is not None:
-        lay.addWidget(extra_widget, 0)
+
+    if min_canvas_height is not None:
+        canvas.setMinimumHeight(int(min_canvas_height))
+    canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    content = QWidget()
+    content_lay = QVBoxLayout(content)
+    content_lay.setContentsMargins(0, 0, 0, 0)
+    content_lay.setSpacing(4)
+
+    if extra_widget is not None and extra_widget_position == "above":
+        content_lay.addWidget(extra_widget, 0)
+    content_lay.addWidget(canvas, 1 if not scroll_canvas else 0)
+    if extra_widget is not None and extra_widget_position != "above":
+        content_lay.addWidget(extra_widget, 0)
+
+    if scroll_canvas:
+        content_lay.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+        lay.addWidget(scroll, 1)
+    else:
+        lay.addWidget(content, 1)
     return w
 
 
@@ -429,6 +460,7 @@ class AnalyticsWidget(QTabWidget):
         self.passport_view = QTextEdit()
         self.passport_view.setReadOnly(True)
         self.passport_view.setFont(QFont("Consolas", 10))
+        self.passport_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.passport_view.setMinimumWidth(400)
         self.passport_view.setStyleSheet(
             "background:#0D1117; color:#C9D1D9; border:none;"
@@ -767,7 +799,12 @@ class AnalyticsWidget(QTabWidget):
         self._gates_checkbox_container = checkbox_widget
         self._gates_checkbox_layout = checkbox_layout
 
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Gate Dynamics'), extra_widget=scroll_area)
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Gate Dynamics'),
+            extra_widget=scroll_area,
+            min_canvas_height=620,
+        )
 
     def _build_tab_spike_mech(self) -> QWidget:
         # Create wider and larger figure for better space utilization and to prevent label overlapping
@@ -835,7 +872,13 @@ class AnalyticsWidget(QTabWidget):
         # Store spike data for zoomer
         self._spike_zoomer_data = None  # Will store (t, v, spike_times)
 
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Mechanism'), extra_widget=control_widget)
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Mechanism'),
+            extra_widget=control_widget,
+            scroll_canvas=True,
+            min_canvas_height=1180,
+        )
 
     def _build_tab_currents(self) -> QWidget:
         # Refactored: Single large plot with checkboxes for toggling individual currents
@@ -881,7 +924,12 @@ class AnalyticsWidget(QTabWidget):
         self._currents_checkbox_container = checkbox_widget
         self._currents_checkbox_layout = checkbox_layout
 
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Currents'), extra_widget=scroll_area)
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Currents'),
+            extra_widget=scroll_area,
+            min_canvas_height=620,
+        )
 
     def _build_tab_phase(self) -> QWidget:
         self.fig_phase, cvs = _mpl_fig(1, 1)
@@ -968,7 +1016,12 @@ class AnalyticsWidget(QTabWidget):
             bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8)
         )
 
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase Plane'), extra_widget=slider_widget)
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Phase Plane'),
+            extra_widget=slider_widget,
+            min_canvas_height=620,
+        )
 
     def _build_tab_kymo(self) -> QWidget:
         self.fig_kymo, cvs = _mpl_fig(2, 1)
@@ -981,7 +1034,12 @@ class AnalyticsWidget(QTabWidget):
         self._kymo_empty_text = None
         self.cvs_kymo = cvs
         self._tab_figures['Kymograph'] = self.fig_kymo
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Kymograph'))
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Kymograph'),
+            scroll_canvas=True,
+            min_canvas_height=900,
+        )
 
     def _build_tab_energy_balance(self) -> QWidget:
         import matplotlib.gridspec as gridspec
@@ -1005,7 +1063,12 @@ class AnalyticsWidget(QTabWidget):
         self._atp_line = None
         self._atp_threshold_line = None
         self._pie_chart = None
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Energy & Balance'))
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Energy & Balance'),
+            scroll_canvas=True,
+            min_canvas_height=1080,
+        )
 
     def _build_tab_spike_shape(self) -> QWidget:
         self.fig_spike_shape, cvs = _mpl_fig(1, 1)
@@ -1098,7 +1161,12 @@ class AnalyticsWidget(QTabWidget):
         self._spike_shape_selection_widget = selection_widget
         self._spike_shape_data = None  # Will store (t, v, spike_times, peak_idx)
 
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Shape'), extra_widget=selection_widget)
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Shape'),
+            extra_widget=selection_widget,
+            min_canvas_height=680,
+        )
 
     def _on_spike_shape_quick_changed(self, text: str):
         """Handle quick selection dropdown change."""
@@ -1161,7 +1229,12 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_bif(self) -> QWidget:
         self.fig_bif, cvs = _mpl_fig(2, 2)
         self.ax_bif = [self.fig_bif.add_subplot(2, 2, k) for k in range(1, 5)]
-        self.tab_bif = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Bifurcation'))
+        self.tab_bif = _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Bifurcation'),
+            scroll_canvas=True,
+            min_canvas_height=900,
+        )
         self.cvs_bif = cvs
         self._tab_figures['Bifurcation'] = self.fig_bif
         self._bif_lines: dict[str, object] = {}
@@ -1171,7 +1244,12 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_sweep(self) -> QWidget:
         self.fig_sweep, cvs = _mpl_fig(2, 2)
         self.ax_sweep = [self.fig_sweep.add_subplot(2, 2, k) for k in range(1, 5)]
-        self.tab_sweep = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Sweep'))
+        self.tab_sweep = _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Sweep'),
+            scroll_canvas=True,
+            min_canvas_height=900,
+        )
         self.cvs_sweep = cvs
         self._tab_figures['Sweep'] = self.fig_sweep
         self._sweep_cbar = None
@@ -1183,7 +1261,12 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_sd(self) -> QWidget:
         self.fig_sd, cvs = _mpl_fig(1, 2)
         self.ax_sd = [self.fig_sd.add_subplot(1, 2, k) for k in range(1, 3)]
-        self.tab_sd = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('S-D Curve'))
+        self.tab_sd = _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('S-D Curve'),
+            scroll_canvas=True,
+            min_canvas_height=760,
+        )
         self.cvs_sd = cvs
         self._tab_figures['S-D Curve'] = self.fig_sd
         self._sd_lines: dict[str, object] = {}
@@ -1192,7 +1275,12 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_excmap(self) -> QWidget:
         self.fig_excmap, cvs = _mpl_fig(1, 2)
         self.ax_excmap = [self.fig_excmap.add_subplot(1, 2, k) for k in range(1, 3)]
-        self.tab_excmap = _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Excitability Map'))
+        self.tab_excmap = _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Excitability Map'),
+            scroll_canvas=True,
+            min_canvas_height=760,
+        )
         self.cvs_excmap = cvs
         self._tab_figures['Excitability Map'] = self.fig_excmap
         self._excmap_mesh = {"spikes": None, "freq": None}
@@ -1209,7 +1297,12 @@ class AnalyticsWidget(QTabWidget):
         self._spectro_vm_line = None
         self._spectro_mesh = None
         self._spectro_fail_text = None
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Spectrogram'))
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Spectrogram'),
+            scroll_canvas=True,
+            min_canvas_height=920,
+        )
 
     def _build_tab_impedance(self) -> QWidget:
         self.fig_impedance, cvs = _mpl_fig(2, 1)
@@ -1298,6 +1391,11 @@ class AnalyticsWidget(QTabWidget):
         self._ensure_built('_build_tab_chaos')
 
         self._update_chaos(self._last_result, stats)
+
+        for i in range(self.count()):
+            if self.tabText(i) == 'Chaos & LLE':
+                self.setCurrentIndex(i)
+                break
 
         # Force synchronous repaint so the chart appears immediately
         if hasattr(self, 'cvs_chaos'):
@@ -1609,14 +1707,23 @@ class AnalyticsWidget(QTabWidget):
 
         t = stats.get('ftle_time_ms', [])
         div = stats.get('ftle_log_divergence', [])
+        duration_ms = float(result.t[-1] - result.t[0]) if len(result.t) > 1 else 0.0
+        valid_pairs = int(stats.get('lyapunov_valid_pairs', 0) or 0)
+        lyap_class = stats.get('lyapunov_class')
+        lle_per_s = stats.get('lle_per_s', np.nan)
 
         # Handle disabled/empty state: only block when there is truly no data
         _no_data = (len(t) == 0 or len(div) == 0
-                    or stats.get('lyapunov_class') in ('disabled', None))
+                    or lyap_class in ('disabled', None))
         if _no_data:
-            msg = ("LLE not computed â€” run â‰Ą1000 ms simulation, then click 'Compute LLE'."
-                   if stats.get('lyapunov_class') != 'disabled'
-                   else "LLE not computed. Click 'Compute LLE' button.")
+            if lyap_class == 'disabled':
+                msg = "LLE not computed. Click 'Compute LLE' button."
+            elif duration_ms < 1000.0:
+                msg = "Lyapunov analysis needs >=1000 ms of data after transients."
+            elif valid_pairs < 20:
+                msg = "No robust divergence fit: too few valid trajectory pairs for this trace."
+            else:
+                msg = "No usable divergence window was found for this simulation."
             if 'div' not in self._chaos_texts:
                 self._chaos_texts['div'] = self.ax_chaos.text(
                     0.5, 0.5, msg,
@@ -1626,6 +1733,8 @@ class AnalyticsWidget(QTabWidget):
             else:
                 self._chaos_texts['div'].set_text(msg)
             self._chaos_texts['div'].set_visible(True)
+            if 'summary' in self._chaos_texts:
+                self._chaos_texts['summary'].set_visible(False)
             if 'div' in self._chaos_lines:
                 self._chaos_lines['div'].set_data([], [])
             self.ax_chaos.set_xlim(0, 1)
@@ -1643,11 +1752,19 @@ class AnalyticsWidget(QTabWidget):
         if 'div' not in self._chaos_lines:
             self._chaos_lines['div'] = self.ax_chaos.plot([], [], color='#89B4FA', lw=2.5, label='Trajectory divergence')[0]
             self._chaos_lines['trend'] = self.ax_chaos.plot([], [], color='#F38BA8', lw=1.5, ls='--', label='Linear trend')[0]
+        if 'summary' not in self._chaos_texts:
+            self._chaos_texts['summary'] = self.ax_chaos.text(
+                0.02, 0.98, '',
+                ha='left', va='top', transform=self.ax_chaos.transAxes,
+                fontsize=9.5, color='#CDD6F4',
+                bbox=dict(boxstyle='round,pad=0.25', facecolor='#11111B', edgecolor='#45475A', alpha=0.88),
+            )
 
         # Plot trajectory divergence
         div_safe = _ensure_shape_compatible(div, t, "div")
         if div_safe is not None:
-            self._chaos_lines['div'].set_data(t, div_safe)
+            td, yd = _downsample_xy(np.asarray(t, dtype=float), np.asarray(div_safe, dtype=float), max_points=2500)
+            self._chaos_lines['div'].set_data(td, yd)
         else:
             self._chaos_lines['div'].set_data([], [])
 
@@ -1661,6 +1778,10 @@ class AnalyticsWidget(QTabWidget):
             self._chaos_lines['trend'].set_visible(True)
         else:
             self._chaos_lines['trend'].set_visible(False)
+        self._chaos_texts['summary'].set_visible(True)
+        self._chaos_texts['summary'].set_text(
+            f"class = {lyap_class}\nLLE = {lle_per_s:+.3f} 1/s\npairs = {valid_pairs}"
+        )
 
         self.ax_chaos.relim()
         self.ax_chaos.autoscale_view()
@@ -1779,7 +1900,8 @@ class AnalyticsWidget(QTabWidget):
             self._gates_line_v = ax.plot([], [], color=soma_color, lw=2.0, alpha=0.7, label='V_soma')[0]
         v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
         if v_soma_safe is not None:
-            self._gates_line_v.set_data(t, v_soma_safe)
+            t_v, v_v = _downsample_xy(np.asarray(t, dtype=float), np.asarray(v_soma_safe, dtype=float), max_points=3000)
+            self._gates_line_v.set_data(t_v, v_v)
         else:
             self._gates_line_v.set_data([], [])
         self._gates_line_v.set_visible(True)
@@ -1799,7 +1921,8 @@ class AnalyticsWidget(QTabWidget):
             is_visible = self._gates_visibility.get(name, True)
             trace_safe = _ensure_shape_compatible(trace, t, f"gate_{name}")
             if trace_safe is not None:
-                line.set_data(t, trace_safe)
+                tg, yg = _downsample_xy(np.asarray(t, dtype=float), np.asarray(trace_safe, dtype=float), max_points=3000)
+                line.set_data(tg, yg)
             else:
                 line.set_data([], [])
             line.set_visible(is_visible)
@@ -1890,7 +2013,8 @@ class AnalyticsWidget(QTabWidget):
             self._currents_line_v = ax.plot([], [], color=soma_color, lw=2.0, alpha=0.7, label='V_soma')[0]
         v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
         if v_soma_safe is not None:
-            self._currents_line_v.set_data(t, v_soma_safe)
+            t_v, v_v = _downsample_xy(np.asarray(t, dtype=float), np.asarray(v_soma_safe, dtype=float), max_points=3000)
+            self._currents_line_v.set_data(t_v, v_v)
         else:
             self._currents_line_v.set_data([], [])
         self._currents_line_v.set_visible(True)
@@ -1910,7 +2034,8 @@ class AnalyticsWidget(QTabWidget):
             is_visible = self._currents_visibility.get(name, True)
             curr_safe = _ensure_shape_compatible(curr, t, f"current_{name}")
             if curr_safe is not None:
-                line.set_data(t, curr_safe)
+                tc, yc = _downsample_xy(np.asarray(t, dtype=float), np.asarray(curr_safe, dtype=float), max_points=3000)
+                line.set_data(tc, yc)
             else:
                 line.set_data([], [])
             line.set_visible(is_visible)
