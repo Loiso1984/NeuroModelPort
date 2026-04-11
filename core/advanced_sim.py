@@ -227,17 +227,17 @@ def run_excitability_map(config: FullModelConfig,
 def run_euler_maruyama(config: FullModelConfig,
                         progress_cb=None) -> SimulationResult:
     """
-    Stochastic simulation using Euler-Maruyama (EM) integration.
-
-    Implements Langevin gate noise (Fox & Lu 1994):
-        σ_gate = sqrt((α(1−x) + β·x) / N_channels)
-
-    Current noise can also be added via config.stim.noise_sigma.
-    Required for stochastic differential equations (SDE) — SciPy
-    solve_ivp cannot handle SDEs.
-
-    Uses centralized stochastic RNG for reproducibility.
-    """
+                        Run a stochastic neuron simulation using Euler–Maruyama integration with optional Langevin gate noise.
+                        
+                        Performs an SDE-based integration of the full neuron model configured by `config`, including optional stochastic gating and membrane current noise, and returns a downsampled SimulationResult evaluated at `config.stim.dt_eval`.
+                        
+                        Parameters:
+                            config (FullModelConfig): Simulation configuration for morphology, channels, stimulation, calcium, and noise settings.
+                            progress_cb (callable, optional): Progress callback invoked as progress_cb(step_index, n_steps, time) periodically during the integration.
+                        
+                        Returns:
+                            SimulationResult: Time series of state variables (downsampled to `config.stim.dt_eval`), number of compartments, and the configuration used.
+                        """
     from core.kinetics import (am, bm, ah, bh, an, bn,
                                 ar_Ih, br_Ih,
                                 as_Ca, bs_Ca, au_Ca, bu_Ca,

@@ -110,17 +110,14 @@ class PhysicsParams(NamedTuple):
 
 
 def create_physics_params(**kwargs) -> PhysicsParams:
-    """Factory function to create PhysicsParams from keyword arguments.
+    """
+    Create a PhysicsParams instance from keyword arguments, supplying sensible defaults for optional fields.
     
-    This function provides a clean interface for creating PhysicsParams
-    from existing solver configuration, maintaining backward compatibility
-    while enabling the new structured interface.
+    Parameters:
+        kwargs (mapping): Keyword arguments corresponding to PhysicsParams fields. Any omitted optional fields (stochastic settings, ATP/metabolism fields, secondary-stimulus fields, and new synaptic reversal potentials `e_rev_syn_primary` and `e_rev_syn_secondary`) are filled with library defaults.
     
-    Args:
-        **kwargs: All physics parameters including stochastic settings
-        
     Returns:
-            PhysicsParams: Structured parameter container
+        PhysicsParams: A fully populated PhysicsParams NamedTuple built from the provided and defaulted values.
     """
     # Set defaults for optional fields if not provided
     defaults = {

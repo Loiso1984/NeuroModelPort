@@ -320,6 +320,14 @@ class AnalyticsWidget(QTabWidget):
     """Main analytics widget — updated by MainWindow after each run."""
 
     def __init__(self, parent=None):
+        """
+        Initialize the AnalyticsWidget instance, setting internal state and constructing the tab UI.
+        
+        This sets placeholders for the most recent simulation data and cached analysis results, prepares bookkeeping for lazy tab construction and fullscreen viewers, initializes the category-to-tab mapping and figure registry used for fullscreen copying, and creates the initial tab layout by calling `_build_tabs()`.
+        
+        Parameters:
+            parent (QObject | None): Optional Qt parent widget for this widget.
+        """
         super().__init__(parent)
         self._last_result = None
         self._last_stats = None
@@ -529,7 +537,19 @@ class AnalyticsWidget(QTabWidget):
                 fig.canvas.draw_idle()
     
     def _on_tab_changed(self, index: int):
-        """Build an MPL canvas the first time a lazy tab is visited."""
+        """
+        Builds and inserts a real tab widget the first time a lazy placeholder tab is selected.
+        
+        If the widget at `index` is a `_LazyPlaceholder`, call its configured builder to create
+        the real tab, replace the placeholder in-place, force redraw of any nested
+        FigureCanvas widgets, and (if available) run the tab's updater using the most
+        recent simulation result and stats. Guards against re-entrancy, displays a
+        user-facing error widget if the builder fails, and shows figure-level messages
+        when required data (morphology or stats) is missing before running the updater.
+        
+        Parameters:
+            index (int): The tab index that was selected.
+        """
         if self._building_lazy_tab:
             return  # re-entrancy guard: removeTab/insertTab fire currentChanged too
         widget = self.widget(index)
@@ -556,6 +576,12 @@ class AnalyticsWidget(QTabWidget):
             
             # Helper to recursively find FigureCanvas inside nested layouts (like QScrollArea)
             def _force_draw(w):
+                """
+                Recursively call `draw_idle` on a widget and its descendant widgets that expose that method.
+                
+                Parameters:
+                    w (QWidget): Root widget (or object) to refresh. For `w` and each descendant that implements a callable `draw_idle`, this function invokes `draw_idle` to schedule a repaint.
+                """
                 if hasattr(w, 'draw_idle') and callable(w.draw_idle):
                     w.draw_idle()
                 for child in w.children():
@@ -1696,7 +1722,12 @@ class AnalyticsWidget(QTabWidget):
     #  2 — GATE DYNAMICS
     # ─────────────────────────────────────────────────────────────────
     def _update_gates(self, result):
-        """Plot gate dynamics with membrane potential overlay on single plot with checkboxes."""
+        """
+        Plot gate-variable time series overlaid with soma membrane potential and update interactive checkbox controls.
+        
+        Parameters:
+            result: Simulation result object providing `t`, `v_soma`, and gate traces (as consumed by core.analysis.extract_gate_traces) used to populate and align plotted traces.
+        """
         if not hasattr(self, 'fig_gates'):
             return  # tab not yet visited
         from core.analysis import extract_gate_traces
@@ -1902,6 +1933,16 @@ class AnalyticsWidget(QTabWidget):
             self._update_currents(self._last_result)
 
     def _init_spike_mechanism_artists(self) -> None:
+        """
+        Initialize and cache matplotlib artists used by the Spike Mechanism tab.
+        
+        Creates empty line artists and text placeholders for the three-row spike-mechanism figure and stores them on the instance so subsequent updates can reuse and update the artists rather than recreate them. Specifically:
+        - Row 1: soma voltage line, spike-peak markers, Nernst E_Ca line, a secondary y-axis and a Ca_i scatter/line.
+        - Row 2: net current line, an explanatory textbox, and a centered error text placeholder.
+        - Row 3: a centered error text placeholder for the stacked-bar contribution axes.
+        
+        Also sets `self._spike_mech_ax2b` for the twin y-axis and marks `self._spike_mech_init_done = True`.
+        """
         if self._spike_mech_init_done:
             return
         ax1, ax2, ax3 = self.ax_spike_mech

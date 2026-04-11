@@ -31,11 +31,25 @@ def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.n
 
 
 def _solver_args_from_cfg(cfg: FullModelConfig):
-    """Build (y0, args, dydt_buf) using the canonical pack_rhs_args contract.
-
-    Mirrors solver.py NeuronSolver.run_single arg construction so that direct
-    calls to rhs_multicompartment in tests use the same positional order as
-    the live solver path.  Returns a pre-allocated dydt buffer sized to y0.
+    """
+    Construct canonical RHS call arguments (y0, physics_params, dydt_buf) from a FullModelConfig.
+    
+    Builds the initial state vector, assembles physics parameters required by rhs_multicompartment,
+    and returns a preallocated RHS output buffer sized to the state vector. The produced arguments
+    match the positional order used by NeuronSolver.run_single.
+    
+    Parameters:
+        cfg (FullModelConfig): Configuration containing morphology, channel settings,
+            environment, calcium, and stimulus parameters used to construct the state and physics.
+    
+    Returns:
+        tuple:
+            y0 (np.ndarray): 1D array of initial state values (membrane voltages, channel gating
+                states, and an optional dendritic-filter state if enabled).
+            physics_params: PhysicsParams-like object containing assembled model parameters
+                (conductances, reversal potentials, morphology indexing, environment vectors, etc.)
+                suitable for passing to rhs_multicompartment.
+            dydt_buf (np.ndarray): Preallocated float64 array of length len(y0) for RHS outputs.
     """
     morph = MorphologyBuilder.build(cfg)
     n_comp = morph["N_comp"]
