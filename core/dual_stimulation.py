@@ -61,6 +61,13 @@ class DualStimulationState:
     """State tracking for dual stimulation."""
     
     def __init__(self, config: DualStimulationConfig):
+        """
+        Initialize DualStimulationState with a configuration and reset runtime filter state.
+        
+        Parameters:
+            config (DualStimulationConfig): Configuration for the secondary stimulus; stored on the instance.
+        
+        """
         self.config = config
         self.secondary_filtered = 0.0
 
@@ -183,13 +190,12 @@ def distributed_stimulus_current_for_comp(
 
 def create_dual_stimulation_preset() -> DualStimulationConfig:
     """
-    Create a demonstration preset for dual stimulation.
+    Create a preset that configures a dendritic GABAA secondary stimulus while leaving the primary stimulus to be configured elsewhere.
     
-    Demonstrates: Soma excitation + Dendritic GABA inhibition
-    This is a classic neurophysiological scenario.
+    The preset sets the secondary stimulus to "dendritic_filtered" with GABAA kinetics, an external current of 15.0, start at 20.0 ms, duration 100.0 ms, alpha tau 5.0 ms, dendritic distance 120.0 µm, space constant 150.0 µm, dendritic tau 8.0 ms, and enables the secondary stimulus.
     
-    Note: Primary stimulus must be configured separately via cfg.stim and cfg.stim_location.
-    This function only configures the secondary stimulus.
+    Returns:
+        DualStimulationConfig: Configuration object populated with the described secondary-stimulus parameters and enabled=True.
     """
     
     config = DualStimulationConfig()
@@ -214,10 +220,15 @@ def create_dual_stimulation_preset() -> DualStimulationConfig:
 
 def create_dual_stimulation_config_from_full(config: "FullModelConfig") -> DualStimulationConfig:
     """
-    Convert FullModelConfig to DualStimulationConfig for backward compatibility.
+    Create a DualStimulationConfig compatible with older code that expected a conversion from FullModelConfig.
     
-    Note: Primary stimulus is always in cfg.stim and cfg.stim_location.
-    This function only creates the secondary config structure.
+    This constructs a new DualStimulationConfig with secondary stimulation fields only and sets its `enabled` flag to False; it does not copy any primary-stimulus settings from the provided `FullModelConfig`.
+    
+    Parameters:
+        config (FullModelConfig): The full model configuration being converted (not read or inspected).
+    
+    Returns:
+        DualStimulationConfig: A newly created dual-stimulation configuration with secondary fields initialized and `enabled` set to False.
     """
     
     dual_config = DualStimulationConfig()
@@ -230,9 +241,15 @@ def create_dual_stimulation_config_from_full(config: "FullModelConfig") -> DualS
 
 def validate_dual_stimulation_parameters(config: DualStimulationConfig) -> bool:
     """
-    Validate dual stimulation parameters for biological realism.
+    Check secondary stimulation parameters for plausibility and print warnings for outliers.
     
-    Returns True if parameters are reasonable.
+    Performs lightweight, non-throwing checks on secondary stimulus values and prints warning messages when values appear biologically implausible (e.g., very large current, unusual dendritic distance or space constant, or very strong dendritic attenuation).
+    
+    Parameters:
+        config (DualStimulationConfig): Configuration containing secondary stimulus fields to validate.
+    
+    Returns:
+        bool: Always returns `True`.
     """
     
     # Check secondary current magnitude
