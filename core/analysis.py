@@ -615,8 +615,14 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     else:
         dVdt = np.gradient(V, t)
 
-    # Total ionic current (soma, index 0)
-    I_ion_soma = sum(result.currents.values())
+    # Total ionic current at soma only (index 0 for multi-compartment arrays).
+    I_ion_soma = np.zeros_like(V, dtype=float)
+    for curr in result.currents.values():
+        curr_arr = np.asarray(curr, dtype=float)
+        if curr_arr.ndim == 2:
+            I_ion_soma += curr_arr[0, :]
+        else:
+            I_ion_soma += curr_arr
 
     # Stimulus current
     s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10}
@@ -644,6 +650,34 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
         I_ax_soma = np.zeros_like(t)
 
     return cfg.channels.Cm * dVdt - (I_stim - I_ion_soma + I_ax_soma)
+
+
+def extract_spatial_traces(trace: np.ndarray, n_comp: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Return soma/AIS/terminal traces from 1D or 2D compartment data.
+
+    For soma-only arrays (shape ``[T]`` or ``[1, T]``), all three outputs map
+    to soma so CSV export remains schema-stable for multi-compartment runs even
+    when a given signal is available only for soma.
+    """
+    arr = np.asarray(trace, dtype=float)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    if arr.ndim != 2:
+        raise ValueError(f"Expected 1D or 2D trace, got shape={arr.shape}")
+    if arr.shape[0] == 0:
+        raise ValueError("Trace has zero compartments.")
+
+    def _pick(comp_idx: int) -> np.ndarray:
+        clamped = max(0, min(int(comp_idx), arr.shape[0] - 1))
+        return arr[clamped, :]
+
+    soma = _pick(0)
+    ais_idx = 1 if n_comp > 1 else 0
+    terminal_idx = (n_comp - 1) if n_comp > 1 else 0
+    ais = _pick(ais_idx)
+    terminal = _pick(terminal_idx)
+    return soma, ais, terminal
 
 
 # ─────────────────────────────────────────────────────────────────────

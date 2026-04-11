@@ -185,7 +185,7 @@ def compute_ionic_currents_scalar(
     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, sk_gate,
     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
     gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar,
-    ena, ek, el, eih, ea,
+    ena, ek, el, eih,
     ca_i_val, ca_ext, ca_rest, t_kelvin,
 ):
     """
@@ -252,20 +252,25 @@ def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
     """
     Select the synaptic reversal potential (mV) for a conductance-based synapse type.
     
-    Parameters:
-        stype: Synapse type code (4=AMPA, 5=NMDA, 6=GABAA, 7=GABAB, 8=Kainate, 9=Nicotinic).
-        e_rev_primary: Primary stimulus synaptic reversal potential (mV), used for excitatory types and GABA-A to allow flexible/pathological values.
-        e_rev_secondary: Secondary stimulus synaptic reversal potential (mV); present for API compatibility with dual-stimulus handling (not used by this selection logic).
+    Args:
+        stype: Synapse type (4=AMPA, 5=NMDA, 6=GABAA, 7=GABAB, 8=Kainate, 9=Nicotinic)
+        e_rev_primary: Reversal for excitatory synapses (AMPA/NMDA/Kainate/Nicotinic)
+        e_rev_secondary: Reversal for inhibitory GABA-A synapses (pathology-configurable)
     
     Returns:
         Reversal potential in millivolts (mV) for the specified synapse type.
     """
-    if stype == 6:   # GABA-A (Cl⁻, Bormann 1988)
-        return e_rev_secondary  # Inhibitory reversal (pathology-aware)
-    elif stype == 7:  # GABA-B (K⁺ via GIRK, Lüscher 1997)
-        return -95.0  # GABA-B is K+-mediated, fixed near EK
-    # Excitatory: AMPA(4), NMDA(5), Kainate(8), Nicotinic(9) — cation, ~0 mV
-    return e_rev_primary  # Excitatory reversal (pathology-aware)
+    # Excitatory: AMPA(4), NMDA(5), Kainate(8), Nicotinic(9)
+    if stype == 4 or stype == 5 or stype == 8 or stype == 9:
+        return e_rev_primary
+    # Inhibitory GABA-A (Cl-), pathology-configurable
+    if stype == 6:
+        return e_rev_secondary
+    # Inhibitory GABA-B (K+ via GIRK), fixed biophysical reversal
+    if stype == 7:
+        return E_GABA_B
+    # Fallback for unknown synaptic code
+    return e_rev_primary
 
 @njit(float64(float64, int32, float64, float64[:], int32, float64), cache=True)
 def get_event_driven_conductance(t: float64, stype: int32, iext: float64, 
@@ -343,7 +348,6 @@ def rhs_multicompartment(
     ek = physics_params.ek
     el = physics_params.el
     eih = physics_params.eih
-    ea = physics_params.ea
     
     # Morphology and axial coupling
     cm_v = physics_params.cm_v
@@ -550,7 +554,7 @@ def rhs_multicompartment(
             ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
             en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
             gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i], gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
-            ena, ek, el, eih, ea,
+            ena, ek, el, eih,
             ca_i_val, ca_ext, ca_rest, t_kelvin,
         )
 

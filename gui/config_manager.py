@@ -203,8 +203,8 @@ class ConfigManager(QObject):
         
         if dual_enabled:
             priority_note = (
-                "Priority: Dual Stim is ON, secondary stimulation is active in addition to "
-                "main Stimulation/Stimulus Location fields."
+                "Priority: Dual Stim is ON. Main Stimulation/Stimulus Location define the primary input, "
+                "and Dual Stim adds an independent secondary input."
             )
         else:
             priority_note = (
@@ -240,8 +240,7 @@ class ConfigManager(QObject):
         """
         Compute display-only absolute current from the active source of truth.
         
-        - Display uses dual primary Iext when Dual Stim is ON.
-        - Display uses canonical config.stim.Iext when Dual Stim is OFF.
+        Effective input density always comes from canonical config.stim.Iext.
         
         Returns
         -------
@@ -271,8 +270,8 @@ class ConfigManager(QObject):
         
         if dual_enabled:
             return (
-                "Priority: Dual Stim is ON, secondary stimulation is active in addition to "
-                "main Stimulation/Stimulus Location fields."
+                "Priority: Dual Stim is ON. Main Stimulation/Stimulus Location define the primary input, "
+                "and Dual Stim adds an independent secondary input."
             )
         else:
             return (

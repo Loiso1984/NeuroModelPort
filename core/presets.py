@@ -236,12 +236,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg (FullModelConfig): Mutable configuration object to modify in-place.
         name (str): Preset name or substring used to select which preset to apply.
     """
-    # Keep user-selected preset modes across preset reloads.
-    selected_modes = cfg.preset_modes.model_copy(deep=True)
-
     # ПОЛНЫЙ СБРОС: все поля возвращаются к умолчаниям Pydantic
     _reset_cfg_to_defaults(cfg)
-    _copy_defaults(cfg.preset_modes, selected_modes)
     
     # --- 1. КЛАССИКА: ГИГАНТСКИЙ АКСОН КАЛЬМАРА ---
     if "Squid" in name:
