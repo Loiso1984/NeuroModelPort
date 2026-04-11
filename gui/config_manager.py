@@ -187,8 +187,8 @@ class ConfigManager(QObject):
         
         if dual_enabled:
             priority_note = (
-                "Priority: Dual Stim is ON, so primary stimulation values from the Dual Stim tab "
-                "override main Stimulation/Stimulus Location fields."
+                "Priority: Dual Stim is ON. Main Stimulation/Stimulus Location define the primary input, "
+                "and Dual Stim adds an independent secondary input."
             )
         else:
             priority_note = (
@@ -224,8 +224,7 @@ class ConfigManager(QObject):
         """
         Compute display-only absolute current from the active source of truth.
         
-        - Dual Stim ON  -> dual primary Iext is effective input.
-        - Dual Stim OFF -> canonical config.stim.Iext is effective input.
+        Effective input density always comes from canonical config.stim.Iext.
         
         Returns
         -------
@@ -235,10 +234,7 @@ class ConfigManager(QObject):
         d = float(self.config.morphology.d_soma)
         area = np.pi * d * d
         
-        if self._dual_stim_widget is not None and bool(self._dual_stim_widget.config.enabled):
-            i_density = float(self._dual_stim_widget.config.primary_Iext)
-        else:
-            i_density = float(self.config.stim.Iext)
+        i_density = float(self.config.stim.Iext)
         
         return float(density_to_absolute_current(i_density, area))
     
@@ -258,8 +254,8 @@ class ConfigManager(QObject):
         
         if dual_enabled:
             return (
-                "Priority: Dual Stim is ON, so primary stimulation values from the Dual Stim tab "
-                "override main Stimulation/Stimulus Location fields."
+                "Priority: Dual Stim is ON. Main Stimulation/Stimulus Location define the primary input, "
+                "and Dual Stim adds an independent secondary input."
             )
         else:
             return (

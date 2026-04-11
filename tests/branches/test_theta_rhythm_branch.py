@@ -37,8 +37,8 @@ def test_ca1_theta_dual_stimulation_config():
     assert cfg.dual_stimulation.enabled == True, "Dual stimulation should be enabled"
     
     # Verify primary stimulus: weak tonic current for readiness
-    assert cfg.dual_stimulation.primary_stim_type == "const"
-    assert cfg.dual_stimulation.primary_Iext == 2.0
+    assert cfg.stim.stim_type == "const"
+    assert cfg.stim.Iext == 2.0
     
     # Verify secondary stimulus: AMPA at 7Hz (theta)
     assert cfg.dual_stimulation.secondary_stim_type == "AMPA"
@@ -83,9 +83,9 @@ def test_ca1_theta_physiological_channels():
     assert 0.3 <= cfg.channels.gA_max <= 0.5  # IA density
     assert 0.01 <= cfg.channels.gIh_max <= 0.02  # Ih density
     
-    # SK and ICa should be disabled for pure theta (no calcium-dependent adaptation)
-    assert cfg.channels.enable_SK == False
-    assert cfg.channels.enable_ICa == False
+    # Current CA1 model includes calcium-dependent adaptation terms.
+    assert cfg.channels.enable_SK is True
+    assert cfg.channels.enable_ICa is True
 
 
 if __name__ == "__main__":

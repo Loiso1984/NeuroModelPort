@@ -772,7 +772,7 @@ class MainWindow(QMainWindow):
 
             slider = QSlider(Qt.Orientation.Horizontal)
             slider.setRange(0, _LIVE_SLIDER_STEPS)
-            slider.setValue(self._val_to_live_slider(default_param))
+            slider.setValue(self._val_to_live_slider(default_param, row_i))
             slider.valueChanged.connect(
                 lambda raw, ri=row_i: self._on_live_slider_moved(ri, raw)
             )
@@ -952,7 +952,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'grp_ana'):
                 self.grp_ana.setVisible(True)
 
-    def _val_to_live_slider(self, param_name: str) -> int:
+    def _val_to_live_slider(self, param_name: str, row_i: int | None = None) -> int:
         # Try custom path resolution first
         obj, attr = self._resolve_param(param_name)
         if obj is not None and attr is not None:
@@ -961,14 +961,16 @@ class MainWindow(QMainWindow):
             simple_name = param_name.split('.')[-1] if '.' in param_name else param_name
             if simple_name in _LIVE_PARAMS:
                 lo, hi, _, _ = _LIVE_PARAMS[simple_name]
+            elif row_i is not None and row_i in self._live_custom_bounds:
+                lo, hi = self._live_custom_bounds[row_i]
             else:
-                # SMART DYNAMIC BOUNDS
+                # One-time fallback bounds for unresolved custom rows.
                 if val == 0.0:
                     lo, hi = -1.0, 1.0
                 elif val > 0:
                     lo, hi = val * 0.1, val * 5.0
                 else:
-                    lo, hi = val * 0.1, val * 5.0
+                    lo, hi = val * 5.0, val * 0.1
         elif param_name in _LIVE_PARAMS:
             lo, hi, _, getter = _LIVE_PARAMS[param_name]
             val = getter(self.config_manager.config)
@@ -1086,7 +1088,7 @@ class MainWindow(QMainWindow):
             combo.setStyleSheet("color: #F38BA8;")  # Red text for invalid path
             # Reset slider to previous valid position (based on current actual value)
             slider.blockSignals(True)
-            slider.setValue(self._val_to_live_slider(param))
+            slider.setValue(self._val_to_live_slider(param, row_i))
             slider.blockSignals(False)
             return
 
@@ -1202,15 +1204,8 @@ class MainWindow(QMainWindow):
 
     def _sync_stim_type_controls(self):
         """Show only stimulation parameters relevant for current stim_type."""
-        dual_enabled = bool(
-            hasattr(self, "dual_stim_widget")
-            and bool(self.dual_stim_widget.config.enabled)
-        )
-        stype = (
-            str(getattr(self.dual_stim_widget.config, "primary_stim_type", "const"))
-            if dual_enabled
-            else str(getattr(self.config_manager.config.stim, "stim_type", "const"))
-        )
+        # Primary stimulus type always comes from canonical config.stim.
+        stype = str(getattr(self.config_manager.config.stim, "stim_type", "const"))
         stim_fields = self.form_stim.widgets_map
         labels = self.form_stim.labels_map
 
@@ -1335,13 +1330,6 @@ class MainWindow(QMainWindow):
         """
         return self.config_manager.sync_dual_stim_into_config()
 
-    def _sync_stim_controls_with_dual_mode(self):
-        """Disable conflicting primary-stim controls when dual stimulation is enabled.
-        Delegated to ConfigManager."""
-        self.config_manager.sync_stim_controls_with_dual_mode()
-        self._sync_stim_type_controls()
-        self.lbl_params_hint.setText(self.config_manager.get_hint_text())
-
     def _sync_preset_mode_controls(self):
         """Show only the mode selector that applies to the active preset."""
         p = (self.config_manager.current_preset_name or "").lower()
@@ -1412,7 +1400,6 @@ class MainWindow(QMainWindow):
             form.refresh()
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._sync_stim_type_controls()
-        self.config_manager.sync_stim_controls_with_dual_mode()
         self._sync_preset_mode_controls()
         self._sync_live_deck_to_config()
 
@@ -2083,7 +2070,7 @@ class MainWindow(QMainWindow):
                         header.append('Ca_i_mM')
 
                 # Gate names
-                from core.analysis import extract_gate_traces
+                from core.analysis import extract_gate_traces, extract_spatial_traces
                 gates = extract_gate_traces(res)
                 header += [f'gate_{k}' for k in gates]
                 writer.writerow(header)
@@ -2091,27 +2078,28 @@ class MainWindow(QMainWindow):
                 for i, t in enumerate(res.t):
                     row = [f"{t:.4f}", f"{res.v_soma[i]:.4f}"]
                     if res.n_comp > 1:
-                        row.append(f"{res.v_all[1, i]:.4f}")
-                        row.append(f"{res.v_all[-1, i]:.4f}")
+                        _, v_ais, v_terminal = extract_spatial_traces(res.v_all, res.n_comp)
+                        row.append(f"{v_ais[i]:.4f}")
+                        row.append(f"{v_terminal[i]:.4f}")
                     
                     # Spatial current data
                     for curr in res.currents.values():
-                        curr_arr = curr if curr.ndim == 2 else curr.reshape(1, -1)
                         if res.n_comp > 1:
-                            row.append(f"{curr_arr[0, i]:.6f}")  # Soma
-                            row.append(f"{curr_arr[1, i]:.6f}")  # AIS
-                            row.append(f"{curr_arr[-1, i]:.6f}")  # Terminal
+                            curr_soma, curr_ais, curr_terminal = extract_spatial_traces(curr, res.n_comp)
+                            row.append(f"{curr_soma[i]:.6f}")
+                            row.append(f"{curr_ais[i]:.6f}")
+                            row.append(f"{curr_terminal[i]:.6f}")
                         else:
-                            row.append(f"{curr_arr[0, i]:.6f}")
+                            row.append(f"{np.asarray(curr, dtype=float).reshape(-1)[i]:.6f}")
                     
                     if res.ca_i is not None:
-                        ca_arr = res.ca_i if res.ca_i.ndim == 2 else res.ca_i.reshape(1, -1)
                         if res.n_comp > 1:
-                            row.append(f"{ca_arr[0, i]:.8f}")  # Soma
-                            row.append(f"{ca_arr[1, i]:.8f}")  # AIS
-                            row.append(f"{ca_arr[-1, i]:.8f}")  # Terminal
+                            ca_soma, ca_ais, ca_terminal = extract_spatial_traces(res.ca_i, res.n_comp)
+                            row.append(f"{ca_soma[i]:.8f}")
+                            row.append(f"{ca_ais[i]:.8f}")
+                            row.append(f"{ca_terminal[i]:.8f}")
                         else:
-                            row.append(f"{ca_arr[0, i]:.8f}")
+                            row.append(f"{np.asarray(res.ca_i, dtype=float).reshape(-1)[i]:.8f}")
                     
                     for gv in gates.values():
                         row.append(f"{gv[i]:.6f}")
