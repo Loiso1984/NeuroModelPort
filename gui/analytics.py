@@ -2234,15 +2234,9 @@ class AnalyticsWidget(QTabWidget):
 
         # ── ATP Overlay (Metabolic Status) ───────────────────────────────
         if hasattr(result, 'config') and result.config.metabolism.enable_dynamic_atp:
-            # Extract ATP from state vector
             atp_data = None
-            if hasattr(result, 'y_all') and result.config.metabolism.enable_dynamic_atp:
-                n_comp = result.n_comp
-                if n_comp == 1:
-                    atp_data = result.y_all[-1, :]  # Last row is ATP for single comp
-                else:
-                    atp_data = result.y_all[-n_comp:, :]  # Last n_comp rows are ATP
-                    atp_data = atp_data[0, :]  # Soma ATP
+            if hasattr(result, 'atp_level') and result.atp_level is not None:
+                atp_data = result.atp_level[0, :] if result.n_comp > 1 else result.atp_level.flatten()
 
             if atp_data is not None and len(atp_data) > 0:
                 # Get final ATP value
@@ -2850,19 +2844,14 @@ class AnalyticsWidget(QTabWidget):
         ax3.tick_params(labelbottom=False)
 
         # ── Row 4: ATP Pool Time Series ─────────────────────────────────
-        # Extract ATP from state vector if dynamic ATP is enabled
+        # ATP pool from pre-extracted SimulationResult state
         atp_data = None
-        if hasattr(result, 'y_all') and result.config.metabolism.enable_dynamic_atp:
-            # Find ATP offset (last variable in state vector)
-            n_comp = result.n_comp
-            # ATP is the last variable, so it's at the end of y_all
-            # For soma-only, it's the last element; for multi-comp, it's the last n_comp elements
-            if n_comp == 1:
-                atp_data = result.y_all[-1, :]  # Last row is ATP for single comp
+        if getattr(result, 'atp_level', None) is not None:
+            atp_arr = np.asarray(result.atp_level, dtype=float)
+            if atp_arr.ndim == 2:
+                atp_data = atp_arr[0, :] if atp_arr.shape[0] > 1 else atp_arr[0, :]
             else:
-                # Use soma ATP (index 0 of the last n_comp elements)
-                atp_data = result.y_all[-n_comp:, :]  # Last n_comp rows are ATP
-                atp_data = atp_data[0, :]  # Soma ATP
+                atp_data = atp_arr.reshape(-1)
 
         if atp_data is not None:
             if self._atp_line is None:

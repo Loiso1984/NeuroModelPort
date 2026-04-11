@@ -2129,15 +2129,29 @@ class MainWindow(QMainWindow):
                         row.append(f"{v_ais[i]:.4f}")
                         row.append(f"{v_terminal[i]:.4f}")
                     
-                    # Spatial current data
+                    # Spatial current data (safe for 1D, 2D and single-comp traces)
                     for curr in res.currents.values():
+                        c_arr = np.asarray(curr, dtype=float)
                         if res.n_comp > 1:
-                            curr_soma, curr_ais, curr_terminal = extract_spatial_traces(curr, res.n_comp)
-                            row.append(f"{curr_soma[i]:.6f}")
-                            row.append(f"{curr_ais[i]:.6f}")
-                            row.append(f"{curr_terminal[i]:.6f}")
+                            if c_arr.ndim == 2:
+                                ais_idx = 1 if c_arr.shape[0] > 1 else 0
+                                term_idx = c_arr.shape[0] - 1
+                                row.append(f"{c_arr[0, i]:.6f}")
+                                row.append(f"{c_arr[ais_idx, i]:.6f}")
+                                row.append(f"{c_arr[term_idx, i]:.6f}")
+                            else:
+                                # Fallback for malformed 1D current trace
+                                flat_val = c_arr.reshape(-1)[i]
+                                row.append(f"{flat_val:.6f}")
+                                row.append(f"{flat_val:.6f}")
+                                row.append(f"{flat_val:.6f}")
                         else:
-                            row.append(f"{np.asarray(curr, dtype=float).reshape(-1)[i]:.6f}")
+                            # Single-comp output
+                            if c_arr.ndim == 2:
+                                flat_val = c_arr[0, i]
+                            else:
+                                flat_val = c_arr.reshape(-1)[i]
+                            row.append(f"{flat_val:.6f}")
                     
                     if res.ca_i is not None:
                         if res.n_comp > 1:

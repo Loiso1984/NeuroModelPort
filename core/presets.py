@@ -848,58 +848,39 @@ def get_synaptic_stimulus_names():
 
 
 def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
-    """Apply a synaptic stimulus profile on top of the current neuron config.
-
-    Only stimulation fields are modified (`stim_type`, `alpha_tau`, `Iext`,
-    timing/simulation window). Morphology and channel parameters are left intact.
-    """
-    
-    # Default fallback is alpha, but known receptor presets below
-    # switch to dedicated synaptic stimulus kernels.
+    """Apply a synaptic stimulus profile on top of the current neuron config."""
     cfg.stim.stim_type = 'alpha'
-    cfg.stim.pulse_start = 10.0  # Стандартная задержка перед стимулом
-    
-    # --- AMPA receptors (быстрые возбуждающие синапсы) ---
+    cfg.stim.pulse_start = 10.0
+
     if "AMPA" in stimulus_type:
         cfg.stim.stim_type = 'AMPA'
-        cfg.stim.alpha_tau = 1.0        # 1 ms kinetics (fast rise/decay, Otis et al 1995)
-        cfg.stim.Iext = 1.5             # Current density [µA/cm²] (peak 50-100 pA / soma area)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 1.5
         cfg.stim.t_sim = 100.0
-
-    # --- NMDA receptors (медленные возбуждающие синапсы) ---
     elif "NMDA" in stimulus_type:
         cfg.stim.stim_type = 'NMDA'
-        cfg.stim.alpha_tau = 70.0       # 70 ms kinetics (slow, Mg-dependent, Jahr & Stevens 1990)
-        cfg.stim.Iext = 0.8             # Current density [µA/cm²] (lower than AMPA, voltage-dependent)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 0.8
         cfg.stim.t_sim = 300.0
-
-    # --- Kainate receptors (промежуточные возбуждающие синапсы) ---
     elif "Kainate" in stimulus_type:
         cfg.stim.stim_type = 'Kainate'
-        cfg.stim.alpha_tau = 12.0       # 10-15 ms kinetics (Ozawa et al 1998)
-        cfg.stim.Iext = 1.2             # Current density [µA/cm²] (intermediate)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 1.2
         cfg.stim.t_sim = 200.0
-
-    # --- GABA-A receptors (быстрое торможение) ---
     elif "GABA-A" in stimulus_type:
         cfg.stim.stim_type = 'GABAA'
-        cfg.stim.alpha_tau = 4.0        # 3-5 ms kinetics (fast, Thalmann 1986)
-        cfg.stim.Iext = -1.5            # Current density [µA/cm²] INHIBITORY (hyperpolarizing)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = -1.5
         cfg.stim.t_sim = 100.0
-
-    # --- GABA-B receptors (медленное торможение) ---
     elif "GABA-B" in stimulus_type:
         cfg.stim.stim_type = 'GABAB'
-        cfg.stim.alpha_tau = 150.0      # 100-300 ms kinetics (very slow, G-protein coupled)
-        cfg.stim.Iext = -0.6            # Current density [µA/cm²] INHIBITORY (longer effect)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = -0.6
         cfg.stim.t_sim = 400.0
-
-    # --- Nicotinic Acetylcholine receptors (быстрое возбуждение от ACh) ---
     elif "Nicotinic" in stimulus_type:
         cfg.stim.stim_type = 'Nicotinic'
-        cfg.stim.alpha_tau = 7.0        # 5-10 ms kinetics (Armstrong & Gilly 1992)
-        cfg.stim.Iext = 1.8             # Current density [µA/cm²] (similar to AMPA, cation channel)
+        cfg.stim.alpha_tau = 1.0
+        cfg.stim.Iext = 1.8
         cfg.stim.t_sim = 150.0
-    
     else:
         raise ValueError(f"Unknown synaptic stimulus type: {stimulus_type}")

@@ -62,41 +62,56 @@ class SimulationResult:
 
         self.v_all  = y[0:n_comp, :]
         self.v_soma = self.v_all[0, :]
-
-        dual_cfg = getattr(config, "dual_stimulation", None)
-        dual_enabled = bool(dual_cfg is not None and getattr(dual_cfg, "enabled", False))
-
-        # Primary stimulus always comes from cfg.stim_location and cfg.stim
-        primary_location = config.stim_location.location
-        has_primary_dfilter_state = (
-            primary_location == "dendritic_filtered"
-            and config.dendritic_filter.enabled
-            and config.dendritic_filter.tau_dendritic_ms > 0.0
-        )
-        has_secondary_dfilter_state = (
-            dual_enabled
-            and getattr(dual_cfg, "secondary_location", "soma") == "dendritic_filtered"
-            and getattr(dual_cfg, "secondary_tau_dendritic_ms", 0.0) > 0.0
-        )
-        filter_state_count = int(has_primary_dfilter_state) + int(has_secondary_dfilter_state)
+        ch = config.channels
+        cursor = 4 * n_comp  # V, m, h, n
+        if ch.enable_Ih:
+            cursor += n_comp
+        if ch.enable_ICa:
+            cursor += 2 * n_comp
+        if ch.enable_IA:
+            cursor += 2 * n_comp
+        if ch.enable_ITCa:
+            cursor += 2 * n_comp
+        if ch.enable_IM:
+            cursor += n_comp
+        if ch.enable_NaP:
+            cursor += n_comp
+        if ch.enable_NaR:
+            cursor += 2 * n_comp
+        if ch.enable_SK:
+            cursor += n_comp
 
         self.ca_i = None
         if config.calcium.dynamic_Ca:
-            if filter_state_count > 0:
-                self.ca_i = y[-(n_comp + filter_state_count):-filter_state_count, :]
-            else:
-                self.ca_i = y[-n_comp:, :]
+            self.ca_i = y[cursor:cursor + n_comp, :]
+            cursor += n_comp
+
+        self.atp_level = None
+        if config.metabolism.enable_dynamic_atp:
+            self.atp_level = y[cursor:cursor + n_comp, :]
+            cursor += n_comp
+
+        primary_loc = config.stim_location.location
+        use_dfilter_primary = (
+            primary_loc == "dendritic_filtered"
+            and config.dendritic_filter.enabled
+            and config.dendritic_filter.tau_dendritic_ms > 0.0
+        )
+        dual = getattr(config, "dual_stimulation", None)
+        dual_enabled = bool(dual is not None and getattr(dual, "enabled", False))
+        use_dfilter_secondary = (
+            dual_enabled
+            and getattr(dual, "secondary_location", "soma") == "dendritic_filtered"
+            and getattr(dual, "secondary_tau_dendritic_ms", 0.0) > 0.0
+        )
 
         self.v_dendritic_filtered = None
         self.v_dendritic_filtered_secondary = None
-        if filter_state_count > 0:
-            tail_start = y.shape[0] - filter_state_count
-            cursor = tail_start
-            if has_primary_dfilter_state:
-                self.v_dendritic_filtered = y[cursor, :]
-                cursor += 1
-            if has_secondary_dfilter_state:
-                self.v_dendritic_filtered_secondary = y[cursor, :]
+        if use_dfilter_primary:
+            self.v_dendritic_filtered = y[cursor, :]
+            cursor += 1
+        if use_dfilter_secondary:
+            self.v_dendritic_filtered_secondary = y[cursor, :]
 
         self.currents:    dict  = {}
         self.atp_estimate: float = 0.0
@@ -708,10 +723,8 @@ class NeuronSolver:
                 logger.warning("SK channel enabled but gSK_v missing from morph")
 
         # Extract K_ATP current if metabolism is enabled
-        if cfg.metabolism.enable_dynamic_atp:
-            # ATP state is at the end of the state vector
-            atp_state = y[-n:, :]
-            atp_ratio = atp_state / cfg.metabolism.katp_kd_atp_mM
+        if cfg.metabolism.enable_dynamic_atp and res.atp_level is not None:
+            atp_ratio = res.atp_level / cfg.metabolism.katp_kd_atp_mM
             g_katp = cfg.metabolism.g_katp_max / (1.0 + atp_ratio ** 2)
             res.currents['KATP'] = g_katp * (v - cfg.channels.EK)
 
