@@ -222,16 +222,13 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         cfg.channels.gL = 0.15
         cfg.calcium.tau_Ca = 900.0
         cfg.channels.gCa_max = 0.08
-        cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 30.0
 
 
 def apply_preset(cfg: FullModelConfig, name: str):
-    """
-    # ПОЛНЫЙ СБРОС: все поля возвращаются к умолчаниям Pydantic
+    # Reset all fields to Pydantic defaults
     _reset_cfg_to_defaults(cfg)
-    
-    # --- 1. КЛАССИКА: ГИГАНТСКИЙ АКСОН КАЛЬМАРА ---
+
+    # --- 1. CLASSIC: SQUID GIANT AXON (HH 1952) ---
     if "Squid" in name:
         cfg.dendritic_filter.enabled = False  # Squid axon has no dendrites
         cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 120.0, 36.0, 0.3
