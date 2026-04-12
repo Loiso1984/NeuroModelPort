@@ -122,6 +122,11 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
         )
         if getattr(dual, "secondary_duration", 0.0) < 0.0:
             raise SimulationParameterError("dual_stimulation.secondary_duration must be >= 0.")
+        sec_tau = float(getattr(dual, "secondary_alpha_tau", 1.0))
+        if getattr(dual, "secondary_stim_type", "const") in {"GABAA", "GABAB", "AMPA", "NMDA"} and sec_tau <= 0.0:
+            raise SimulationParameterError(
+                f"secondary_alpha_tau must be > 0 for {dual.secondary_stim_type}, got {sec_tau}."
+            )
         if getattr(dual, "secondary_location", "soma") == "dendritic_filtered":
             tau2 = float(getattr(dual, "secondary_tau_dendritic_ms", 0.0))
             if tau2 < 0.0:

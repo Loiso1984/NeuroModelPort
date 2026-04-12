@@ -33,7 +33,7 @@ def test_distributed_stimulus_current_for_comp_soma_mode():
             use_dfilter=0,
             dfilter_attenuation=1.0,
             dfilter_tau_ms=10.0,
-            v_filtered=0.0,
+            i_filtered=0.0,
         )
         for i in range(4)
     ]
@@ -51,7 +51,7 @@ def test_distributed_stimulus_current_for_comp_ais_mode():
             use_dfilter=0,
             dfilter_attenuation=1.0,
             dfilter_tau_ms=10.0,
-            v_filtered=0.0,
+            i_filtered=0.0,
         )
         for i in range(4)
     ]
@@ -69,7 +69,7 @@ def test_distributed_stimulus_current_for_comp_dfilter_mode():
             use_dfilter=0,
             dfilter_attenuation=0.25,
             dfilter_tau_ms=10.0,
-            v_filtered=0.0,
+            i_filtered=0.0,
         )
         for i in range(3)
     ]
@@ -85,7 +85,7 @@ def test_distributed_stimulus_current_for_comp_dfilter_mode():
             use_dfilter=1,
             dfilter_attenuation=0.25,
             dfilter_tau_ms=10.0,
-            v_filtered=0.33,
+            i_filtered=0.33,
         )
         for i in range(3)
     ]
@@ -103,7 +103,7 @@ def test_distributed_stimulus_current_for_comp_tau_nonpositive_disables_filter()
             use_dfilter=1,
             dfilter_attenuation=0.25,
             dfilter_tau_ms=0.0,
-            v_filtered=0.33,
+            i_filtered=0.33,
         )
         for i in range(3)
     ]

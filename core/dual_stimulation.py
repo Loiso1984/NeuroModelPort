@@ -82,7 +82,7 @@ def distributed_stimulus_current_for_comp(
     use_dfilter: int,
     dfilter_attenuation: float,
     dfilter_tau_ms: float,
-    i_filtered: float,
+    i_filtered: float = 0.0,
 ) -> float:
     """Return stimulus contribution for a single compartment without temp vectors.
 

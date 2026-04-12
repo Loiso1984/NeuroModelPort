@@ -136,16 +136,19 @@ def _apply_l5_mode(cfg: FullModelConfig) -> None:
 
 def _apply_ach_mode(cfg: FullModelConfig) -> None:
     """Apply ACh mode for preset R (sleep vs arousal)."""
+    cfg.preset_modes.l5_mode = "normal"
     mode = getattr(cfg.preset_modes, "ach_mode", "sleep")
     cfg.channels.enable_IM = True
     if mode == "arousal":
         cfg.channels.gIM_max = 0.05
         cfg.channels.im_speed_multiplier = 1.0
-        cfg.stim.Iext = 12.0
+        cfg.stim.Iext = 10.0
+        cfg.stim.noise_sigma = 0.35
     else:
         cfg.channels.gIM_max = 0.5
         cfg.channels.im_speed_multiplier = 0.15
-        cfg.stim.Iext = 5.0
+        cfg.stim.Iext = 4.0
+        cfg.stim.noise_sigma = 0.10
 
 
 def _apply_purkinje_mode(cfg: FullModelConfig) -> None:
@@ -246,11 +249,89 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         cfg.channels.gL = 0.15
         cfg.calcium.tau_Ca = 900.0
         cfg.channels.gCa_max = 0.08
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 95.0
+
+
+def _apply_ca1_theta_protocol(cfg: FullModelConfig) -> None:
+    """Single-cell CA1 theta surrogate: distal excitation + somatic inhibitory pacing."""
+    from core.dual_stimulation import DualStimulationConfig
+
+    cfg.morphology.single_comp = False
+    cfg.morphology.N_trunk = 6
+    cfg.stim_location.location = "dendritic_filtered"
+    cfg.dendritic_filter.enabled = True
+    cfg.dendritic_filter.distance_um = 180.0
+    cfg.dendritic_filter.space_constant_um = 180.0
+    cfg.dendritic_filter.tau_dendritic_ms = 12.0
+
+    # Distal glutamatergic theta drive with a mild high-conductance background.
+    cfg.stim.stim_type = 'AMPA'
+    cfg.stim.Iext = 2.0
+    cfg.stim.alpha_tau = 2.0
+    cfg.stim.pulse_start = 0.0
+    cfg.stim.synaptic_train_type = 'regular'
+    cfg.stim.synaptic_train_freq_hz = 7.0
+    cfg.stim.synaptic_train_duration_ms = 5000.0
+    cfg.stim.t_sim = 5000.0
+    cfg.stim.dt_eval = 0.5
+    cfg.stim.noise_sigma = 0.25
+    cfg.stim.jacobian_mode = 'native_hines'
+
+    # Phase-shifted fast inhibition at the soma keeps the rhythm honest.
+    cfg.dual_stimulation = DualStimulationConfig(
+        enabled=True,
+        secondary_location="soma",
+        secondary_stim_type="GABAA",
+        secondary_Iext=0.8,
+        secondary_start=35.0,
+        secondary_train_type="regular",
+        secondary_train_freq_hz=7.0,
+        secondary_train_duration_ms=5000.0,
+        secondary_alpha_tau=6.0,
+    )
+
+
+def _apply_epilepsy_disinhibition_protocol(cfg: FullModelConfig) -> None:
+    """Protocol overlay for epileptic disinhibition, separate from intrinsic excitability."""
+    from core.dual_stimulation import DualStimulationConfig
+
+    cfg.stim_location.location = "soma"
+    cfg.stim.stim_type = "const"
+    cfg.stim.Iext = 30.0
+    cfg.stim.noise_sigma = 0.2
+    cfg.dual_stimulation = DualStimulationConfig(
+        enabled=True,
+        secondary_location="dendritic_filtered",
+        secondary_stim_type="GABAA",
+        secondary_Iext=15.0,
+        secondary_train_type="poisson",
+        secondary_train_freq_hz=100.0,
+        secondary_train_duration_ms=5000.0,
+        secondary_distance_um=75.0,
+        secondary_space_constant_um=100.0,
+        secondary_tau_dendritic_ms=5.0,
+    )
 
 
 def apply_preset(cfg: FullModelConfig, name: str):
+    saved_modes = cfg.preset_modes.model_dump()
     # Reset all fields to Pydantic defaults
     _reset_cfg_to_defaults(cfg)
+    if "Pyramidal L5" in name:
+        cfg.preset_modes.l5_mode = saved_modes.get("l5_mode", cfg.preset_modes.l5_mode)
+    if "Thalamic" in name:
+        cfg.preset_modes.k_mode = saved_modes.get("k_mode", cfg.preset_modes.k_mode)
+    if "Hypoxia" in name:
+        cfg.preset_modes.hypoxia_mode = saved_modes.get("hypoxia_mode", cfg.preset_modes.hypoxia_mode)
+    if "Alzheimer" in name:
+        cfg.preset_modes.alzheimer_mode = saved_modes.get("alzheimer_mode", cfg.preset_modes.alzheimer_mode)
+    if "Cholinergic" in name or "ACh" in name:
+        cfg.preset_modes.ach_mode = saved_modes.get("ach_mode", cfg.preset_modes.ach_mode)
+    if "Purkinje" in name:
+        cfg.preset_modes.purkinje_mode = saved_modes.get("purkinje_mode", cfg.preset_modes.purkinje_mode)
+    if "Dravet" in name:
+        cfg.preset_modes.dravet_mode = saved_modes.get("dravet_mode", cfg.preset_modes.dravet_mode)
 
     # --- 1. CLASSIC: SQUID GIANT AXON (HH 1952) ---
     if "Squid" in name:
@@ -520,32 +601,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.B_Ca = 1e-5  # Calibrated conversion for pathological accumulation without runaway Ca
         # Chloride Shift: depolarized GABA reversal (pathological disinhibition)
         cfg.channels.e_rev_syn_secondary = -40.0  # Depolarized from -75 to -40 mV
-        # Const stim to show sustained hyperexcitability
-        # Validated: ~29 spikes, 197 Hz, Vmax ≈ 48 mV (higher amp than FS base)
-        cfg.stim.stim_type = 'const'
-        cfg.stim.alpha_tau = 1.0
-        cfg.stim.Iext = 30.0
-
-        # DUAL STIMULATION: Add depolarizing GABAA inhibition (disinhibition model)
-        # Primary stimulus is set on cfg.stim, secondary on dual_stimulation
-        from core.dual_stimulation import DualStimulationConfig
-        cfg.stim_location.location = "soma"
-        cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 30.0  # Primary stimulus
-        cfg.dual_stimulation = DualStimulationConfig(
-            enabled=True,
-            secondary_location="dendritic_filtered",
-            secondary_stim_type="GABAA",
-            secondary_Iext=15.0,
-            secondary_train_type="poisson",
-            secondary_train_freq_hz=100.0,
-            secondary_train_duration_ms=5000.0,
-            secondary_distance_um=75.0,
-            secondary_space_constant_um=100.0,
-            secondary_tau_dendritic_ms=5.0
-        )
-
-    # --- 9. ПАТОЛОГИЯ: АЛЬЦГЕЙМЕР (CALCIUM TOXICITY - SLOW EXTRUSION) ---
+        _apply_epilepsy_disinhibition_protocol(cfg)
+# --- 9. ПАТОЛОГИЯ: АЛЬЦГЕЙМЕР (CALCIUM TOXICITY - SLOW EXTRUSION) ---
     elif "Alzheimer's" in name:
         apply_preset(cfg, "Pyramidal L5 (Mainen 1996)")
         # Apply Alzheimer mode overlay immediately
@@ -629,29 +686,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.gSK_max = 0.5  # SK for calcium-dependent adaptation (reduced to allow theta-rhythm trains)
         cfg.channels.gIM_max = 0.04  # M-type for slow adaptation
         cfg.morphology.d_soma = 20e-4
-        # v12.0: Dual-drive stimulation for theta rhythm
-        # Primary: weak tonic current for readiness
-        cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 2.0
-        cfg.stim.pulse_start = 0.0
-        cfg.stim.t_sim = 5000.0  # Match secondary train duration
-        cfg.stim.dt_eval = 0.5  # Optimized for faster testing (0.5ms sampling)
-        cfg.stim.noise_sigma = 0.8  # Stochastic facilitation
-        # Secondary: AMPA synaptic train at 7Hz (theta)
-        from core.dual_stimulation import DualStimulationConfig
-        cfg.dual_stimulation = DualStimulationConfig(
-            enabled=True,
-            secondary_location="soma",
-            secondary_stim_type="AMPA",
-            secondary_Iext=5.0,
-            secondary_start=0.0,
-            secondary_train_type="regular",
-            secondary_train_freq_hz=7.0,
-            secondary_train_duration_ms=5000.0,
-            secondary_alpha_tau=2.0,
-        )
-
-    # --- 13. АНЕСТЕЗИЯ (ЛИДОКАИН) ---
+        _apply_ca1_theta_protocol(cfg)
+# --- 13. АНЕСТЕЗИЯ (ЛИДОКАИН) ---
     elif "Anesthesia" in name:
         apply_preset(cfg, "Squid Giant Axon (HH 1952)")
         cfg.channels.gNa_max = 12.0  # 90% blockade: 120 → 12
@@ -910,12 +946,12 @@ def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
     elif "GABA-A" in stimulus_type:
         cfg.stim.stim_type = 'GABAA'
         cfg.stim.alpha_tau = 1.0
-        cfg.stim.Iext = -1.5
+        cfg.stim.Iext = 1.5
         cfg.stim.t_sim = 100.0
     elif "GABA-B" in stimulus_type:
         cfg.stim.stim_type = 'GABAB'
         cfg.stim.alpha_tau = 1.0
-        cfg.stim.Iext = -2.5
+        cfg.stim.Iext = 2.5
         cfg.stim.t_sim = 400.0
     elif "Nicotinic" in stimulus_type:
         cfg.stim.stim_type = 'Nicotinic'

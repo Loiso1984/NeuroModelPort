@@ -6,8 +6,8 @@ from numba import vectorize, float64, njit
 # =====================================================================
 
 # Voltage range: -120 to 120 mV, 0.1 mV step
-V_MIN = -120.0
-V_MAX = 120.0
+V_MIN = -200.0
+V_MAX = 200.0
 V_STEP = 0.1
 N_V = int((V_MAX - V_MIN) / V_STEP) + 1  # 2401 points
 
@@ -421,10 +421,10 @@ def ah_TCa(V):
     """I_T inactivation alpha (Destexhe 1998). V½ ≈ -81 mV. Slow recovery."""
     Vs = V + _IT_SHIFT
     h_inf = 1.0 / (1.0 + np.exp((Vs + 81.0) / 4.0))
-    if Vs < -80.0:
-        tau_h = np.exp((Vs + 467.0) / 66.6)
-    else:
-        tau_h = 28.0 + np.exp(-(Vs + 22.0) / 10.5)
+    w = 1.0 / (1.0 + np.exp((Vs + 80.0) / 2.0))
+    tau_h_hyper = np.exp((Vs + 467.0) / 66.6)
+    tau_h_depol = 28.0 + np.exp(-(Vs + 22.0) / 10.5)
+    tau_h = w * tau_h_hyper + (1.0 - w) * tau_h_depol
     return h_inf / tau_h
 
 @vectorize([float64(float64)], nopython=True, cache=True)
@@ -432,10 +432,10 @@ def bh_TCa(V):
     """I_T inactivation beta (Destexhe 1998)."""
     Vs = V + _IT_SHIFT
     h_inf = 1.0 / (1.0 + np.exp((Vs + 81.0) / 4.0))
-    if Vs < -80.0:
-        tau_h = np.exp((Vs + 467.0) / 66.6)
-    else:
-        tau_h = 28.0 + np.exp(-(Vs + 22.0) / 10.5)
+    w = 1.0 / (1.0 + np.exp((Vs + 80.0) / 2.0))
+    tau_h_hyper = np.exp((Vs + 467.0) / 66.6)
+    tau_h_depol = 28.0 + np.exp(-(Vs + 22.0) / 10.5)
+    tau_h = w * tau_h_hyper + (1.0 - w) * tau_h_depol
     return (1.0 - h_inf) / tau_h
 
 

@@ -28,46 +28,51 @@ def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.n
 
 
 def test_ca1_theta_dual_stimulation_config():
-    """Test that CA1 preset has correct dual stimulation configuration for theta rhythm."""
+    """Test that CA1 preset uses a physiology-first theta surrogate protocol."""
     cfg = FullModelConfig()
     apply_preset(cfg, "L: Hippocampal CA1 Pyramidal (Adapting)")
-    
-    # Verify dual stimulation is enabled
+
     assert cfg.dual_stimulation is not None, "CA1 should have dual stimulation configured"
-    assert cfg.dual_stimulation.enabled == True, "Dual stimulation should be enabled"
-    
-    # Verify primary stimulus: weak tonic current for readiness
-    assert cfg.stim.stim_type == "const"
+    assert cfg.dual_stimulation.enabled is True, "Dual stimulation should be enabled"
+
+    assert cfg.morphology.single_comp is False
+    assert cfg.stim_location.location == "dendritic_filtered"
+    assert cfg.stim.stim_type == "AMPA"
     assert cfg.stim.Iext == 2.0
-    
-    # Verify secondary stimulus: AMPA at 7Hz (theta)
-    assert cfg.dual_stimulation.secondary_stim_type == "AMPA"
-    assert cfg.dual_stimulation.secondary_Iext == 5.0
+    assert cfg.stim.synaptic_train_type == "regular"
+    assert cfg.stim.synaptic_train_freq_hz == 7.0
+
+    assert cfg.dual_stimulation.secondary_stim_type == "GABAA"
+    assert cfg.dual_stimulation.secondary_Iext == 0.8
     assert cfg.dual_stimulation.secondary_train_type == "regular"
     assert cfg.dual_stimulation.secondary_train_freq_hz == 7.0
     assert cfg.dual_stimulation.secondary_train_duration_ms == 5000.0
-    
-    # Verify stochastic facilitation
-    assert cfg.stim.noise_sigma == 0.8
+    assert cfg.dual_stimulation.secondary_location == "soma"
+    assert cfg.stim.noise_sigma == 0.25
 
 
 def test_ca1_theta_firing_response():
-    """Test that CA1 neuron fires in response to dual-drive stimulation at 7Hz."""
+    """Test that CA1 neuron fires in response to theta-paced distal input."""
     cfg = FullModelConfig()
     apply_preset(cfg, "L: Hippocampal CA1 Pyramidal (Adapting)")
-    
+
     res = NeuronSolver(cfg).run_single()
     st = _spike_times(res.v_soma, res.t)
-    
-    # Should fire multiple spikes (at least 5-10) over 5000ms with dual-drive
-    # Primary: 2.0 µA/cm² tonic + Secondary: 5.0 mS/cm² AMPA at 7Hz
-    assert len(st) >= 5, f"Expected at least 5 spikes with dual-drive, got {len(st)}"
-    
-    # Check that firing follows the 7Hz rhythm (ISI ~143ms)
+
+    assert len(st) >= 5, f"Expected at least 5 spikes with theta surrogate, got {len(st)}"
+
     if len(st) > 1:
         isi = np.diff(st)
-        mean_isi = np.mean(isi)
-        assert 100 <= mean_isi <= 200, f"Expected ISI ~143ms for 7Hz, got {mean_isi:.1f}ms"
+        burst_starts = [st[0]]
+        for i, dt in enumerate(isi):
+            if dt >= 50.0:
+                burst_starts.append(st[i + 1])
+        if len(burst_starts) > 1:
+            burst_intervals = np.diff(np.asarray(burst_starts))
+            mean_burst_interval = np.mean(burst_intervals)
+            assert 80 <= mean_burst_interval <= 220, (
+                f"Expected theta-paced burst spacing, got {mean_burst_interval:.1f}ms"
+            )
 
 
 def test_ca1_theta_physiological_channels():

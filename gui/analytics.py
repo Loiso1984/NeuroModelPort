@@ -1,21 +1,21 @@
 """
-gui/analytics.py â€” Full Scientific Analytics Suite v10.1
+gui/analytics.py - Full Scientific Analytics Suite v10.1
 
 Analytical tabs using matplotlib embedded in Qt:
-  0. Neuron Passport     â€” rich biophysical report
-  1. Oscilloscope detail â€” multi-compartment traces
-  2. Gate Dynamics       â€” m, h, n, r, s, u vs time
-  3. Equilibrium Curves  â€” x_inf(V), Ď„(V) for all gates
-  4. Phase Plane         â€” V vs n + nullclines
-  5. Kymograph           â€” spatiotemporal V(x,t) heatmap
-  6. Current Balance     â€” CmÂ·dV/dt â’ (I_stim â’ I_ion + I_ax)
-  7. Energy / Power      â€” cumulative charge & instantaneous power
-  8. Bifurcation         â€” spike peaks vs parameter
-  9. Sweep               â€” traces + f-I curve
- 10. S-D Curve           â€” strength-duration + Weiss fit
- 11. Excitability Map    â€” 2-D heatmap (I Ă— duration)
- 12. Spectrogram         â€” STFT of soma Vm
- 13. Impedance Z(f)      â€” membrane frequency response (|Z|, phase)
+  0. Neuron Passport     - rich biophysical report
+  1. Oscilloscope detail - multi-compartment traces
+  2. Gate Dynamics       - m, h, n, r, s, u vs time
+  3. Equilibrium Curves  - x_inf(V), tau(V) for all gates
+  4. Phase Plane         - V vs n + nullclines
+  5. Kymograph           - spatiotemporal V(x,t) heatmap
+  6. Current Balance     - Cm*dV/dt - (I_stim - I_ion + I_ax)
+  7. Energy / Power      - cumulative charge & instantaneous power
+  8. Bifurcation         - spike peaks vs parameter
+  9. Sweep               - traces + f-I curve
+ 10. S-D Curve           - strength-duration + Weiss fit
+ 11. Excitability Map    - 2-D heatmap (I x duration)
+ 12. Spectrogram         - STFT of soma Vm
+ 13. Impedance Z(f)      - membrane frequency response (|Z|, phase)
 
 Lyapunov computation is explicit via `Compute LLE` action.
 """
@@ -52,7 +52,7 @@ except ImportError:
         }
     }
 
-# â”€â”€ colour palette (matches plots.py) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── colour palette (matches plots.py) ──────────────────────────────
 CHAN_COLORS = {
     'Na':   '#DC3232', 'K':   '#3264DC', 'Leak': '#32A050',
     'Ih':   '#9632C8', 'ICa': '#FA9600', 'IA':   '#00C8C8',
@@ -71,9 +71,20 @@ def _mpl_fig(nrows=1, ncols=1, tight=True, **kwargs) -> tuple:
     figsize = kwargs.pop('figsize', (8, 4 * nrows))
     fig = Figure(figsize=figsize, dpi=90, **kwargs)
     if tight:
-        fig.set_tight_layout(True)
+        try:
+            fig.set_layout_engine('tight')
+        except Exception:
+            fig.set_tight_layout(True)
     canvas = FigureCanvas(fig)
     return fig, canvas
+
+
+def _set_tight_layout_engine(fig, **kwargs):
+    """Matplotlib layout helper that avoids deprecated set_tight_layout usage when possible."""
+    try:
+        fig.set_layout_engine('tight', **kwargs)
+    except Exception:
+        fig.set_tight_layout(kwargs or True)
 
 
 def _ensure_shape_compatible(arr, t, name="array"):
@@ -348,9 +359,9 @@ class FullscreenPlotViewer(QMainWindow):
         super().closeEvent(event)
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ════════════════════════════════════════════════════════════════════
 class AnalyticsWidget(QTabWidget):
-    """Main analytics widget â€” updated by MainWindow after each run."""
+    """Main analytics widget — updated by MainWindow after each run."""
 
     def __init__(self, parent=None):
         """
@@ -385,9 +396,9 @@ class AnalyticsWidget(QTabWidget):
         self._build_tabs()
         repair_widget_tree(self)
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  TAB CONSTRUCTION
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _open_fullscreen_plot(self, tab_name: str):
         """Open a fullscreen viewer for the specified tab's plot."""
         if tab_name not in self._tab_figures:
@@ -456,7 +467,7 @@ class AnalyticsWidget(QTabWidget):
 
         self.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
-        # â”€â”€ Tab 0: Passport â€” always built (pure text, zero MPL cost) â”€â”€
+        # â”€â”€ Tab 0: Passport — always built (pure text, zero MPL cost) â”€â”€
         self.passport_view = QTextEdit()
         self.passport_view.setReadOnly(True)
         self.passport_view.setFont(QFont("Consolas", 10))
@@ -467,7 +478,7 @@ class AnalyticsWidget(QTabWidget):
         )
         self.addTab(self.passport_view, "Passport")
 
-        # â”€â”€ Tabs 1â€“15: lazy placeholders â€” MPL canvas built on first visit â”€â”€
+        # â”€â”€ Tabs 1–15: lazy placeholders — MPL canvas built on first visit â”€â”€
         # Each entry: builder (creates attrs + returns QWidget), updater (may be None),
         # needs_stats (updater takes (result, stats)), needs_morph (skip if no morph).
         self._all_tab_specs: dict[int, dict] = {
@@ -523,9 +534,9 @@ class AnalyticsWidget(QTabWidget):
                     self.setCurrentIndex(i)
                     break
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  LAZY TAB ACTIVATION
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _show_missing_data_message(self, tab_title: str, missing_data: str):
         """Show error message on tab when required data is missing."""
         # Map tab title to figure name
@@ -683,7 +694,7 @@ class AnalyticsWidget(QTabWidget):
             return
         idx = int(np.argmin(np.abs(t_arr - t_ms)))
 
-        # â”€â”€ Phase Plane: yellow ghost dot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Phase Plane: yellow ghost dot ────────────────────────────
         if hasattr(self, 'ax_phase') and hasattr(self, 'fig_phase'):
             n_comp = int(self._last_result.n_comp)
             if n_comp > 0:
@@ -705,7 +716,7 @@ class AnalyticsWidget(QTabWidget):
                 if hasattr(self, 'cvs_phase'):
                     self.cvs_phase.draw_idle()
 
-        # â”€â”€ Currents tab: vertical line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Currents tab: vertical line ──────────────────────────────
         if hasattr(self, 'ax_currents'):
             if hasattr(self, '_currents_time_marker') and self._currents_time_marker is not None:
                 try:
@@ -718,7 +729,7 @@ class AnalyticsWidget(QTabWidget):
             if hasattr(self, 'cvs_currents'):
                 self.cvs_currents.draw_idle()
 
-        # â”€â”€ Gates tab: vertical line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Gates tab: vertical line ─────────────────────────────────
         if hasattr(self, 'ax_gates'):
             if hasattr(self, '_gates_time_marker') and self._gates_time_marker is not None:
                 try:
@@ -731,7 +742,7 @@ class AnalyticsWidget(QTabWidget):
             if hasattr(self, 'cvs_gates'):
                 self.cvs_gates.draw_idle()
 
-        # â”€â”€ Spike Shape tab: nearest spike vertical marker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Spike Shape tab: nearest spike vertical marker ───────────
         if hasattr(self, 'ax_spike_shape'):
             try:
                 from core.analysis import detect_spikes
@@ -752,14 +763,14 @@ class AnalyticsWidget(QTabWidget):
             except Exception:
                 pass
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  PER-TAB BUILDER METHODS  (called once on first visit)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _build_tab_gates(self) -> QWidget:
         # Refactored: Single large plot with checkboxes for toggling individual gates
         self.fig_gates, cvs = _mpl_fig(1, 1)
         self.ax_gates = self.fig_gates.add_subplot(1, 1, 1)
-        self.fig_gates.set_tight_layout({'pad': 2.5})
+        _set_tight_layout_engine(self.fig_gates, pad=2.5)
         self.cvs_gates = cvs
         self._tab_figures['Gate Dynamics'] = self.fig_gates
 
@@ -807,84 +818,61 @@ class AnalyticsWidget(QTabWidget):
         )
 
     def _build_tab_spike_mech(self) -> QWidget:
-        # Create wider and larger figure for better space utilization and to prevent label overlapping
-        self.fig_spike_mech, cvs = _mpl_fig(3, 1, figsize=(16, 18))
-        self.ax_spike_mech = [self.fig_spike_mech.add_subplot(3, 1, k) for k in range(1, 4)]
-        # Enable navigation for all subplots
+        self.fig_spike_mech, cvs = _mpl_fig(5, 1, figsize=(15, 24))
+        self.ax_spike_mech = [self.fig_spike_mech.add_subplot(5, 1, k) for k in range(1, 6)]
         for ax in self.ax_spike_mech:
             ax.set_navigate(True)
-        self.fig_spike_mech.set_tight_layout({'pad': 4.0, 'h_pad': 1.0, 'w_pad': 1.0})
+        _set_tight_layout_engine(self.fig_spike_mech, pad=3.5, h_pad=1.1, w_pad=0.8)
         self.cvs_spike_mech = cvs
         self._tab_figures['Spike Mechanism'] = self.fig_spike_mech
-        self._spike_mech_init_done = False
-        self._spike_mech_lines: dict[str, object] = {}
-        self._spike_mech_curr_lines: dict[str, object] = {}
-        self._spike_mech_norm_lines: dict[str, object] = {}
-        self._spike_mech_texts: dict[str, object] = {}
-        self._spike_mech_ax2b = None
-        self._spike_mech_ax3 = None  # For 3rd panel (threshold contributions)
-        self._spike_mech_bar_artists: dict[str, object] = {}  # For stacked bar chart
+        self._spike_mech_selected = 0
+        self._spike_mech_peak_idx = np.array([], dtype=int)
+        self._spike_mech_spike_times = np.array([], dtype=float)
+        self._spike_mech_last_result = None
+        self._spike_mech_last_stats = None
+        self._spike_mech_click_cid = self.cvs_spike_mech.mpl_connect('button_press_event', self._on_spike_mech_clicked)
 
-        # Add spike zoomer spinbox and vertical scroll control
-        from PySide6.QtWidgets import QSpinBox, QHBoxLayout, QLabel, QWidget, QScrollArea, QVBoxLayout
-        control_widget = QWidget()
-        control_layout = QHBoxLayout(control_widget)
-        control_layout.setContentsMargins(0, 0, 0, 0)
-        control_layout.setSpacing(5)
+        from PySide6.QtWidgets import QSpinBox, QComboBox, QCheckBox, QHBoxLayout, QLabel, QWidget
+        controls = QWidget()
+        layout = QHBoxLayout(controls)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-        # Spike zoomer
-        zoom_label = QLabel("Zoom to Spike #:")
-        zoom_label.setStyleSheet("color:#CDD6F4; font-size:11px;")
-        control_layout.addWidget(zoom_label)
-
+        layout.addWidget(QLabel('Spike'))
         self._spike_zoomer = QSpinBox()
-        self._spike_zoomer.setRange(1, 9999)
-        self._spike_zoomer.setValue(1)
-        self._spike_zoomer.setStyleSheet("""
-            QSpinBox {
-                background:#313244; color:#CDD6F4; border:1px solid #45475A;
-                padding:2px; font-size:11px; min-width:60px;
-            }
-        """)
+        self._spike_zoomer.setRange(1, 1)
         self._spike_zoomer.valueChanged.connect(self._on_spike_zoomer_changed)
-        control_layout.addWidget(self._spike_zoomer)
+        layout.addWidget(self._spike_zoomer)
 
-        control_layout.addStretch()
+        layout.addWidget(QLabel('Currents'))
+        self._spike_mech_current_scope = QComboBox()
+        self._spike_mech_current_scope.addItems(['Top 6', 'Top 10', 'All'])
+        self._spike_mech_current_scope.currentTextChanged.connect(self._on_spike_mech_controls_changed)
+        layout.addWidget(self._spike_mech_current_scope)
 
-        # Store control widget reference
-        self._spike_zoomer_widget = control_widget
-        # Disconnect signal when widget is destroyed to prevent C++ object deletion error
-        # Use weakref to avoid reference cycles
-        import weakref
-        self_ref = weakref.ref(self)
-        def _cleanup_zoomer():
-            try:
-                obj = self_ref()
-                if obj is not None and hasattr(obj, '_spike_zoomer'):
-                    try:
-                        obj._spike_zoomer.valueChanged.disconnect(obj._on_spike_zoomer_changed)
-                    except (RuntimeError, TypeError, SystemError):
-                        pass  # Widget already destroyed or signal not connected
-            except Exception:
-                pass  # Ignore any errors during cleanup
-        control_widget.destroyed.connect(_cleanup_zoomer)
+        self._spike_mech_normalize = QCheckBox('Normalize currents')
+        self._spike_mech_normalize.setChecked(True)
+        self._spike_mech_normalize.stateChanged.connect(self._on_spike_mech_controls_changed)
+        layout.addWidget(self._spike_mech_normalize)
 
-        # Store spike data for zoomer
-        self._spike_zoomer_data = None  # Will store (t, v, spike_times)
+        layout.addStretch(1)
+        hint = QLabel('Click a spike in the overview to drive all lower panels.')
+        hint.setStyleSheet('color:#A6ADC8; font-size:11px;')
+        layout.addWidget(hint)
 
         return _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Mechanism'),
-            extra_widget=control_widget,
+            extra_widget=controls,
             scroll_canvas=True,
-            min_canvas_height=1180,
+            min_canvas_height=1600,
         )
 
     def _build_tab_currents(self) -> QWidget:
         # Refactored: Single large plot with checkboxes for toggling individual currents
         self.fig_currents, cvs = _mpl_fig(1, 1)
         self.ax_currents = self.fig_currents.add_subplot(1, 1, 1)
-        self.fig_currents.set_tight_layout({'pad': 2.5})
+        _set_tight_layout_engine(self.fig_currents, pad=2.5)
         self.cvs_currents = cvs
         self._tab_figures['Currents'] = self.fig_currents
 
@@ -1026,7 +1014,7 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_kymo(self) -> QWidget:
         self.fig_kymo, cvs = _mpl_fig(2, 1)
         self._kymo_axes = [self.fig_kymo.add_subplot(2, 1, k) for k in range(1, 3)]
-        self.fig_kymo.set_tight_layout({'pad': 2.5})
+        _set_tight_layout_engine(self.fig_kymo, pad=2.5)
         self._kymo_cbar1 = None
         self._kymo_cbar2 = None
         self._kymo_im1 = None
@@ -1073,7 +1061,7 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_spike_shape(self) -> QWidget:
         self.fig_spike_shape, cvs = _mpl_fig(1, 1)
         self.ax_spike_shape = self.fig_spike_shape.add_subplot(1, 1, 1)
-        self.fig_spike_shape.set_tight_layout({'pad': 2.5})
+        _set_tight_layout_engine(self.fig_spike_shape, pad=2.5)
         self.cvs_spike_shape = cvs
         self._tab_figures['Spike Shape'] = self.fig_spike_shape
         self._spike_shape_init_done = False
@@ -1165,6 +1153,7 @@ class AnalyticsWidget(QTabWidget):
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Shape'),
             extra_widget=selection_widget,
+            scroll_canvas=True,
             min_canvas_height=680,
         )
 
@@ -1219,7 +1208,7 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_poincare(self) -> QWidget:
         self.fig_poincare, cvs = _mpl_fig(1, 1)
         self.ax_poincare = self.fig_poincare.add_subplot(1, 1, 1)
-        self.fig_poincare.set_tight_layout({'pad': 2.5})
+        _set_tight_layout_engine(self.fig_poincare, pad=2.5)
         self.cvs_poincare = cvs
         self._tab_figures['Poincare (ISI)'] = self.fig_poincare
         self._poincare_init_done = False
@@ -1290,7 +1279,7 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_spectro(self) -> QWidget:
         self.fig_spectro, cvs = _mpl_fig(2, 1)
         self.ax_spectro = [self.fig_spectro.add_subplot(2, 1, k) for k in range(1, 3)]
-        self.fig_spectro.set_tight_layout({'pad': 2.5})
+        _set_tight_layout_engine(self.fig_spectro, pad=2.5)
         self.cvs_spectro = cvs
         self._tab_figures['Spectrogram'] = self.fig_spectro
         self._spectro_cbar = None
@@ -1307,7 +1296,7 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_impedance(self) -> QWidget:
         self.fig_impedance, cvs = _mpl_fig(2, 1)
         self.ax_impedance = [self.fig_impedance.add_subplot(2, 1, k) for k in range(1, 3)]
-        self.fig_impedance.set_tight_layout({'pad': 2.5})
+        _set_tight_layout_engine(self.fig_impedance, pad=2.5)
         self.cvs_impedance = cvs
         self._tab_figures['Impedance'] = self.fig_impedance
         self._impedance_lines: dict[str, object] = {}
@@ -1315,13 +1304,90 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Impedance'))
 
     def _build_tab_chaos(self) -> QWidget:
-        self.fig_chaos, cvs = _mpl_fig(1, 1)
-        self.ax_chaos = self.fig_chaos.add_subplot(1, 1, 1)
+        self.fig_chaos, cvs = _mpl_fig(3, 1, figsize=(14, 18))
+        self.ax_chaos = [self.fig_chaos.add_subplot(3, 1, k) for k in range(1, 4)]
+        _set_tight_layout_engine(self.fig_chaos, pad=3.0, h_pad=1.0, w_pad=0.8)
         self.cvs_chaos = cvs
         self._tab_figures['Chaos & LLE'] = self.fig_chaos
-        self._chaos_lines = {}
-        self._chaos_texts = {}
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Chaos & LLE'))
+        self._chaos_force_enabled = getattr(self, '_chaos_force_enabled', False)
+        self._chaos_selected_k = 0
+        self._chaos_selected_pair = 0
+        self._chaos_analysis = None
+        self._chaos_click_cid = self.cvs_chaos.mpl_connect('button_press_event', self._on_chaos_plot_clicked)
+
+        from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpinBox, QDoubleSpinBox, QComboBox
+        controls = QWidget()
+        layout = QHBoxLayout(controls)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        def _add_label(text_label: str):
+            lbl = QLabel(text_label)
+            lbl.setStyleSheet('color:#CDD6F4; font-size:11px;')
+            layout.addWidget(lbl)
+            return lbl
+
+        _add_label('Embed')
+        self._chaos_embed_spin = QSpinBox()
+        self._chaos_embed_spin.setRange(2, 8)
+        self._chaos_embed_spin.setValue(3)
+        self._chaos_embed_spin.valueChanged.connect(self._on_chaos_controls_changed)
+        layout.addWidget(self._chaos_embed_spin)
+
+        _add_label('Lag')
+        self._chaos_lag_spin = QSpinBox()
+        self._chaos_lag_spin.setRange(1, 20)
+        self._chaos_lag_spin.setValue(2)
+        self._chaos_lag_spin.valueChanged.connect(self._on_chaos_controls_changed)
+        layout.addWidget(self._chaos_lag_spin)
+
+        _add_label('Fit start')
+        self._chaos_fit_start_spin = QDoubleSpinBox()
+        self._chaos_fit_start_spin.setRange(0.0, 500.0)
+        self._chaos_fit_start_spin.setDecimals(1)
+        self._chaos_fit_start_spin.setValue(5.0)
+        self._chaos_fit_start_spin.valueChanged.connect(self._on_chaos_controls_changed)
+        layout.addWidget(self._chaos_fit_start_spin)
+
+        _add_label('Fit end')
+        self._chaos_fit_end_spin = QDoubleSpinBox()
+        self._chaos_fit_end_spin.setRange(1.0, 1000.0)
+        self._chaos_fit_end_spin.setDecimals(1)
+        self._chaos_fit_end_spin.setValue(40.0)
+        self._chaos_fit_end_spin.valueChanged.connect(self._on_chaos_controls_changed)
+        layout.addWidget(self._chaos_fit_end_spin)
+
+        _add_label('Min sep')
+        self._chaos_sep_spin = QDoubleSpinBox()
+        self._chaos_sep_spin.setRange(0.0, 500.0)
+        self._chaos_sep_spin.setDecimals(1)
+        self._chaos_sep_spin.setValue(10.0)
+        self._chaos_sep_spin.valueChanged.connect(self._on_chaos_controls_changed)
+        layout.addWidget(self._chaos_sep_spin)
+
+        _add_label('Pair')
+        self._chaos_pair_mode = QComboBox()
+        self._chaos_pair_mode.addItems(['Representative', 'First pair', 'Pair index'])
+        self._chaos_pair_mode.currentTextChanged.connect(self._on_chaos_controls_changed)
+        layout.addWidget(self._chaos_pair_mode)
+
+        self._chaos_pair_spin = QSpinBox()
+        self._chaos_pair_spin.setRange(1, 1)
+        self._chaos_pair_spin.valueChanged.connect(self._on_chaos_controls_changed)
+        layout.addWidget(self._chaos_pair_spin)
+
+        layout.addStretch(1)
+        tip = QLabel('Click the divergence curve to inspect a specific separation horizon.')
+        tip.setStyleSheet('color:#A6ADC8; font-size:11px;')
+        layout.addWidget(tip)
+
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Chaos & LLE'),
+            extra_widget=controls,
+            scroll_canvas=True,
+            min_canvas_height=1280,
+        )
 
     def _build_tab_modulation(self) -> QWidget:
         self.fig_mod, cvs = _mpl_fig(1, 1)
@@ -1338,13 +1404,13 @@ class AnalyticsWidget(QTabWidget):
                                                  transform=self.ax_mod.transAxes, fontsize=12, color='#666666', visible=False)
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def update_analytics(self, result):
         """Update all already-built tabs from a SimulationResult.
 
-        Lazy tabs that haven't been visited yet are skipped â€” their guard
+        Lazy tabs that haven't been visited yet are skipped — their guard
         at the top of each _update_* method returns immediately if the
         corresponding figure attribute doesn't exist yet.  They will be
         populated in _on_tab_changed when the user first clicks the tab.
@@ -1356,10 +1422,10 @@ class AnalyticsWidget(QTabWidget):
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
 
-        # Tab 0 â€” always built
+        # Tab 0 — always built
         self._update_passport(result, stats)
 
-        # Tabs 1â€“17 â€” each guard-checks hasattr(self, 'fig_*') and returns
+        # Tabs 1–17 — each guard-checks hasattr(self, 'fig_*') and returns
         # early if the canvas hasn't been created yet.
         self._update_spike_mechanism(result, stats)
         self._update_phase(result, stats)
@@ -1386,6 +1452,7 @@ class AnalyticsWidget(QTabWidget):
         stats = full_analysis(self._last_result, compute_lyapunov=True)
         self._last_stats = stats
         self._update_passport(self._last_result, stats)
+        self._chaos_force_enabled = True
 
         # Force-build chaos tab if not visited yet, using the robust helper
         self._ensure_built('_build_tab_chaos')
@@ -1401,9 +1468,9 @@ class AnalyticsWidget(QTabWidget):
         if hasattr(self, 'cvs_chaos'):
             self.cvs_chaos.draw()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  0 â€” NEURON PASSPORT
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  0 — NEURON PASSPORT
+    # ─────────────────────────────────────────────────────────────────
     def _update_passport(self, result, stats: dict):
         cfg = result.config
         ch = cfg.channels
@@ -1636,7 +1703,7 @@ class AnalyticsWidget(QTabWidget):
         if not self._impedance_lines:
             self._impedance_lines["zmag"] = ax_mag.plot([], [], color="#2E86DE", lw=1.8, label="|Z(f)|")[0]
             self._impedance_lines["fres"] = ax_mag.axvline(0.0, color="#E67E22", ls="--", lw=1.2, visible=False)
-            self._impedance_lines["zph"] = ax_phase.plot([], [], color="#8E44AD", lw=1.5, label="â Z(f)")[0]
+            self._impedance_lines["zph"] = ax_phase.plot([], [], color="#8E44AD", lw=1.5, label="angle Z(f)")[0]
             self._impedance_lines["zero"] = ax_phase.axhline(0.0, color="#7f8c8d", lw=0.8, ls=":")
 
         if not self._impedance_texts:
@@ -1660,7 +1727,7 @@ class AnalyticsWidget(QTabWidget):
             self._impedance_texts["mag"].set_visible(True)
             self._impedance_texts["phase"].set_text("Need dynamic stimulus content")
             self._impedance_texts["phase"].set_visible(True)
-            _configure_ax_interactive(ax_mag, title="Impedance Magnitude", xlabel="Frequency (Hz)", ylabel="|Z| (kÎ©Â·cmÂ˛)", show_legend=False)
+            _configure_ax_interactive(ax_mag, title="Impedance Magnitude", xlabel="Frequency (Hz)", ylabel="|Z| (kΩ·cmÂ˛)", show_legend=False)
             _configure_ax_interactive(ax_phase, title="Impedance Phase", xlabel="Frequency (Hz)", ylabel="Phase (deg)", show_legend=False)
             self.cvs_impedance.draw_idle()
             return
@@ -1682,9 +1749,9 @@ class AnalyticsWidget(QTabWidget):
         ax_mag.autoscale_view()
         _configure_ax_interactive(
             ax_mag,
-            title=f"Membrane Impedance |Z(f)|  (peak={zres:.2f} kÎ©Â·cmÂ˛ @ {fres:.2f} Hz)" if np.isfinite(fres) else "Membrane Impedance |Z(f)|",
+            title=f"Membrane Impedance |Z(f)|  (peak={zres:.2f} kΩ·cmÂ˛ @ {fres:.2f} Hz)" if np.isfinite(fres) else "Membrane Impedance |Z(f)|",
             xlabel="Frequency (Hz)",
-            ylabel="|Z| (kÎ©Â·cmÂ˛)",
+            ylabel="|Z| (kΩ·cmÂ˛)",
             show_legend=True,
         )
 
@@ -1851,9 +1918,9 @@ class AnalyticsWidget(QTabWidget):
         self.ax_mod.set_title("Spike Phase-Locking (Firing Rate vs LFP Phase)", fontsize=11, fontweight='bold', pad=15)
         self.cvs_mod.draw_idle()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  2 â€” GATE DYNAMICS
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  2 — GATE DYNAMICS
+    # ─────────────────────────────────────────────────────────────────
     def _update_gates(self, result):
         """
         Plot gate-variable time series overlaid with soma membrane potential and update interactive checkbox controls.
@@ -1957,9 +2024,9 @@ class AnalyticsWidget(QTabWidget):
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_gates(self._last_result)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  2.5 â€” CHANNEL CURRENTS (NEW)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  2.5 — CHANNEL CURRENTS (NEW)
+    # ─────────────────────────────────────────────────────────────────
     def _update_currents(self, result):
         """Plot channel currents with membrane potential overlay on single plot with checkboxes."""
         if not hasattr(self, 'fig_currents'):
@@ -2059,7 +2126,7 @@ class AnalyticsWidget(QTabWidget):
             ylabel="V (mV)",
             show_legend=True,
         )
-        self._currents_ax2.set_ylabel("Current (ÂµA/cmÂ˛)", fontsize=10, fontweight="bold")
+        self._currents_ax2.set_ylabel("Current (µA/cmÂ˛)", fontsize=10, fontweight="bold")
 
         self.cvs_currents.draw_idle()
 
@@ -2069,363 +2136,319 @@ class AnalyticsWidget(QTabWidget):
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_currents(self._last_result)
 
-    def _init_spike_mechanism_artists(self) -> None:
-        """
-        Initialize and cache matplotlib artists used by the Spike Mechanism tab.
-        
-        Creates empty line artists and text placeholders for the three-row spike-mechanism figure and stores them on the instance so subsequent updates can reuse and update the artists rather than recreate them. Specifically:
-        - Row 1: soma voltage line, spike-peak markers, Nernst E_Ca line, a secondary y-axis and a Ca_i scatter/line.
-        - Row 2: net current line, an explanatory textbox, and a centered error text placeholder.
-        - Row 3: a centered error text placeholder for the stacked-bar contribution axes.
-        
-        Also sets `self._spike_mech_ax2b` for the twin y-axis and marks `self._spike_mech_init_done = True`.
-        """
-        if self._spike_mech_init_done:
+    def _on_chaos_controls_changed(self, *_args):
+        if getattr(self, '_last_result', None) is not None and getattr(self, '_chaos_force_enabled', False):
+            self._update_chaos(self._last_result, self._last_stats or {})
+
+    def _chaos_control_values(self) -> dict:
+        return {
+            'embedding_dim': int(self._chaos_embed_spin.value()) if hasattr(self, '_chaos_embed_spin') else 3,
+            'lag_steps': int(self._chaos_lag_spin.value()) if hasattr(self, '_chaos_lag_spin') else 2,
+            'fit_start_ms': float(self._chaos_fit_start_spin.value()) if hasattr(self, '_chaos_fit_start_spin') else 5.0,
+            'fit_end_ms': float(self._chaos_fit_end_spin.value()) if hasattr(self, '_chaos_fit_end_spin') else 40.0,
+            'min_separation_ms': float(self._chaos_sep_spin.value()) if hasattr(self, '_chaos_sep_spin') else 10.0,
+        }
+
+    def _on_chaos_plot_clicked(self, event):
+        if not hasattr(self, 'ax_chaos') or self._chaos_analysis is None:
             return
-        ax1, ax2, ax3 = self.ax_spike_mech
+        if event.inaxes != self.ax_chaos[0] or event.xdata is None:
+            return
+        t = np.asarray(self._chaos_analysis.get('ftle_time_ms', []), dtype=float)
+        if len(t) == 0:
+            return
+        self._chaos_selected_k = int(np.argmin(np.abs(t - float(event.xdata))))
+        if getattr(self, '_last_result', None) is not None:
+            self._update_chaos(self._last_result, self._last_stats or {})
 
-        # Row 1: Voltage trace with peaks and calcium overlay
-        soma_color = PLOT_THEMES.get("Default", PLOT_THEMES["Default"]).get("soma", "#4080FF")
-        self._spike_mech_lines["ax1_vm"] = ax1.plot([], [], color=soma_color, lw=2.0, label="V_soma")[0]
-        self._spike_mech_lines["ax1_peaks"] = ax1.plot([], [], linestyle="None", marker="o", markersize=4.0, color="#AA3377", label="spike peaks")[0]
-        self._spike_mech_lines["ax1_eca"] = ax1.plot([], [], ":", color="#FF7F0E", lw=1.5, label="E_Ca (Nernst)", alpha=0.8)[0]
-        self._spike_mech_ax2b = ax1.twinx()
-        self._spike_mech_lines["ax1_ca"] = self._spike_mech_ax2b.plot([], [], "s--", color="#D62728", lw=1.4, label="Ca_i@spike")[0]
+    def _chaos_pair_index(self, analysis: dict) -> int:
+        pair_i = np.asarray(analysis.get('pair_i', []), dtype=int)
+        if len(pair_i) == 0:
+            return 0
+        if hasattr(self, '_chaos_pair_spin'):
+            self._chaos_pair_spin.blockSignals(True)
+            self._chaos_pair_spin.setRange(1, max(1, len(pair_i)))
+            self._chaos_pair_spin.blockSignals(False)
+        mode = self._chaos_pair_mode.currentText() if hasattr(self, '_chaos_pair_mode') else 'Representative'
+        if mode == 'First pair':
+            return 0
+        if mode == 'Pair index':
+            return max(0, min(len(pair_i) - 1, int(self._chaos_pair_spin.value()) - 1))
+        return len(pair_i) // 2
 
-        # Row 2: Channel activity with explanation
-        self._spike_mech_lines["ax2_inet"] = ax2.plot([], [], color="k", lw=1.0, alpha=0.3, label="I_net")[0]
-        self._spike_mech_texts["ax2_reasons"] = ax2.text(
-            0.01, 0.02, "", transform=ax2.transAxes, fontsize=8.5, color="#333333",
-            bbox=dict(boxstyle="round,pad=0.25", facecolor="#F8F8F8", edgecolor="#CCCCCC", alpha=0.9),
+    def _clear_chaos_axes(self, message: str):
+        if not hasattr(self, 'ax_chaos'):
+            return
+        titles = ['Trajectory divergence', 'Delay-embedded attractor', 'Source trace']
+        for ax, title in zip(self.ax_chaos, titles):
+            ax.clear()
+            ax.text(0.5, 0.5, message, ha='center', va='center', transform=ax.transAxes, fontsize=11, color='#89B4FA')
+            _configure_ax_interactive(ax, title=title, xlabel='', ylabel='', show_legend=False)
+        self.cvs_chaos.draw_idle()
+
+    def _update_chaos(self, result, stats: dict):
+        if not hasattr(self, 'fig_chaos'):
+            return
+        from core.analysis import estimate_ftle_lle
+
+        if not getattr(self, '_chaos_force_enabled', False):
+            self._clear_chaos_axes("LLE not computed. Click 'Compute LLE' to build the interactive analysis.")
+            return
+
+        params = self._chaos_control_values()
+        analysis = estimate_ftle_lle(np.asarray(result.v_soma, dtype=float), np.asarray(result.t, dtype=float), **params)
+        self._chaos_analysis = analysis
+
+        t_div = np.asarray(analysis.get('ftle_time_ms', []), dtype=float)
+        div = np.asarray(analysis.get('ftle_log_divergence', []), dtype=float)
+        pair_i = np.asarray(analysis.get('pair_i', []), dtype=int)
+        pair_j = np.asarray(analysis.get('pair_j', []), dtype=int)
+        emb = np.asarray(analysis.get('embedding', np.empty((0, 0))), dtype=float)
+        if len(t_div) == 0 or len(div) == 0 or len(pair_i) == 0 or emb.size == 0:
+            self._clear_chaos_axes('No usable divergence window was found for this simulation.')
+            return
+
+        ax_div, ax_attr, ax_trace = self.ax_chaos
+        ax_div.clear(); ax_attr.clear(); ax_trace.clear()
+
+        self._chaos_selected_k = max(0, min(len(t_div) - 1, int(getattr(self, '_chaos_selected_k', 0))))
+        selected_pair = self._chaos_pair_index(analysis)
+        self._chaos_selected_pair = selected_pair
+        k = self._chaos_selected_k
+        pair_span = min(k + 1, max(1, emb.shape[0] - max(pair_i[selected_pair], pair_j[selected_pair])))
+
+        ax_div.plot(t_div, div, color='#89B4FA', lw=2.0, label='Trajectory divergence')
+        ax_div.scatter([t_div[k]], [div[k]], color='#F9E2AF', s=60, zorder=5, label='Selected horizon')
+        fit_start = params['fit_start_ms']; fit_end = params['fit_end_ms']
+        ax_div.axvspan(fit_start, fit_end, color='#A6E3A1', alpha=0.12, label='Fit window')
+        fit_mask = (t_div >= fit_start) & (t_div <= fit_end)
+        if np.sum(fit_mask) >= 2 and np.isfinite(analysis.get('lle_per_ms', np.nan)):
+            coeffs = np.polyfit(t_div[fit_mask], div[fit_mask], 1)
+            ax_div.plot(t_div[fit_mask], np.polyval(coeffs, t_div[fit_mask]), '--', color='#F38BA8', lw=2.0, label='Linear trend')
+        summary = (
+            f"class = {stats.get('lyapunov_class', 'n/a')}\n"
+            f"LLE = {analysis.get('lle_per_s', np.nan):+.3f} 1/s\n"
+            f"pairs = {int(analysis.get('valid_pairs', 0))}\n"
+            f"selected k = {k}"
         )
-        # Initialize centered error text for ax2
-        self._spike_mech_texts["ax2_error"] = ax2.text(
-            0.5, 0.5, "", ha='center', va='center', transform=ax2.transAxes, fontsize=12,
-            visible=False
-        )
+        ax_div.text(0.02, 0.96, summary, transform=ax_div.transAxes, ha='left', va='top', fontsize=10,
+                    bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4')
+        _configure_ax_interactive(ax_div, title='Lyapunov Exponent (Trajectory Separation)', xlabel='Time (ms)', ylabel='Log divergence ln(d)', show_legend=True)
 
-        # Row 3: Current contribution at threshold (stacked bar chart)
-        self._spike_mech_texts["ax3_error"] = ax3.text(
-            0.5, 0.5, "", ha='center', va='center', transform=ax3.transAxes, fontsize=12,
-            visible=False
-        )
+        dims = emb.shape[1]
+        x_idx = 0
+        y_idx = 1 if dims > 1 else 0
+        ax_attr.plot(emb[:, x_idx], emb[:, y_idx], color='#6C7086', alpha=0.4, lw=1.0, label='Embedded attractor')
+        i0 = int(pair_i[selected_pair])
+        j0 = int(pair_j[selected_pair])
+        seg_i = emb[i0:i0 + pair_span]
+        seg_j = emb[j0:j0 + pair_span]
+        if len(seg_i) > 0:
+            ax_attr.plot(seg_i[:, x_idx], seg_i[:, y_idx], color='#89B4FA', lw=2.5, label='Reference segment')
+            ax_attr.scatter([seg_i[0, x_idx]], [seg_i[0, y_idx]], color='#89B4FA', s=50)
+        if len(seg_j) > 0:
+            ax_attr.plot(seg_j[:, x_idx], seg_j[:, y_idx], color='#F38BA8', lw=2.5, label='Neighbor segment')
+            ax_attr.scatter([seg_j[0, x_idx]], [seg_j[0, y_idx]], color='#F38BA8', s=50)
+        _configure_ax_interactive(ax_attr, title='Delay-embedded attractor and selected pair', xlabel='x(t)', ylabel='x(t + lag)', show_legend=True)
 
-        self._spike_mech_init_done = True
+        t_full = np.asarray(result.t, dtype=float)
+        v_full = np.asarray(result.v_soma, dtype=float)
+        ax_trace.plot(t_full, v_full, color='#89B4FA', lw=1.4, label='V_soma')
+        dt_ms = float(analysis.get('dt_ms', np.median(np.diff(t_full)) if len(t_full) > 1 else 0.1))
+        span_ms = pair_span * dt_ms
+        start_i_ms = t_full[min(i0, len(t_full) - 1)]
+        start_j_ms = t_full[min(j0, len(t_full) - 1)]
+        ax_trace.axvspan(start_i_ms, start_i_ms + span_ms, color='#89B4FA', alpha=0.18, label='Reference source')
+        ax_trace.axvspan(start_j_ms, start_j_ms + span_ms, color='#F38BA8', alpha=0.18, label='Neighbor source')
+        ax_trace.axvline(start_i_ms + k * dt_ms, color='#89B4FA', ls='--', lw=1.3)
+        ax_trace.axvline(start_j_ms + k * dt_ms, color='#F38BA8', ls='--', lw=1.3)
+        _configure_ax_interactive(ax_trace, title='Time-domain trace with selected divergence segment', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)
+
+        self.cvs_chaos.draw_idle()
+
+    def _spike_mech_current_limit(self) -> int | None:
+        if not hasattr(self, '_spike_mech_current_scope'):
+            return 6
+        text = self._spike_mech_current_scope.currentText()
+        if text == 'All':
+            return None
+        return 10 if text == 'Top 10' else 6
+
+    def _on_spike_mech_controls_changed(self, *_args):
+        if getattr(self, '_spike_mech_last_result', None) is not None and getattr(self, '_spike_mech_last_stats', None) is not None:
+            self._update_spike_mechanism(self._spike_mech_last_result, self._spike_mech_last_stats)
+
+    def _on_spike_mech_clicked(self, event):
+        if not hasattr(self, 'ax_spike_mech') or len(getattr(self, '_spike_mech_spike_times', [])) == 0:
+            return
+        if event.inaxes != self.ax_spike_mech[0] or event.xdata is None:
+            return
+        spike_times = np.asarray(self._spike_mech_spike_times, dtype=float)
+        idx = int(np.argmin(np.abs(spike_times - float(event.xdata))))
+        self._spike_mech_selected = idx
+        if hasattr(self, '_spike_zoomer'):
+            self._spike_zoomer.blockSignals(True)
+            self._spike_zoomer.setValue(idx + 1)
+            self._spike_zoomer.blockSignals(False)
+        if self._spike_mech_last_result is not None:
+            self._update_spike_mechanism(self._spike_mech_last_result, self._spike_mech_last_stats)
 
     def _update_spike_mechanism(self, result, stats: dict):
-        """Explain spike attenuation using per-spike ion/channel dynamics."""
         if not hasattr(self, 'fig_spike_mech'):
-            return  # tab not yet visited
-        from core.analysis import detect_spikes
+            return
+        from core.analysis import detect_spikes, extract_gate_traces, spike_threshold, spike_halfwidth, after_hyperpolarization
 
-        self._init_spike_mechanism_artists()
+        self._spike_mech_last_result = result
+        self._spike_mech_last_stats = stats
         t = np.asarray(result.t, dtype=float)
         v = np.asarray(result.v_soma, dtype=float)
-        ax1, ax2, ax3 = self.ax_spike_mech
-
+        ax1, ax2, ax3, ax4, ax5 = self.ax_spike_mech
         for ax in self.ax_spike_mech:
-            ax.set_axis_on()
-            ax.set_visible(True)
+            ax.clear()
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
-        n_sp = len(spike_times)
+        self._spike_mech_peak_idx = np.asarray(peak_idx, dtype=int)
+        self._spike_mech_spike_times = np.asarray(spike_times, dtype=float)
 
-        # Store spike data for zoomer
-        self._spike_zoomer_data = (t, v, spike_times)
-        # Update zoomer range
-        if hasattr(self, '_spike_zoomer'):
-            self._spike_zoomer.setRange(1, max(1, n_sp))
-
-        # Row 1: Voltage trace with peaks and calcium overlay
-        v_safe = _ensure_shape_compatible(v, t, "v_soma")
-        if v_safe is not None:
-            self._spike_mech_lines["ax1_vm"].set_data(t, v_safe)
-        else:
-            self._spike_mech_lines["ax1_vm"].set_data([], [])
-        if n_sp > 0 and v_safe is not None:
-            self._spike_mech_lines["ax1_peaks"].set_data(t[peak_idx], v_safe[peak_idx])
-            self._spike_mech_lines["ax1_peaks"].set_visible(True)
-        else:
-            self._spike_mech_lines["ax1_peaks"].set_data([], [])
-            self._spike_mech_lines["ax1_peaks"].set_visible(False)
-
-        # Add continuous calcium trace on secondary axis
-        if (result.ca_i is not None and
-            len(result.ca_i) > 0 and
-            result.ca_i.shape[0] > 0):
-            ca_nM = np.asarray(result.ca_i[0, :], dtype=float) * 1e6
-            ca_nM_safe = _ensure_shape_compatible(ca_nM, t, "ca_nM")
-            if ca_nM_safe is not None:
-                self._spike_mech_lines["ax1_ca"].set_data(t, ca_nM_safe)
-                self._spike_mech_lines["ax1_ca"].set_visible(True)
-                self._spike_mech_ax2b.set_ylabel("[CaÂ˛+]_i (nM)", fontsize=10, fontweight="bold", color="#D62728")
-                self._spike_mech_ax2b.tick_params(axis="y", labelcolor="#D62728")
-                self._spike_mech_ax2b.relim()
-                self._spike_mech_ax2b.autoscale_view()
-            else:
-                self._spike_mech_lines["ax1_ca"].set_data([], [])
-                self._spike_mech_lines["ax1_ca"].set_visible(False)
-
-            # Compute dynamic E_Ca Nernst potential
-            # E_Ca = (RT/zF) * ln([Ca]_out / [Ca]_in)
-            # At 37Â°C: RT/F = 26.7 mV, for Ca2+ (z=2): RT/(zF) = 13.35 mV
-            ca_in_M = np.asarray(result.ca_i[0, :], dtype=float)
-            ca_out_M = result.config.calcium.Ca_ext if hasattr(result.config.calcium, 'Ca_ext') else 2.0
-            RT_over_zF = 13.35  # mV at 37Â°C for Ca2+
-            e_ca = RT_over_zF * np.log(ca_out_M / (ca_in_M + 1e-12))
-            e_ca_safe = _ensure_shape_compatible(e_ca, t, "e_ca")
-            if e_ca_safe is not None:
-                self._spike_mech_lines["ax1_eca"].set_data(t, e_ca_safe)
-                self._spike_mech_lines["ax1_eca"].set_visible(True)
-            else:
-                self._spike_mech_lines["ax1_eca"].set_data([], [])
-                self._spike_mech_lines["ax1_eca"].set_visible(False)
-        else:
-            self._spike_mech_lines["ax1_ca"].set_data([], [])
-            self._spike_mech_lines["ax1_ca"].set_visible(False)
-            self._spike_mech_ax2b.set_visible(False)
-            self._spike_mech_lines["ax1_eca"].set_data([], [])
-            self._spike_mech_lines["ax1_eca"].set_visible(False)
-
-        _configure_ax_interactive(
-            ax1,
-            title=f"Spike Peaks Timeline (N={n_sp})",
-            xlabel="Time (ms)",
-            ylabel="V (mV)",
-            show_legend=True,
-        )
-
-        # Row 2: Channel activity with explanation
-        if n_sp < 2:
-            self._spike_mech_texts["ax2_reasons"].set_text("Channel activity shown below.\n(Attenuation analysis requires â‰Ą2 spikes)")
-            self._spike_mech_texts["ax2_error"].set_visible(False)
-            # Continue to plot channel activity even with < 2 spikes
-
-        # Hide error text when we have enough spikes
-        self._spike_mech_texts["ax2_error"].set_visible(False)
-
-        # Time-resolved channel activity to explain attenuation causes
-        dt = float(np.mean(np.diff(t))) if len(t) > 1 else 0.1
-        smooth_pts = max(3, int(round(2.0 / max(dt, 1e-6))))
-        if smooth_pts % 2 == 0:
-            smooth_pts += 1
-
-        # Cache kernel for efficiency
-        _smooth_kernel = np.ones(smooth_pts) / smooth_pts
-
-        def _smooth(x: np.ndarray) -> np.ndarray:
-            """Optimized smoothing using pre-computed kernel."""
-            if len(x) < smooth_pts or smooth_pts <= 1:
-                return x
-            return np.convolve(x, _smooth_kernel, mode='same')
-
-        # Plot normalized channel activity
-        curr_candidates = ["Na", "K", "ICa", "IA", "SK", "Ih", "Leak"]
-        
-        # Safety check for currents dictionary
-        if not hasattr(result, 'currents') or not isinstance(result.currents, dict):
-            logging.error("SimulationResult missing or invalid currents attribute")
+        if len(peak_idx) == 0:
+            for ax, title in zip(self.ax_spike_mech, ['Overview', 'Aligned spike', 'Currents', 'Gates and state', 'Interpretation']):
+                ax.text(0.5, 0.5, 'No spikes detected for the current trace.', ha='center', va='center', transform=ax.transAxes, fontsize=11)
+                _configure_ax_interactive(ax, title=title, xlabel='', ylabel='', show_legend=False)
+            self.cvs_spike_mech.draw_idle()
             return
-            
-        # Handle 2D current arrays (n_comp, n_time) - sum across compartments
-        traces = {}
-        for k in curr_candidates:
-            if k in result.currents:
-                tr = np.asarray(result.currents[k], dtype=float)
-                # If 2D array, sum across spatial dimension to get total current
-                if tr.ndim == 2:
-                    tr = np.sum(tr, axis=0)
-                traces[k] = tr
-        
-        for line in self._spike_mech_norm_lines.values():
-            line.set_data([], [])
-            line.set_visible(False)
-        
-        for name, tr in traces.items():
-            if name not in self._spike_mech_norm_lines:
-                color = CHAN_COLORS.get(name, '#888888')
-                self._spike_mech_norm_lines[name] = ax2.plot([], [], color=color, lw=1.5, alpha=0.8, label=name)[0]
-            # Normalize and smooth
-            tr_norm = np.abs(tr) / (np.max(np.abs(tr)) + 1e-12)
-            tr_smooth = _smooth(tr_norm)
-            tr_smooth_safe = _ensure_shape_compatible(tr_smooth, t, f"trace_{name}")
-            if tr_smooth_safe is not None:
-                self._spike_mech_norm_lines[name].set_data(t, tr_smooth_safe)
-                self._spike_mech_norm_lines[name].set_visible(True)
-            else:
-                self._spike_mech_norm_lines[name].set_data([], [])
-                self._spike_mech_norm_lines[name].set_visible(False)
 
-        # Compute and plot net current: I_net = sum of all ionic currents
-        if traces:
-            i_net = np.zeros_like(t)
-            for tr in traces.values():
-                i_net += tr
-            i_net_safe = _ensure_shape_compatible(i_net, t, "i_net")
-            if i_net_safe is not None:
-                self._spike_mech_lines["ax2_inet"].set_data(t, i_net_safe)
-                self._spike_mech_lines["ax2_inet"].set_visible(True)
-            else:
-                self._spike_mech_lines["ax2_inet"].set_data([], [])
-                self._spike_mech_lines["ax2_inet"].set_visible(False)
+        self._spike_mech_selected = max(0, min(len(peak_idx) - 1, int(getattr(self, '_spike_mech_selected', 0))))
+        if hasattr(self, '_spike_zoomer'):
+            self._spike_zoomer.blockSignals(True)
+            self._spike_zoomer.setRange(1, len(peak_idx))
+            self._spike_zoomer.setValue(self._spike_mech_selected + 1)
+            self._spike_zoomer.blockSignals(False)
 
-        _configure_ax_interactive(
-            ax2,
-            title="Time-Resolved Channel Activity (Normalized)",
-            xlabel="Time (ms)",
-            ylabel="|I|/max(|I|)",
-            show_legend=True,
-        )
+        pk = int(peak_idx[self._spike_mech_selected])
+        spike_t = float(t[pk])
+        dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.1
+        pre_ms = 4.0
+        post_ms = 8.0
+        lo = max(0, pk - int(pre_ms / max(dt_ms, 1e-9)))
+        hi = min(len(t), pk + int(post_ms / max(dt_ms, 1e-9)))
+        t_win = t[lo:hi] - spike_t
+        v_win = v[lo:hi]
 
-        # Add explanation text - data-driven based on actual channels
-        active_channels = list(traces.keys())
-        if n_sp >= 2:
-            # Compare first vs last spike
-            v_first_peak = v[peak_idx[0]]
-            v_last_peak = v[peak_idx[-1]]
-            attenuation_pct = 100.0 * (v_first_peak - v_last_peak) / abs(v_first_peak) if v_first_peak != 0 else 0.0
-            explanation = (f"Spike attenuation: {attenuation_pct:.1f}% (first={v_first_peak:.1f}mV, last={v_last_peak:.1f}mV)\n"
-                          f"Active channels: {', '.join(active_channels)}\n"
-                          f"Attenuation mechanisms: Na+ inactivation, K+ activation")
-            if 'ICa' in active_channels or 'SK' in active_channels:
-                explanation += ", CaÂ˛+-dependent SK"
-            if 'IA' in active_channels:
-                explanation += ", A-type K+ adaptation"
+        ax1.plot(t, v, color='#89B4FA', lw=1.2, label='V_soma')
+        ax1.scatter(t[peak_idx], v[peak_idx], color='#F38BA8', s=22, label='Spike peaks', zorder=4)
+        ax1.axvspan(spike_t - pre_ms, spike_t + post_ms, color='#F9E2AF', alpha=0.18, label='Selected spike window')
+        ax1.axvline(spike_t, color='#F9E2AF', ls='--', lw=1.5)
+        _configure_ax_interactive(ax1, title='Spike overview', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)
+
+        dvdt_win = np.gradient(v_win, t_win) if len(t_win) > 1 else np.zeros_like(v_win)
+        ax2.plot(t_win, v_win, color='#89B4FA', lw=2.0, label='V aligned to peak')
+        ax2b = ax2.twinx()
+        ax2b.plot(t_win, dvdt_win, color='#F38BA8', lw=1.5, alpha=0.85, label='dV/dt')
+        thr = spike_threshold(v[lo:hi], t[lo:hi]) if len(t[lo:hi]) > 3 else np.nan
+        hw = spike_halfwidth(v[lo:hi], t[lo:hi], detect_algorithm='threshold_crossing') if len(t[lo:hi]) > 3 else np.nan
+        ahp = after_hyperpolarization(v[lo:hi], t[lo:hi], min(pk - lo, max(0, len(v_win) - 1))) if len(v_win) > 2 else np.nan
+        if np.isfinite(thr):
+            thr_idx = int(np.argmin(np.abs(v_win - thr)))
+            ax2.scatter([t_win[thr_idx]], [v_win[thr_idx]], color='#A6E3A1', s=45, zorder=5, label='Threshold')
+        ax2.scatter([0.0], [v[pk]], color='#F9E2AF', s=55, zorder=5, label='Peak')
+        if np.isfinite(ahp):
+            ahp_idx = int(np.argmin(v_win))
+            ax2.scatter([t_win[ahp_idx]], [v_win[ahp_idx]], color='#FAB387', s=45, zorder=5, label='AHP min')
+        ax2.set_ylabel('V (mV)')
+        ax2b.set_ylabel('dV/dt (mV/ms)')
+        ax2.set_title(f'Aligned spike waveform | threshold={thr:.2f} mV | half-width={hw:.2f} ms')
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        lines2b, labels2b = ax2b.get_legend_handles_labels()
+        ax2.legend(lines2 + lines2b, labels2 + labels2b, fontsize=9, loc='upper right')
+        ax2.grid(alpha=0.25)
+
+        current_limit = self._spike_mech_current_limit()
+        normalize = bool(self._spike_mech_normalize.isChecked()) if hasattr(self, '_spike_mech_normalize') else True
+        currents = {}
+        for name, curr in getattr(result, 'currents', {}).items():
+            arr = np.asarray(curr, dtype=float)
+            if arr.ndim == 2:
+                arr = np.sum(arr, axis=0)
+            if arr.shape[0] != len(t):
+                continue
+            window = arr[lo:hi]
+            if np.max(np.abs(window)) > 1e-9:
+                currents[name] = window
+        ranked = sorted(currents.items(), key=lambda kv: float(np.max(np.abs(kv[1]))), reverse=True)
+        if current_limit is not None:
+            ranked = ranked[:current_limit]
+        for name, arr in ranked:
+            y = np.asarray(arr, dtype=float)
+            if normalize:
+                y = y / (np.max(np.abs(y)) + 1e-12)
+            ax3.plot(t_win, y, lw=1.6, color=CHAN_COLORS.get(name, '#888888'), label=name)
+        _configure_ax_interactive(ax3, title='Current decomposition around selected spike', xlabel='Time from peak (ms)', ylabel='Normalized current' if normalize else 'Current (uA/cm^2)', show_legend=True)
+
+        gates = extract_gate_traces(result)
+        gate_items = sorted(gates.items(), key=lambda kv: float(np.nanmax(kv[1]) - np.nanmin(kv[1])), reverse=True)
+        for name, arr in gate_items[:5]:
+            arr = np.asarray(arr, dtype=float)
+            if arr.shape[0] == len(t):
+                ax4.plot(t_win, arr[lo:hi], lw=1.5, label=f'gate {name}', color=GATE_COLORS.get(name, '#888888'))
+        if getattr(result, 'ca_i', None) is not None:
+            ca_arr = np.asarray(result.ca_i, dtype=float)
+            if ca_arr.ndim == 2:
+                ca_arr = ca_arr[0, :]
+            ca_seg = ca_arr[lo:hi]
+            if np.max(np.abs(ca_seg)) > 0:
+                ax4.plot(t_win, ca_seg / (np.max(np.abs(ca_seg)) + 1e-12), '--', color='#F38BA8', label='Ca_i (norm)')
+        if getattr(result, 'atp_level', None) is not None:
+            atp_arr = np.asarray(result.atp_level, dtype=float)
+            if atp_arr.ndim == 2:
+                atp_arr = atp_arr[0, :]
+            atp_seg = atp_arr[lo:hi]
+            if np.max(np.abs(atp_seg)) > 0:
+                ax4.plot(t_win, atp_seg / (np.max(np.abs(atp_seg)) + 1e-12), ':', color='#A6E3A1', label='ATP (norm)')
+        _configure_ax_interactive(ax4, title='Gate and state context', xlabel='Time from peak (ms)', ylabel='State / normalized pool', show_legend=True)
+
+        inward = []
+        outward = []
+        if ranked:
+            rel_idx = int(np.argmin(np.abs(t_win))) if len(t_win) else 0
+            for name, arr in ranked:
+                val = float(arr[rel_idx])
+                if val < 0:
+                    inward.append((name, abs(val)))
+                elif val > 0:
+                    outward.append((name, abs(val)))
+        inward.sort(key=lambda item: item[1], reverse=True)
+        outward.sort(key=lambda item: item[1], reverse=True)
+        inward_txt = ', '.join(name for name, _ in inward[:3]) or 'none'
+        outward_txt = ', '.join(name for name, _ in outward[:3]) or 'none'
+        summary_lines = [
+            f'Selected spike: {self._spike_mech_selected + 1} / {len(peak_idx)} at {spike_t:.2f} ms',
+            f'Peak voltage: {float(v[pk]):.2f} mV',
+            f'Threshold estimate: {thr:.2f} mV' if np.isfinite(thr) else 'Threshold estimate unavailable',
+            f'Half-width: {hw:.2f} ms' if np.isfinite(hw) else 'Half-width unavailable',
+            f'AHP minimum: {ahp:.2f} mV' if np.isfinite(ahp) else 'AHP minimum unavailable',
+            f'Dominant inward currents near peak: {inward_txt}',
+            f'Dominant outward currents near peak: {outward_txt}',
+        ]
+        if 'IM' in dict(ranked) or 'SK' in dict(ranked):
+            summary_lines.append('Interpretation: slow outward currents are shaping spike termination and post-spike recovery.')
+        elif 'IA' in dict(ranked):
+            summary_lines.append('Interpretation: A-type potassium current is likely delaying re-excitation and sharpening onset.')
         else:
-            explanation = (f"Single spike detected ({n_sp} spike).\n"
-                          f"Active channels: {', '.join(active_channels)}\n"
-                          f"Run longer simulation for attenuation analysis.")
-        self._spike_mech_texts["ax2_reasons"].set_text(explanation)
-
-        # Row 3: Current contribution at threshold (stacked bar chart)
-        ax3.clear()
-        if n_sp > 0 and traces:
-            # K-channel candidates for outward current analysis
-            k_channels = [name for name in ["K", "IA", "IM", "SK"] if name in traces]
-
-            if k_channels:
-                contributions = []
-                spike_indices = []
-
-                # For each spike, find time point where V = V_threshold
-                # Use -40mV as typical threshold or use spike onset
-                threshold_v = -40.0
-
-                for i, peak_i in enumerate(peak_idx):
-                    # Find threshold crossing before peak
-                    start_idx = max(0, peak_i - 20)
-                    threshold_idx = None
-
-                    for j in range(start_idx, peak_i):
-                        if v[j] >= threshold_v:
-                            threshold_idx = j
-                            break
-
-                    if threshold_idx is not None:
-                        # Calculate outward current contributions at threshold
-                        outward_currents = {}
-                        total_outward = 0.0
-
-                        for name in k_channels:
-                            current = traces[name][threshold_idx]
-                            if current > 0:  # Outward (positive) current
-                                outward_currents[name] = current
-                                total_outward += current
-
-                        # Calculate percentages
-                        if total_outward > 0:
-                            percentages = {name: 100.0 * val / total_outward for name, val in outward_currents.items()}
-                            contributions.append(percentages)
-                            spike_indices.append(i + 1)
-
-                # Plot stacked bar chart
-                if contributions:
-                    colors_list = [CHAN_COLORS.get(name, "#888888") for name in k_channels]
-
-                    # Prepare data for stacked bar chart
-                    n_bars = len(contributions)
-                    bottom = np.zeros(n_bars)
-
-                    for name in k_channels:
-                        heights = [contrib.get(name, 0) for contrib in contributions]
-                        ax3.bar(range(n_bars), heights, bottom=bottom, label=name, color=CHAN_COLORS.get(name, "#888888"), alpha=0.8)
-                        bottom += heights
-
-                    ax3.set_xticks(range(n_bars))
-                    ax3.set_xticklabels([f"#{idx}" for idx in spike_indices], rotation=45, ha='right')
-                    ax3.set_ylabel('Outward Current %')
-                    ax3.set_title('K-Channel Contribution at Threshold')
-                    ax3.legend(loc='upper right', fontsize=8)
-                    ax3.set_ylim(0, 100)
-                    ax3.grid(alpha=0.2, axis='y')
-                else:
-                    ax3.text(0.5, 0.5, 'No threshold crossings detected', ha='center', va='center',
-                           transform=ax3.transAxes, fontsize=10)
-            else:
-                ax3.text(0.5, 0.5, 'No K-channels available', ha='center', va='center',
-                       transform=ax3.transAxes, fontsize=10)
-        else:
-            ax3.text(0.5, 0.5, 'Need spikes for threshold analysis', ha='center', va='center',
-                   transform=ax3.transAxes, fontsize=10)
-
-        # â”€â”€ ATP Overlay (Metabolic Status) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        if hasattr(result, 'config') and result.config.metabolism.enable_dynamic_atp:
-            atp_data = None
-            if hasattr(result, 'atp_level') and result.atp_level is not None:
-                atp_data = result.atp_level[0, :] if result.n_comp > 1 else result.atp_level.flatten()
-
-            if atp_data is not None and len(atp_data) > 0:
-                # Get final ATP value
-                atp_final = float(atp_data[-1])
-                
-                # Determine color and warning
-                atp_color = '#FF6B6B' if atp_final < 0.5 else '#A6E3A1'
-                atp_text = f"Current ATP: {atp_final:.3f} mM"
-                if atp_final < 0.5:
-                    atp_text += "\nâš  METABOLIC EXHAUSTION"
-                
-                # Add text overlay in corner of ax1 (voltage trace)
-                if 'atp_overlay' not in self._spike_mech_texts:
-                    self._spike_mech_texts['atp_overlay'] = ax1.text(
-                        0.98, 0.02, atp_text,
-                        ha='right', va='bottom',
-                        transform=ax1.transAxes,
-                        fontsize=10, fontweight='bold',
-                        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor=atp_color)
-                    )
-                else:
-                    self._spike_mech_texts['atp_overlay'].set_text(atp_text)
-                    self._spike_mech_texts['atp_overlay'].set_color(atp_color)
+            summary_lines.append('Interpretation: classic Na/K balance dominates this spike waveform.')
+        ax5.axis('off')
+        ax5.text(0.02, 0.98, '\n'.join(summary_lines), ha='left', va='top', transform=ax5.transAxes, fontsize=11,
+                 bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.92), color='#CDD6F4')
 
         self.cvs_spike_mech.draw_idle()
 
     def _on_spike_zoomer_changed(self, spike_num: int):
-        """Handle spike zoomer spinbox change to zoom to specific spike."""
-        if self._spike_zoomer_data is None:
+        if len(getattr(self, '_spike_mech_peak_idx', [])) == 0:
             return
+        self._spike_mech_selected = max(0, min(len(self._spike_mech_peak_idx) - 1, int(spike_num) - 1))
+        if self._spike_mech_last_result is not None:
+            self._update_spike_mechanism(self._spike_mech_last_result, self._spike_mech_last_stats)
 
-        t, v, spike_times = self._spike_zoomer_data
-        n_sp = len(spike_times)
-
-        if spike_num < 1 or spike_num > n_sp:
-            return
-
-        spike_time = spike_times[spike_num - 1]
-        # Zoom to [spike_time - 2ms, spike_time + 5ms]
-        t_min = spike_time - 2.0
-        t_max = spike_time + 5.0
-
-        ax1, ax2, ax3 = self.ax_spike_mech
-        ax1.set_xlim(t_min, t_max)
-        ax2.set_xlim(t_min, t_max)
-        ax3.set_xlim(t_min, t_max) if n_sp > 0 else None
-
-        self.cvs_spike_mech.draw_idle()
-
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  3 â€” EQUILIBRIUM CURVES
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _update_equil(self, result):
         if not hasattr(self, 'fig_equil'):
             return  # tab not yet visited
@@ -2439,13 +2462,13 @@ class AnalyticsWidget(QTabWidget):
 
         ax1, ax2, ax3, ax4 = self.ax_equil
         if not self._equil_init_done:
-            self._equil_lines["m_inf"] = ax1.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='mâž (Na act)', alpha=0.9)[0]
-            self._equil_lines["h_inf"] = ax1.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='hâž (Na inact)', alpha=0.9)[0]
-            self._equil_lines["n_inf"] = ax1.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='nâž (K act)', alpha=0.9)[0]
+            self._equil_lines["m_inf"] = ax1.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='m_inf (Na act)', alpha=0.9)[0]
+            self._equil_lines["h_inf"] = ax1.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='h_inf (Na inact)', alpha=0.9)[0]
+            self._equil_lines["n_inf"] = ax1.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='n_inf (K act)', alpha=0.9)[0]
 
-            self._equil_lines["tau_m"] = ax2.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='Ď„â‚', alpha=0.9)[0]
-            self._equil_lines["tau_h"] = ax2.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='Ď„â‚•', alpha=0.9)[0]
-            self._equil_lines["tau_n"] = ax2.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='Ď„â‚™', alpha=0.9)[0]
+            self._equil_lines["tau_m"] = ax2.plot([], [], color=GATE_COLORS['m'], lw=2.5, label='tau_m', alpha=0.9)[0]
+            self._equil_lines["tau_h"] = ax2.plot([], [], color=GATE_COLORS['h'], lw=2.5, label='tau_h', alpha=0.9)[0]
+            self._equil_lines["tau_n"] = ax2.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='tau_n', alpha=0.9)[0]
 
             self._equil_lines["phase_m"] = ax3.plot([], [], color=GATE_COLORS['m'], lw=2, label='m (Na act)', alpha=0.9)[0]
             self._equil_lines["phase_h"] = ax3.plot([], [], color=GATE_COLORS['h'], lw=2, label='h (Na inact)', alpha=0.9)[0]
@@ -2454,14 +2477,14 @@ class AnalyticsWidget(QTabWidget):
             self._equil_lines["g_k"] = ax4.plot([], [], color=GATE_COLORS['n'], lw=2.5, label='g_K(t)', alpha=0.9)[0]
             self._equil_init_done = True
 
-        # x_inf(V) â€” improved layout
+        # x_inf(V) - improved layout
         self._equil_lines["m_inf"].set_data(V_rng, eq['m_inf'])
         self._equil_lines["h_inf"].set_data(V_rng, eq['h_inf'])
         self._equil_lines["n_inf"].set_data(V_rng, eq['n_inf'])
         active_opt_inf = set()
         for k in ('r_inf', 's_inf', 'u_inf', 'a_inf', 'b_inf'):
             if k in opt:
-                lbl = k.replace('_inf', 'âž')
+                lbl = k.replace('_inf', '_inf')
                 key = f"opt_{k}"
                 if key not in self._equil_lines:
                     self._equil_lines[key] = ax1.plot([], [], lw=1.8, ls='--', label=lbl, alpha=0.8)[0]
@@ -2473,10 +2496,10 @@ class AnalyticsWidget(QTabWidget):
         ax1.relim()
         ax1.autoscale_view()
         ax1.set_ylim(-0.05, 1.05)
-        _configure_ax_interactive(ax1, title='Steady-state gating (xâž)', 
-                                  xlabel='V (mV)', ylabel='xâž', show_legend=True)
+        _configure_ax_interactive(ax1, title='Steady-state gating (x_inf)',
+                                  xlabel='V (mV)', ylabel='x_inf', show_legend=True)
 
-        # Ď„(V) â€” main gating time constants
+        # tau(V) - main gating time constants
         self._equil_lines["tau_m"].set_data(V_rng, eq['tau_m'])
         self._equil_lines["tau_h"].set_data(V_rng, eq['tau_h'])
         self._equil_lines["tau_n"].set_data(V_rng, eq['tau_n'])
@@ -2494,7 +2517,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.relim()
         ax2.autoscale_view()
         _configure_ax_interactive(ax2, title=f'Time constants (Ď† = {phi:.2f})',
-                                  xlabel='V (mV)', ylabel='Ď„ (ms)', show_legend=True)
+                                  xlabel='V (mV)', ylabel='τ (ms)', show_legend=True)
 
         # Phase portrait V-m and V-h
         v_soma_safe = _ensure_shape_compatible(result.v_soma, result.y[result.n_comp, :], "v_soma_phase")
@@ -2514,7 +2537,7 @@ class AnalyticsWidget(QTabWidget):
             self._equil_lines["phase_h"].set_data([], [])
         ax3.relim()
         ax3.autoscale_view()
-        _configure_ax_interactive(ax3, title='V â€“ Gate Phase Portraits',
+        _configure_ax_interactive(ax3, title='V – Gate Phase Portraits',
                                   xlabel='V (mV)', ylabel='Gate variable', show_legend=True)
 
         # Effective conductances over time
@@ -2537,13 +2560,13 @@ class AnalyticsWidget(QTabWidget):
         ax4.relim()
         ax4.autoscale_view()
         _configure_ax_interactive(ax4, title='Effective Conductances',
-                                  xlabel='Time (ms)', ylabel='g (mS/cmÂ˛)', show_legend=True)
+                                  xlabel='Time (ms)', ylabel='g (mS/cm²)', show_legend=True)
 
         self.cvs_equil.draw_idle()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  4 â€” PHASE PLANE + NULLCLINES
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  4 — PHASE PLANE + NULLCLINES
+    # ─────────────────────────────────────────────────────────────────
     def _on_phase_y_changed(self, text: str):
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_phase(self._last_result, self._last_stats)
@@ -2722,7 +2745,7 @@ class AnalyticsWidget(QTabWidget):
         t  = result.t
         V  = result.v_all      # shape (N_comp, N_time)
 
-        # Build two axonal paths: soma â†’ Branch1 tip, soma â†’ Branch2 tip
+        # Build two axonal paths: soma -> Branch1 tip, soma -> Branch2 tip
         i_tr_s   = 1 + mc.N_ais
         i_branch = i_tr_s + mc.N_trunk
         i_b1s    = i_branch + 1
@@ -2748,8 +2771,8 @@ class AnalyticsWidget(QTabWidget):
             self._kymo_im1.set_clim(vmin=vmin, vmax=vmax)
             if self._kymo_cbar1 is not None:
                 self._kymo_cbar1.update_normal(self._kymo_im1)
-        ax1.set_ylabel('Compartment (soma â†’ B1 tip)')
-        ax1.set_title('Kymograph â€” Path to Branch 1')
+        ax1.set_ylabel('Compartment (soma -> B1 tip)')
+        ax1.set_title('Kymograph — Path to Branch 1')
 
         if self._kymo_im2 is None:
             self._kymo_im2 = ax2.imshow(
@@ -2765,8 +2788,8 @@ class AnalyticsWidget(QTabWidget):
             if self._kymo_cbar2 is not None:
                 self._kymo_cbar2.update_normal(self._kymo_im2)
         ax2.set_xlabel('Time (ms)')
-        ax2.set_ylabel('Compartment (soma â†’ B2 tip)')
-        ax2.set_title('Kymograph â€” Path to Branch 2')
+        ax2.set_ylabel('Compartment (soma -> B2 tip)')
+        ax2.set_title('Kymograph — Path to Branch 2')
 
         self.fig_kymo.tight_layout(pad=2.5)
         self.cvs_kymo.draw_idle()
@@ -2778,7 +2801,7 @@ class AnalyticsWidget(QTabWidget):
         t   = result.t
         ax1, ax2, ax3, ax4, ax5 = self.ax_energy
 
-        # â”€â”€ Row 1: Current Balance Error (semilog) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Row 1: Current Balance Error (semilog) ─────────────────────
         from core.analysis import compute_current_balance
         try:
             I_bal = compute_current_balance(result, result.morph)
@@ -2807,15 +2830,15 @@ class AnalyticsWidget(QTabWidget):
             self._balance_lines["abs_err"].set_data([], [])
         else:
             self._balance_lines["abs_err"].set_data(t, np.abs(I_bal) + 1e-12)
-        ax1.set_ylabel('|Error| (ÂµA/cmÂ˛)')
-        ax1.set_title(f'Current Balance Error (log) â€” max|error| = {err:.5f} ÂµA/cmÂ˛  '
-                      f'{"âś“ Good" if err < 0.05 else "âš  Check solver"}')
+        ax1.set_ylabel('|Error| (µA/cmÂ˛)')
+        ax1.set_title(f'Current Balance Error (log) — max|error| = {err:.5f} µA/cmÂ˛  '
+                      f'{"✓ Good" if err < 0.05 else "⚠ Check solver"}')
         ax1.grid(alpha=0.3)
         ax1.relim()
         ax1.autoscale_view()
         ax1.tick_params(labelbottom=False)
 
-        # â”€â”€ Row 2: Cumulative Charge Q â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Row 2: Cumulative Charge Q ─────────────────────────────────
         P_total = np.zeros_like(t)
         active_q = set()
         active_p = set()
@@ -2895,15 +2918,15 @@ class AnalyticsWidget(QTabWidget):
             if key.startswith("P_") and key not in active_p and key != "P_total":
                 line.set_data([], [])
 
-        ax2.set_ylabel('Cumulative charge (nC/cmÂ˛)')
-        ax2.set_title('Energy â€” Cumulative ionic charge transfer')
+        ax2.set_ylabel('Cumulative charge (nC/cm^2)')
+        ax2.set_title('Energy - Cumulative ionic charge transfer')
         ax2.legend(fontsize=7, loc='upper left', bbox_to_anchor=(0, 1), framealpha=0.8)
         ax2.grid(alpha=0.3)
         ax2.relim()
         ax2.autoscale_view()
         ax2.tick_params(labelbottom=False)
 
-        # â”€â”€ Row 3: Instantaneous Power P â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # Row 3: Instantaneous Power P
         if "P_total" not in self._energy_lines:
             self._energy_lines["P_total"] = ax3.plot([], [], 'k-', lw=2, label='Total', zorder=5)[0]
         P_total_safe = _ensure_shape_compatible(P_total, t, "P_total")
@@ -2913,15 +2936,15 @@ class AnalyticsWidget(QTabWidget):
             self._energy_lines["P_total"].set_data([], [])
 
         ax3.set_xlabel('Time (ms)')
-        ax3.set_ylabel('Power (ÂµW/cmÂ˛)')
-        ax3.set_title(f'Instantaneous power   ATP â‰ {result.atp_estimate:.3e} nmol/cmÂ˛')
+        ax3.set_ylabel('Power (uW/cm^2)')
+        ax3.set_title(f'Instantaneous power   ATP ~= {result.atp_estimate:.3e} nmol/cm^2')
         ax3.legend(fontsize=7, loc='upper left', bbox_to_anchor=(0, 1), framealpha=0.8)
         ax3.grid(alpha=0.3)
         ax3.relim()
         ax3.autoscale_view()
         ax3.tick_params(labelbottom=False)
 
-        # â”€â”€ Row 4: ATP Pool Time Series â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Row 4: ATP Pool Time Series ─────────────────────────────────
         # ATP pool from pre-extracted SimulationResult state
         atp_data = None
         if getattr(result, 'atp_level', None) is not None:
@@ -2955,11 +2978,7 @@ class AnalyticsWidget(QTabWidget):
             ax4.set_ylabel('[ATP]i (mM)')
             ax4.set_title('Intracellular ATP Pool (Disabled)')
         
-        try:
-            self.fig_energy.tight_layout()
-        except Exception:
-            pass  # Skip tight_layout if axes are incompatible
-        self.cvs_energy.draw_idle()
+        self.fig_energy.subplots_adjust(left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
 
         # Add crosshair and zoom to time-series axes only (not pie chart)
         for i, ax in enumerate(self.ax_energy[:4]):  # First 4 axes (time-series plots)
@@ -2971,7 +2990,7 @@ class AnalyticsWidget(QTabWidget):
             # Enable zoom
             ax.set_navigate(True)
 
-        # â”€â”€ Row 5: ATP Breakdown Pie Chart (top-right corner) â”€â”€â”€â”€â”€â”€â”€
+        # ── Row 5: ATP Breakdown Pie Chart (top-right corner) ───────
         atp_bd = getattr(result, 'atp_breakdown', None)
         if atp_bd is None or not isinstance(atp_bd, dict):
             atp_bd = {}
@@ -2989,32 +3008,48 @@ class AnalyticsWidget(QTabWidget):
             colors = [CHAN_COLORS.get('Na', '#FF6B6B'), CHAN_COLORS.get('Ca', '#4ECDC4'), '#888888']
         labels = ['Na+ Pump', 'Ca2+ Pump', 'Resting Leakage']
         sizes = [na_pump, ca_pump, baseline]
+        title_suffix = ''
 
-        # Clear previous pie chart
+        # Clear previous pie chart artists explicitly; ax.pie returns tuples/lists, not a single artist.
         if self._pie_chart is not None:
-            self._pie_chart.remove()
+            for artist_group in self._pie_chart:
+                if isinstance(artist_group, (list, tuple)):
+                    for artist in artist_group:
+                        try:
+                            artist.remove()
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        artist_group.remove()
+                    except Exception:
+                        pass
             self._pie_chart = None
+
+        ax5.cla()
 
         # Create new pie chart in top-right corner
         if total > 0:
             title_suffix = ' (METABOLIC STRESS)' if ca_ratio > 0.3 else ''
-            self._pie_chart = ax5.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%',
-                                      startangle=90, textprops={'fontsize': 9})[0]
+            self._pie_chart = ax5.pie(
+                sizes,
+                labels=labels,
+                colors=colors,
+                autopct='%1.1f%%',
+                startangle=90,
+                textprops={'fontsize': 9},
+            )
         else:
             ax5.text(0.5, 0.5, 'No ATP data', ha='center', va='center', transform=ax5.transAxes)
 
-        ax5.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cmÂ˛){title_suffix}', fontsize=10)
+        ax5.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cm^2){title_suffix}', fontsize=10)
         ax5.axis('equal')
-
-        try:
-            self.fig_energy.tight_layout()
-        except Exception:
-            pass  # Skip tight_layout if axes are incompatible
+        self.fig_energy.subplots_adjust(left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
         self.cvs_energy.draw_idle()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  16 â€” SPIKE SHAPE OVERLAY
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  16 — SPIKE SHAPE OVERLAY
+    # ─────────────────────────────────────────────────────────────────
     def _update_spike_shape(self, result, stats: dict):
         """Overlay selected spikes with color coding to show spike shape evolution."""
         if not hasattr(self, 'fig_spike_shape'):
@@ -3115,9 +3150,9 @@ class AnalyticsWidget(QTabWidget):
 
         self.cvs_spike_shape.draw_idle()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  17 â€” POINCARĂ‰ PLOT (ISI DYNAMICS)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  17 — POINCARĂ‰ PLOT (ISI DYNAMICS)
+    # ─────────────────────────────────────────────────────────────────
     def _update_poincare(self, result, stats: dict):
         """Poincare plot of ISI dynamics: ISI[n+1] vs ISI[n]."""
         if not hasattr(self, 'fig_poincare'):
@@ -3166,9 +3201,9 @@ class AnalyticsWidget(QTabWidget):
 
         self.cvs_poincare.draw_idle()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  12 â€” SPECTROGRAM  (STFT of soma Vm)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  12 — SPECTROGRAM  (STFT of soma Vm)
+    # ─────────────────────────────────────────────────────────────────
     def _update_spectrogram(self, result):
         if not hasattr(self, 'fig_spectro'):
             return  # tab not yet visited
@@ -3186,13 +3221,13 @@ class AnalyticsWidget(QTabWidget):
         else:
             self._spectro_vm_line.set_data([], [])
         ax_v.set_ylabel('V (mV)', fontsize=9)
-        ax_v.set_title('Membrane potential â€” soma', fontsize=10)
+        ax_v.set_title('Membrane potential — soma', fontsize=10)
         ax_v.grid(alpha=0.25)
         ax_v.set_xlim(t[0], t[-1])
         ax_v.relim()
         ax_v.autoscale_view()
 
-        # STFT â€” fs in Hz, dt in ms â†’ fs = 1000/dt
+        # STFT — fs in Hz, dt in ms -> fs = 1000/dt
         dt_ms = float(t[1] - t[0]) if len(t) > 1 else 0.05
         fs_hz = 1000.0 / dt_ms
 
@@ -3204,11 +3239,11 @@ class AnalyticsWidget(QTabWidget):
             freqs, times_stft, Zxx = stft(v, fs=fs_hz, nperseg=n_seg,
                                            noverlap=n_overlap, window='hann')
             # Convert STFT output times to simulation time axis
-            t_stft = t[0] + times_stft * 1000.0  # seconds â†’ ms
+            t_stft = t[0] + times_stft * 1000.0  # seconds -> ms
 
             power_db = 10.0 * np.log10(np.abs(Zxx) ** 2 + 1e-12)
 
-            # Limit display to biologically relevant range: 0â€“1000 Hz
+            # Limit display to biologically relevant range: 0–1000 Hz
             f_max_disp = min(1000.0, freqs[-1])
             freq_mask = freqs <= f_max_disp
 
@@ -3259,9 +3294,9 @@ class AnalyticsWidget(QTabWidget):
         self.fig_spectro.tight_layout(pad=2.5)
         self.cvs_spectro.draw_idle()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  8 â€” BIFURCATION
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  8 — BIFURCATION
+    # ─────────────────────────────────────────────────────────────────
     def _ensure_built(self, builder_name: str):
         """Force initialization of a lazy tab by its builder name."""
         for i in range(self.count()):
@@ -3330,9 +3365,9 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_bif.draw_idle()
         self.setCurrentWidget(self.tab_bif)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  9 â€” SWEEP
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  9 — SWEEP
+    # ─────────────────────────────────────────────────────────────────
     def update_sweep(self, sweep_results: list, param_name: str):
         """sweep_results: list of (param_value, SimulationResult|None)"""
         self._ensure_built('_build_tab_sweep')
@@ -3408,9 +3443,9 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_sweep.draw_idle()
         self.setCurrentWidget(self.tab_sweep)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  10 â€” S-D CURVE
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  10 — S-D CURVE
+    # ─────────────────────────────────────────────────────────────────
     def update_sd_curve(self, sd: dict):
         self._ensure_built('_build_tab_sd')
         self._last_sd = sd
@@ -3426,10 +3461,10 @@ class AnalyticsWidget(QTabWidget):
             self._sd_lines["ith"] = ax1.plot([], [], 'b.-', lw=2, ms=8, label='I_threshold')[0]
             self._sd_lines["weiss"] = ax1.plot([], [], 'r--', lw=1.5, label="Weiss fit")[0]
             self._sd_lines["rh"] = ax1.axhline(I_rh, color='gray', ls=':', lw=1.5,
-                                               label=f'Rheobase = {I_rh:.2f} ÂµA/cmÂ˛')
+                                               label=f'Rheobase = {I_rh:.2f} µA/cmÂ˛')
             self._sd_lines["ch"] = ax1.axvline(0.0, color='orange', ls='--', lw=1.5)
             self._sd_lines["ch_point"] = ax1.plot([], [], 'go', ms=10, zorder=5)[0]
-            self._sd_lines["qth"] = ax2.plot([], [], 'm.-', lw=2, ms=8, label='Q = IÂ·t')[0]
+            self._sd_lines["qth"] = ax2.plot([], [], 'm.-', lw=2, ms=8, label='Q = I·t')[0]
 
         self._sd_lines["ith"].set_data(dur, I_th)
         if weiss is not None:
@@ -3445,13 +3480,13 @@ class AnalyticsWidget(QTabWidget):
         else:
             self._sd_lines["ch"].set_visible(False)
             self._sd_lines["ch_point"].set_visible(False)
-        ax1.set_xlabel('Pulse duration (ms)');  ax1.set_ylabel('I threshold (ÂµA/cmÂ˛)')
+        ax1.set_xlabel('Pulse duration (ms)');  ax1.set_ylabel('I threshold (µA/cmÂ˛)')
         ax1.set_title('Strength-Duration Curve');  ax1.legend(fontsize=8)
         ax1.grid(alpha=0.3)
         ax1.relim(); ax1.autoscale_view()
 
         self._sd_lines["qth"].set_data(dur, Q_th)
-        ax2.set_xlabel('Pulse duration (ms)');  ax2.set_ylabel('Charge threshold (nC/cmÂ˛)')
+        ax2.set_xlabel('Pulse duration (ms)');  ax2.set_ylabel('Charge threshold (nC/cm²)')
         ax2.set_title('Minimum charge vs duration')
         ax2.legend();  ax2.grid(alpha=0.3)
         ax2.relim(); ax2.autoscale_view()
@@ -3460,9 +3495,9 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_sd.draw_idle()
         self.setCurrentWidget(self.tab_sd)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    #  11 â€” EXCITABILITY MAP
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    #  11 — EXCITABILITY MAP
+    # ─────────────────────────────────────────────────────────────────
     def update_excmap(self, exc: dict):
         self._ensure_built('_build_tab_excmap')
         self._last_exc = exc
@@ -3482,7 +3517,7 @@ class AnalyticsWidget(QTabWidget):
             self._excmap_mesh["spikes"].set_array(S.ravel())
             if self._excmap_cbar["spikes"] is not None:
                 self._excmap_cbar["spikes"].update_normal(self._excmap_mesh["spikes"])
-        ax1.set_xlabel('Duration (ms)');  ax1.set_ylabel('I_ext (ÂµA/cmÂ˛)')
+        ax1.set_xlabel('Duration (ms)');  ax1.set_ylabel('I_ext (µA/cmÂ˛)')
         ax1.set_title('Spike count map')
 
         # Mask zero-frequency cells
@@ -3496,7 +3531,7 @@ class AnalyticsWidget(QTabWidget):
             self._excmap_mesh["freq"].set_array(F_masked.ravel())
             if self._excmap_cbar["freq"] is not None:
                 self._excmap_cbar["freq"].update_normal(self._excmap_mesh["freq"])
-        ax2.set_xlabel('Duration (ms)');  ax2.set_ylabel('I_ext (ÂµA/cmÂ˛)')
+        ax2.set_xlabel('Duration (ms)');  ax2.set_ylabel('I_ext (µA/cmÂ˛)')
         ax2.set_title('Mean frequency map')
 
         self.fig_excmap.tight_layout()
@@ -3533,9 +3568,9 @@ class AnalyticsWidget(QTabWidget):
         win.destroyed.connect(_cleanup)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 #  HELPER
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 def _get_E_rev(name: str, ch) -> float:
     mapping = {
         'Na':   ch.ENa, 'K': ch.EK, 'Leak': ch.EL,

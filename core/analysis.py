@@ -160,6 +160,7 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
             if t[crossings[i]] - t[keep[-1]] >= refractory_ms:
                 keep.append(int(crossings[i]))
         candidate_idx = np.array(keep, dtype=int)
+        return candidate_idx, t[candidate_idx], V[candidate_idx]
     else:
         candidate_idx, _ = find_peaks(
             V,
@@ -169,6 +170,16 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
         )
 
     if len(candidate_idx) == 0:
+        if algorithm == "peak_repolarization":
+            return detect_spikes(
+                V, t,
+                threshold=threshold,
+                prominence=prominence,
+                baseline_threshold=baseline_threshold,
+                repolarization_window_ms=repolarization_window_ms,
+                refractory_ms=refractory_ms,
+                algorithm="threshold_crossing",
+            )
         return np.array([], dtype=int), np.array([]), np.array([])
 
     valid = []
@@ -190,6 +201,16 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
             valid.append(int(pk))
 
     if len(valid) == 0:
+        if algorithm == "peak_repolarization":
+            return detect_spikes(
+                V, t,
+                threshold=threshold,
+                prominence=prominence,
+                baseline_threshold=baseline_threshold,
+                repolarization_window_ms=repolarization_window_ms,
+                refractory_ms=refractory_ms,
+                algorithm="threshold_crossing",
+            )
         return np.array([], dtype=int), np.array([]), np.array([])
 
     valid_idx = np.array(valid, dtype=int)
@@ -214,7 +235,10 @@ def spike_threshold(V: np.ndarray, t: np.ndarray,
     max_dvdt = np.max(dvdt)
     if max_dvdt < 0.5:          # no fast depolarisation
         return np.nan
-    idx = np.argmax(dvdt > pct * max_dvdt)
+    mask = dvdt > pct * max_dvdt
+    if not np.any(mask):
+        return np.nan
+    idx = int(np.argmax(mask))
     return float(V[idx])
 
 
@@ -276,7 +300,7 @@ def after_hyperpolarization(V: np.ndarray, t: np.ndarray,
     Minimum voltage in the window after the first spike peak.
     Measures the depth of AHP.
     """
-    dt_ms = (t[-1] - t[0]) / (len(t) - 1)
+    dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.05
     end_idx = min(peak_idx + int(window_ms / dt_ms), len(V) - 1)
     return float(np.min(V[peak_idx:end_idx]))
 
@@ -747,6 +771,12 @@ def estimate_ftle_lle(
         "valid_pairs": 0,
         "ftle_time_ms": np.array([]),
         "ftle_log_divergence": np.array([]),
+        "pair_i": np.array([], dtype=int),
+        "pair_j": np.array([], dtype=int),
+        "embedding": np.empty((0, 0), dtype=float),
+        "dt_ms": np.nan,
+        "lag_steps": int(lag_steps),
+        "embedding_dim": int(embedding_dim),
     }
 
     if len(x) < 50 or len(t) < 50:
@@ -761,22 +791,22 @@ def estimate_ftle_lle(
     # Stage 3.3 — LLE protection: require t_sim > 1000 ms and discard
     # first 200 ms of transients before attractor reconstruction.
     t_sim_ms = float(t[-1] - t[0])
-    if t_sim_ms < 1000.0:
-        return out
-
-    transient_ms = 200.0
-    transient_mask = t >= (t[0] + transient_ms)
-    if np.sum(transient_mask) < 50:
-        return out
-    x = x[transient_mask]
-    t = t[transient_mask]
-    n = len(x)
+    transient_ms = min(200.0, 0.2 * t_sim_ms)
+    if transient_ms > 0.0:
+        transient_mask = t >= (t[0] + transient_ms)
+        if np.sum(transient_mask) >= 50:
+            x = x[transient_mask]
+            t = t[transient_mask]
+            n = len(x)
 
     dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.1
     dt_ms = max(dt_ms, 1e-9)
+    out["dt_ms"] = dt_ms
 
     embedding_dim = max(2, int(embedding_dim))
     lag_steps = max(1, int(lag_steps))
+    out["lag_steps"] = int(lag_steps)
+    out["embedding_dim"] = int(embedding_dim)
     max_start = n - (embedding_dim - 1) * lag_steps
     if max_start <= 30:
         return out
@@ -819,6 +849,9 @@ def estimate_ftle_lle(
 
     pair_i = np.asarray(pair_i, dtype=int)
     pair_j = np.asarray(pair_j, dtype=int)
+    out["pair_i"] = pair_i
+    out["pair_j"] = pair_j
+    out["embedding"] = emb
 
     mean_log_div = np.full(max_k, np.nan, dtype=float)
     for k in range(max_k):
@@ -828,7 +861,10 @@ def estimate_ftle_lle(
         mean_log_div[k] = float(np.mean(np.log(dist)))
 
     times_ms = np.arange(max_k, dtype=float) * dt_ms
-    fit_mask = (times_ms >= fit_start_ms) & (times_ms <= fit_end_ms) & np.isfinite(mean_log_div)
+    finite_mask = np.isfinite(mean_log_div)
+    out["ftle_time_ms"] = times_ms[finite_mask]
+    out["ftle_log_divergence"] = mean_log_div[finite_mask]
+    fit_mask = (times_ms >= fit_start_ms) & (times_ms <= fit_end_ms) & finite_mask
     if np.sum(fit_mask) < 6:
         return out
 
@@ -838,8 +874,6 @@ def estimate_ftle_lle(
     out["lle_per_ms"] = float(slope)
     out["lle_per_s"] = float(slope * 1000.0)
     out["valid_pairs"] = int(len(pair_i))
-    out["ftle_time_ms"] = times_ms
-    out["ftle_log_divergence"] = mean_log_div
     return out
 
 
@@ -1515,14 +1549,15 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
     # Refractory period estimate (from AHP recovery)
     refr_period = np.nan
     if n_spikes > 0 and len(peak_idx) > 0:
-        # Simple estimate: time from spike peak to 90% AHP recovery
         pk_idx = int(peak_idx[0])
-        if pk_idx + 1 < len(V):
-            # Look for 50% recovery from peak towards baseline
-            V_baseline = V[0]
+        if pk_idx + 1 < len(V) and len(t) > 1:
+            dt_ms = float(np.median(np.diff(t)))
+            V_baseline = float(np.mean(V[:max(1, pk_idx // 4)]))
             V_peak_val = V[pk_idx]
             V_target = V_baseline + 0.5 * (V_peak_val - V_baseline)
-            for i in range(pk_idx, min(pk_idx + len(t)//10, len(V))):
+            ahp_end = min(pk_idx + int(50.0 / max(dt_ms, 1e-9)), len(V))
+            ahp_idx = pk_idx + int(np.argmin(V[pk_idx:ahp_end])) if ahp_end > pk_idx else pk_idx
+            for i in range(ahp_idx, min(ahp_idx + int(100.0 / max(dt_ms, 1e-9)), len(V))):
                 if V[i] >= V_target:
                     refr_period = float(t[i] - t[pk_idx])
                     break

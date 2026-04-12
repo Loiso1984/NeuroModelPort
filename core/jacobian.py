@@ -37,6 +37,13 @@ from .rhs import CA_I_MAX_M_M, CA_I_MIN_M_M, F_CONST, R_GAS
 from .physics_params import PhysicsParams, unpack_conductances, unpack_temperature_scaling
 
 _LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
+_MAX_JAC_CACHE = 8
+
+
+def _evict_oldest_if_needed() -> None:
+    if len(_LEGACY_JACOBIAN_CACHE) >= _MAX_JAC_CACHE:
+        oldest_key = next(iter(_LEGACY_JACOBIAN_CACHE))
+        del _LEGACY_JACOBIAN_CACHE[oldest_key]
 
 
 def _sparse_structure_signature(l_indices: np.ndarray, l_indptr: np.ndarray) -> tuple:
@@ -827,6 +834,7 @@ def _analytic_sparse_jacobian_impl(*args, **kwargs):
             en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
         )
         fn = make_analytic_jacobian(sp)
+        _evict_oldest_if_needed()
         _LEGACY_JACOBIAN_CACHE[cache_key] = fn
     return fn(*args)
 

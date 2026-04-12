@@ -2,8 +2,9 @@ import numpy as np
 import copy
 import logging
 import hashlib
+import os
 from scipy.integrate import solve_ivp, trapezoid
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
@@ -97,10 +98,10 @@ class SimulationResult:
             cursor += n_comp
         if ch.enable_NaR:
             cursor += 2 * n_comp
-        if ch.enable_SK:
-            cursor += n_comp
 
         self.ca_i = None
+        if ch.enable_SK:
+            cursor += n_comp
         if config.calcium.dynamic_Ca:
             self.ca_i = y[cursor:cursor + n_comp, :]
             cursor += n_comp
@@ -138,6 +139,13 @@ class SimulationResult:
 
         # Morphology dict stored for post-analysis (current balance, etc.)
         self.morph: dict = {}
+
+    def _finalize_current_shapes(self):
+        """Collapse single-compartment current matrices to 1-D time series."""
+        for key, arr in list(self.currents.items()):
+            arr_np = np.asarray(arr)
+            if arr_np.ndim == 2 and arr_np.shape[0] == 1:
+                self.currents[key] = arr_np[0, :]
 
 
 def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms: float, t_start: float, manual_times: list, seed_hash: int = None) -> np.ndarray:
@@ -748,6 +756,8 @@ class NeuronSolver:
             g_katp = cfg.metabolism.g_katp_max / (1.0 + atp_ratio ** 2)
             res.currents['KATP'] = g_katp * (v - cfg.channels.EK)
 
+        res._finalize_current_shapes()
+
         # ── ATP consumption estimate ──────────────────────────────────
         # Na+/K+-ATPase: 3 Na+ pumped per ATP hydrolysis (Skou 1957).
         # Ca²+-ATPase (PMCA): 1 Ca²+ pumped per ATP (Bhatt et al. 2005).
@@ -1091,6 +1101,18 @@ class NeuronSolver:
             rng_state         = None,
         )
 
+        if stoch_gating or noise_sigma > 0:
+            seed = _stable_seed_from_values(
+                cfg.stim.t_sim,
+                cfg.stim.Iext,
+                cfg.stim.pulse_start,
+                cfg.stim.pulse_dur,
+                cfg.stim.stim_type,
+                noise_sigma,
+                stoch_gating,
+            )
+            np.random.seed(seed)
+
         t_out, y_out, diverged = run_native_loop(
             y0.astype(np.float64),
             float(cfg.stim.t_sim),
@@ -1149,7 +1171,7 @@ class NeuronSolver:
             m_cfg.channels.gK_max  *= rng.normal(1.0, param_var)
             configs.append(m_cfg)
 
-        with ProcessPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=min(n_trials, max(1, os.cpu_count() or 1))) as executor:
             futures = []
             for i, cfg in enumerate(configs):
                 if progress_cb:

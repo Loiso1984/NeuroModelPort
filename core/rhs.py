@@ -23,6 +23,8 @@ ATP_MIN_M_M = 0.0
 ATP_MAX_M_M = 10.0
 ATP_ISCHEMIC_THRESHOLD = 0.5  # mM - K_ATP opens below this threshold
 ATP_PUMP_FAILURE_THRESHOLD = 0.2  # mM - pumps fail below this threshold
+_NA_PUMP_FACTOR = 1e3 / (3.0 * 96485.0)
+_CA_PUMP_FACTOR = 1e3 / (2.0 * 96485.0)
 
 # Noise parameters
 OU_NOISE_AMPLITUDE = 0.1  # 10% noise amplitude
@@ -124,12 +126,16 @@ def _calculate_syn_tau(stype, atau_mult):
 
 @njit(float64(float64, int32, float64, float64, float64, float64, float64, float64), cache=True)
 def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
-    """Return stimulus current at time t for various stimulus types."""
+    """Return stimulus current at time t for various stimulus types.
+
+    For stype >= 4, iext is a conductance amplitude [mS/cm²] and must be
+    non-negative. Current direction is determined later by (V - E_syn).
+    """
     # Input validation
     t = _validate_time_parameter(t)
     t0 = _validate_time_parameter(t0)
     td = _validate_time_parameter(td)
-    iext = _validate_conductance(iext)
+    iext = iext if np.isfinite(iext) else 0.0
 
     # Validate atau to prevent division by zero
     if atau <= 0.0:
@@ -690,9 +696,9 @@ def rhs_multicompartment(
             # Pump consumption: proportional to Na+ and Ca2+ influx
             # Simplified model: consumption ~ |I_Na| + 3*|I_Ca| (Na/K pump uses 3 Na per ATP)
             i_na = gna_v[i] * (mi * mi * mi) * hi * (vi - ena)
-            pump_consumption = abs(i_na) * 0.001  # Convert µA/cm² to nmol/cm²/s (simplified)
+            pump_consumption = max(0.0, -i_na) * _NA_PUMP_FACTOR
             if dyn_ca:
-                pump_consumption += 3.0 * i_ca_influx * 0.001
+                pump_consumption += i_ca_influx * _CA_PUMP_FACTOR
 
             # ATP ODE: d[ATP]/dt = Synthesis - PumpConsumption
             datp = atp_synthesis_rate * 0.001 - pump_consumption

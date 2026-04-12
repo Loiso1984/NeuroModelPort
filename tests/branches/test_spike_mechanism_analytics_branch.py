@@ -32,8 +32,10 @@ def test_spike_mechanism_tab_populates_axes():
     w = AnalyticsWidget()
     try:
         w.update_analytics(res)
+        w._ensure_built("_build_tab_spike_mech")
+        w._update_spike_mechanism(res, w._last_stats)
         assert hasattr(w, "fig_spike_mech")
-        assert len(w.fig_spike_mech.axes) >= 2
+        assert len(w.fig_spike_mech.axes) >= 5
         # Top axis should include soma voltage trace.
         assert len(w.fig_spike_mech.axes[0].lines) >= 1
     finally:

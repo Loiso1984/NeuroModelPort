@@ -1,5 +1,5 @@
 """
-gui/main_window.py â€” Main Application Window v10.0
+gui/main_window.py — Main Application Window v10.0
 
 Tabs: Parameters | Oscilloscope | Analytics | Topology | Guide
 Run modes: Standard | Monte-Carlo | Sweep | S-D Curve | Excit. Map | Stochastic
@@ -37,9 +37,9 @@ from gui.dual_stimulation_widget import DualStimulationWidget
 from gui.text_sanitize import repair_text, repair_widget_tree
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 #  LIVE DECK PARAMETER REGISTRY
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 #  (name, lo, hi, setter, getter)
 _LIVE_PARAMS = {
     'Iext':      (-50.0, 250.0,
@@ -98,9 +98,9 @@ _LIVE_PARAM_SUGGESTIONS = [
 _LIVE_SLIDER_STEPS = 1000   # integer slider resolution
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 #  MAIN WINDOW
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 class MainWindow(QMainWindow):
 
     _STYLE = """
@@ -228,12 +228,12 @@ class MainWindow(QMainWindow):
     def _on_progress_updated(self, current: int, total: int, value: float):
         """Handle progress update signal from SimulationController."""
         pct = int(100 * current / max(1, total))
-        self._status(f"Progress: {pct}% ({current}/{total}) â€” Value: {value:.3g}")
+        self._status(f"Progress: {pct}% ({current}/{total}) — Value: {value:.3g}")
         QApplication.processEvents()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  TOP BAR
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _setup_top_bar(self):
         # Create a two-row layout to prevent overlap
         top_container = QWidget()
@@ -245,7 +245,7 @@ class MainWindow(QMainWindow):
         row1 = QHBoxLayout()
         row1.setSpacing(6)
 
-        # â”€â”€ Run button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Run button ──────────────────────────────────────────────
         self.btn_run = QPushButton("RUN SIMULATION")
         self.btn_run.setMinimumHeight(38)
         self.btn_run.setStyleSheet("""
@@ -260,7 +260,7 @@ class MainWindow(QMainWindow):
         """)
         self.btn_run.clicked.connect(lambda: self.sim_controller.run_single(self.config_manager.config, on_success=self._on_simulation_done, on_error=self._on_sim_error))
 
-        # â”€â”€ Stochastic button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Stochastic button ────────────────────────────────────────
         self.btn_stoch = QPushButton("STOCHASTIC")
         self.btn_stoch.setMinimumHeight(38)
         self.btn_stoch.setStyleSheet("""
@@ -276,7 +276,7 @@ class MainWindow(QMainWindow):
         self.btn_stoch.setToolTip("Run stochastic simulation (Langevin gate & membrane noise via Native Hines)")
         self.btn_stoch.clicked.connect(lambda: self.sim_controller.run_stochastic(self.config_manager.config, 1, on_success=self._on_stoch_done, on_error=self._on_sim_error))
 
-        # â”€â”€ Sweep button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Sweep button ─────────────────────────────────────────────
         self.btn_sweep = QPushButton("SWEEP")
         self.btn_sweep.setMinimumHeight(38)
         self.btn_sweep.setStyleSheet("""
@@ -292,7 +292,7 @@ class MainWindow(QMainWindow):
         self.btn_sweep.setToolTip("Run parametric sweep (configured in Analysis tab)")
         self.btn_sweep.clicked.connect(self.run_sweep)
 
-        # â”€â”€ SD / ExcMap buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── SD / ExcMap buttons ───────────────────────────────────────
         self.btn_sd = QPushButton("S-D")
         self.btn_sd.setMinimumHeight(38)
         self.btn_sd.setStyleSheet("""
@@ -323,7 +323,7 @@ class MainWindow(QMainWindow):
         self.btn_excmap.setToolTip("Compute 2-D excitability map (I x duration)")
         self.btn_excmap.clicked.connect(self.run_excmap)
 
-        # â”€â”€ Cancel button (hidden until computation starts) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Cancel button (hidden until computation starts) ──────────
         self.btn_cancel = QPushButton("CANCEL")
         self.btn_cancel.setMinimumHeight(38)
         self.btn_cancel.setStyleSheet("""
@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setVisible(False)
         self._cancel_requested = False
 
-        # â”€â”€ Hines solver toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Hines solver toggle ──────────────────────────────────────
         self.btn_hines = QPushButton("HINES")
         self.btn_hines.setMinimumHeight(38)
         self.btn_hines.setCheckable(True)
@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
         self.btn_hines.setToolTip("Toggle native Hines solver (O(N) vs SciPy BDF)")
         self.btn_hines.clicked.connect(self._on_hines_toggled)
 
-        # â”€â”€ Export buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Export buttons ─────────────────────────────────────
         self.btn_export = QPushButton("CSV")
         self.btn_export_plot = QPushButton("Plot")
         self.btn_export_plot.setMinimumHeight(38)
@@ -396,7 +396,7 @@ class MainWindow(QMainWindow):
         """)
         self.btn_export_nml.clicked.connect(self.export_neuroml)
 
-        # â”€â”€ Save/Load Config buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Save/Load Config buttons ─────────────────────────────
         self.btn_save_config = QPushButton("Save")
         self.btn_save_config.setMinimumHeight(38)
         self.btn_save_config.setStyleSheet("""
@@ -427,7 +427,7 @@ class MainWindow(QMainWindow):
         self.btn_load_config.setToolTip("Load configuration from JSON file")
         self.btn_load_config.clicked.connect(self.load_config_from)
 
-        # â”€â”€ Sidebar toggle button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Sidebar toggle button ──────────────────────────────
         self.btn_toggle_sidebar = QPushButton("<")
         self.btn_toggle_sidebar.setFixedWidth(30)
         self.btn_toggle_sidebar.setFixedHeight(38)
@@ -438,7 +438,7 @@ class MainWindow(QMainWindow):
         )
         self.btn_toggle_sidebar.clicked.connect(self._toggle_sidebar)
 
-        # â”€â”€ Window size preset button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Window size preset button ────────────────────────────
         self.btn_window_size = QPushButton("Size")
         self.btn_window_size.setFixedWidth(30)
         self.btn_window_size.setFixedHeight(38)
@@ -470,28 +470,28 @@ class MainWindow(QMainWindow):
         row2 = QHBoxLayout()
         row2.setSpacing(8)
 
-        # â”€â”€ Preset selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Preset selector ───────────────────────────────────────────
         self.lbl_preset = QLabel("Preset:")
         self.combo_presets = QComboBox()
         self.combo_presets.setMinimumWidth(200)
-        self.combo_presets.addItems(["â€” Select preset â€”"] + get_preset_names())
+        self.combo_presets.addItems(["— Select preset —"] + get_preset_names())
         self.combo_presets.currentTextChanged.connect(self.load_preset)
 
-        # â”€â”€ Language selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Language selector ─────────────────────────────────────────
         self.lbl_lang = QLabel("Lang:")
         self.combo_lang = QComboBox()
         self.combo_lang.addItems(["EN", "RU"])
         self.combo_lang.setCurrentText("EN")
         self.combo_lang.currentTextChanged.connect(self.change_language)
 
-        # â”€â”€ Experience mode selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Experience mode selector ───────────────────────────────
         self.lbl_mode = QLabel("Mode:")
         self.combo_mode = QComboBox()
-        self.combo_mode.addItems(["đź”¬ Microscope", "đźŚ‰ Bridge", "đź§Ş Research"])
-        self.combo_mode.setCurrentText("đźŚ‰ Bridge")
+        self.combo_mode.addItems(["🔬 Microscope", "🌉 Bridge", "🧪 Research"])
+        self.combo_mode.setCurrentText("🌉 Bridge")
         self.combo_mode.currentTextChanged.connect(self._toggle_ui_complexity)
 
-        # â”€â”€ Sparkline (mini Vm trace) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Sparkline (mini Vm trace) ──────────────────────────
         self._sparkline = pg.PlotWidget()
         self._sparkline.setFixedHeight(36)
         self._sparkline.setMinimumWidth(150)
@@ -514,9 +514,9 @@ class MainWindow(QMainWindow):
         top_layout.addLayout(row2)
         self._main_layout.addWidget(top_container)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  TABS  +  COLLAPSIBLE SIDEBAR
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _setup_tabs(self):
         """
         Constructs and configures the application's main tabbed interface, collapsible sidebar, and the widgets contained in each tab.
@@ -530,13 +530,13 @@ class MainWindow(QMainWindow):
         - the "Topology", "Axon Biophysics", and "Guide" tabs (`self.topology`, `self.axon_biophysics`, `self.guide_browser`);
         - the horizontal main splitter (`self._main_splitter`) that contains the sidebar and the tabs.
         
-        Also wires relevant signals (e.g., stimulus/dual-stim change handlers, oscilloscope â†” analytics time highlighting), sets initial widget states from the configuration, and registers form widgets with the ConfigManager.
+        Also wires relevant signals (e.g., stimulus/dual-stim change handlers, oscilloscope ↔ analytics time highlighting), sets initial widget states from the configuration, and registers form widgets with the ConfigManager.
         """
         self.tabs = QTabWidget()
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tabs.setMovable(True)  # Allow users to rearrange tabs
 
-        # â”€â”€ Sidebar panel (replaces old "1) Setup" tab) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Sidebar panel (replaces old "1) Setup" tab) ───────────────
         self._sidebar_frame = QFrame()
         self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
         # Calculate sidebar width based on screen size (15-20% of screen width, min 320px)
@@ -549,7 +549,7 @@ class MainWindow(QMainWindow):
         # Dummy tab_params kept for backward-compat references (not in tabs)
         self.tab_params = self._sidebar_frame
 
-        # â”€â”€ Tab 1: Stimulation Studio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Tab 1: Stimulation Studio ───────────────────────────────
         # Step 2: Stimulation Studio (consolidated stimulation controls)
         stim_studio_widget_outer = QWidget()
         stim_outer_layout = QVBoxLayout(stim_studio_widget_outer)
@@ -628,7 +628,7 @@ class MainWindow(QMainWindow):
         preview_controls = QHBoxLayout()
         preview_controls.setSpacing(8)
         
-        btn_refresh_preview = QPushButton("đź”„ Refresh Preview")
+        btn_refresh_preview = QPushButton("🔄 Refresh Preview")
         btn_refresh_preview.setToolTip("Manually refresh stimulus preview with current parameters")
         btn_refresh_preview.clicked.connect(self._update_stim_preview)
         btn_refresh_preview.setMaximumWidth(140)
@@ -666,7 +666,7 @@ class MainWindow(QMainWindow):
         
         self.tabs.addTab(stim_studio_widget_outer, "2) Stimulation Studio")
 
-        # â”€â”€ Tab 2: Oscilloscope â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Tab 2: Oscilloscope ───────────────────────────────────────
         # Step 3: Oscilloscope
         self.oscilloscope = OscilloscopeWidget()
         self.oscilloscope.delay_target_changed.connect(self._on_delay_target_changed)
@@ -676,7 +676,7 @@ class MainWindow(QMainWindow):
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         self.tabs.addTab(self.oscilloscope, "3) Oscilloscope")
 
-        # â”€â”€ Tab 3: Analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Tab 3: Analytics ──────────────────────────────────────────
         # Step 4: Analytics
         analytics_container = QWidget()
         analytics_layout = QVBoxLayout(analytics_container)
@@ -724,7 +724,7 @@ class MainWindow(QMainWindow):
         # Connect oscilloscope time_highlighted to analytics for linked cursors
         self.oscilloscope.time_highlighted.connect(self.analytics.highlight_time)
 
-        # â”€â”€ Tab 4: Topology â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Tab 4: Topology ───────────────────────────────────────────
         # Step 5: Topology
         self.topology = TopologyWidget()
         self.topology.set_delay_focus(
@@ -733,12 +733,12 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.topology,     "5) Topology")
 
-        # â”€â”€ Tab 5: Axon Biophysics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Tab 5: Axon Biophysics ───────────────────────────────────
         # Step 6: Axon Biophysics
         self.axon_biophysics = AxonBiophysicsWidget()
         self.tabs.addTab(self.axon_biophysics, "6) Axon Biophysics")
 
-        # â”€â”€ Tab 6: Guide â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Tab 6: Guide ──────────────────────────────────────────────
         # Step 7: Guide
         from PySide6.QtWidgets import QTextBrowser
         self.guide_browser = QTextBrowser()
@@ -748,7 +748,7 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.guide_browser, "7) Guide")
 
-        # â”€â”€ Main splitter: sidebar | tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Main splitter: sidebar | tabs ────────────────────────────
         self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._main_splitter.setChildrenCollapsible(False)  # Prevent complete collapse
         self._main_splitter.setHandleWidth(6)
@@ -772,26 +772,26 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        # â”€â”€ Quick Preset shortcut row (Step 5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Quick Preset shortcut row (Step 5) ────────────────────────
         preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("âšˇ Preset:"))
+        preset_row.addWidget(QLabel("HINES Preset:"))
         self._sidebar_preset_combo = QComboBox()
-        self._sidebar_preset_combo.addItems(["â€” Select preset â€”"] + get_preset_names())
+        self._sidebar_preset_combo.addItems(["— Select preset —"] + get_preset_names())
         self._sidebar_preset_combo.currentTextChanged.connect(self.load_preset)
         preset_row.addWidget(self._sidebar_preset_combo, 1)
         layout.addLayout(preset_row)
 
-        # â”€â”€ Quick-Set dropdown for parameter groups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Quick-Set dropdown for parameter groups ────────────────────
         quickset_row = QHBoxLayout()
-        quickset_row.addWidget(QLabel("đź“‹ Quick-Set:"))
+        quickset_row.addWidget(QLabel("📋 Quick-Set:"))
         self._quickset_combo = QComboBox()
-        self._quickset_combo.addItems(["â€” Quick-Set â€”", "Channel Densities", "Dendritic Cable", "Metabolism"])
+        self._quickset_combo.addItems(["— Quick-Set —", "Channel Densities", "Dendritic Cable", "Metabolism"])
         self._quickset_combo.currentTextChanged.connect(self._on_quick_set_changed)
         quickset_row.addWidget(self._quickset_combo, 1)
         layout.addLayout(quickset_row)
 
-        # â”€â”€ Live Control Deck (Step 2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        deck = QGroupBox("đźŽ›ď¸Ź Live Control Deck")
+        # ── Live Control Deck (Step 2) ─────────────────────────────────
+        deck = QGroupBox("🎛️ Live Control Deck")
         deck_layout = QVBoxLayout(deck)
         deck_layout.setSpacing(6)
         deck_layout.setContentsMargins(6, 10, 6, 6)
@@ -842,7 +842,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(deck)
 
-        # â”€â”€ Params hint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Params hint ───────────────────────────────────────────────
         self.lbl_params_hint = QLabel("")
         self.lbl_params_hint.setWordWrap(True)
         self.lbl_params_hint.setStyleSheet(
@@ -853,7 +853,7 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.lbl_params_hint)
 
-        # â”€â”€ Scrollable forms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Scrollable forms ──────────────────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustIgnored)
@@ -957,7 +957,7 @@ class MainWindow(QMainWindow):
         Bridge: Full functionality
         Research: Future SWC/Network support (identical to Bridge for now)
         """
-        if mode == "đź”¬ Microscope":
+        if mode == "🔬 Microscope":
             # Hide topology and axon biophysics tabs
             for i in range(self.tabs.count()):
                 tab_text = self.tabs.tabText(i)
@@ -974,7 +974,7 @@ class MainWindow(QMainWindow):
             self.config_manager.config.morphology.single_comp = True
             self._refresh_all_forms()
             
-        elif mode == "đźŚ‰ Bridge":
+        elif mode == "🌉 Bridge":
             # Show all tabs
             for i in range(self.tabs.count()):
                 self.tabs.setTabVisible(i, True)
@@ -985,7 +985,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'grp_ana'):
                 self.grp_ana.setVisible(True)
             
-        elif mode == "đź§Ş Research":
+        elif mode == "🧪 Research":
             # Identical to Bridge for now (future SWC/Network tabs)
             for i in range(self.tabs.count()):
                 self.tabs.setTabVisible(i, True)
@@ -1140,7 +1140,7 @@ class MainWindow(QMainWindow):
 
     def _on_quick_set_changed(self, selection: str):
         """Handle Quick-Set dropdown selection to configure live deck sliders."""
-        if selection == "â€” Quick-Set â€”":
+        if selection == "— Quick-Set —":
             return
 
         quick_set_params = {
@@ -1189,7 +1189,7 @@ class MainWindow(QMainWindow):
             row_h.addWidget(slider, 1)
             row_h.addWidget(lbl)
             # Get the deck layout
-            deck = self.findChild(QGroupBox, "đźŽ›ď¸Ź Live Control Deck")
+            deck = self.findChild(QGroupBox, "🎛️ Live Control Deck")
             if deck:
                 deck.layout().addWidget(row_w)
 
@@ -1214,24 +1214,24 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  SPARKLINE
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _update_sparkline(self, res) -> None:
         """Update the mini Vm trace in the top bar after each simulation."""
         try:
             t = res.t
             v = res.v_soma
-            # Downsample to â‰¤512 points for performance
+            # Downsample to ≤512 points for performance
             step = max(1, len(t) // 512)
             self._sparkline_curve.setData(t[::step], v[::step])
             self._sparkline.setYRange(float(v.min()) - 2, float(v.max()) + 2, padding=0)
         except Exception:
             pass
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  STATUS BAR
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _setup_status_bar(self):
         self._sb = QStatusBar()
         self.setStatusBar(self._sb)
@@ -1395,16 +1395,16 @@ class MainWindow(QMainWindow):
             self.form_preset_modes.group_box.setTitle("Preset Modes (not used for current preset)")
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  PRESET & LANGUAGE
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def load_preset(self, name: str):
         """
         Apply a named preset configuration and update the UI and internal state to reflect it.
         
-        Ignores placeholder names containing "â€”" or "Select". Synchronizes the preset selection controls without emitting signals, loads the preset into the configuration manager, performs preset-specific postprocessing (auto-selects the jacobian mode, updates the Hines toggle state), refreshes all form widgets, synchronizes oscilloscope delay controls, resets the dual-stimulation widget to its preset defaults, updates preset-mode controls, redraws the topology using the current delay focus, and updates the status bar with the applied preset name and active mode suffix.
+        Ignores placeholder names containing "—" or "Select". Synchronizes the preset selection controls without emitting signals, loads the preset into the configuration manager, performs preset-specific postprocessing (auto-selects the jacobian mode, updates the Hines toggle state), refreshes all form widgets, synchronizes oscilloscope delay controls, resets the dual-stimulation widget to its preset defaults, updates preset-mode controls, redraws the topology using the current delay focus, and updates the status bar with the applied preset name and active mode suffix.
         """
-        if "â€”" in name or "Select" in name:
+        if "—" in name or "Select" in name:
             return
         # Keep both preset combos in sync without re-firing
         for combo in (self.combo_presets, getattr(self, '_sidebar_preset_combo', None)):
@@ -1508,17 +1508,17 @@ class MainWindow(QMainWindow):
                 # For current-based stimuli, we need to convert I to g by dividing by (V - Erev)
                 # For preview purposes, use V = -60 mV (typical resting potential)
                 v_rest = -60.0
-                # For excitatory synapses (AMPA, NMDA), Erev â‰ 0 mV
-                # For inhibitory synapses (GABA), Erev â‰ -75 mV
+                # For excitatory synapses (AMPA, NMDA), Erev ≈ 0 mV
+                # For inhibitory synapses (GABA), Erev ≈ -75 mV
                 # Simplified: assume excitatory for preview
                 e_exc = 0.0
                 g_stim = i_stim / (v_rest - e_exc) if (v_rest - e_exc) != 0 else i_stim
                 self._stim_preview_plot.plot(t, g_stim, pen=pg.mkPen('#89B4FA', width=2))
-                self._stim_preview_plot.setLabel('left', 'Conductance', units='mS/cmÂ˛')
+                self._stim_preview_plot.setLabel('left', 'Conductance', units='mS/cm²')
             else:
                 # Show current (I)
                 self._stim_preview_plot.plot(t, i_stim, pen=pg.mkPen('#F5C2E7', width=2))
-                self._stim_preview_plot.setLabel('left', 'Total Input Current', units='ÂµA/cmÂ˛')
+                self._stim_preview_plot.setLabel('left', 'Total Input Current', units='µA/cmÂ˛')
         except Exception as e:
             # Show error message in plot area instead of silent failure
             self._stim_preview_plot.clear()
@@ -1546,18 +1546,18 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
 
-        action_desktop = menu.addAction("đź–Ą Desktop (1400Ă—900)")
+        action_desktop = menu.addAction("🖥 Desktop (1400x900)")
         action_desktop.triggered.connect(lambda: self._set_window_size(1400, 900))
 
-        action_laptop_small = menu.addAction("đź’» Laptop Small (1100Ă—700)")
+        action_laptop_small = menu.addAction("💻 Laptop Small (1100x700)")
         action_laptop_small.triggered.connect(lambda: self._set_window_size(1100, 700))
 
-        action_laptop_large = menu.addAction("đź’» Laptop Large (1280Ă—800)")
+        action_laptop_large = menu.addAction("💻 Laptop Large (1280x800)")
         action_laptop_large.triggered.connect(lambda: self._set_window_size(1280, 800))
         
         menu.addSeparator()
         
-        action_fullscreen = menu.addAction("â›¶ Fullscreen")
+        action_fullscreen = menu.addAction("⛶ Fullscreen")
         action_fullscreen.triggered.connect(self._toggle_fullscreen)
         
         menu.exec(self.btn_window_size.mapToGlobal(self.btn_window_size.rect().bottomLeft()))
@@ -1577,7 +1577,7 @@ class MainWindow(QMainWindow):
             self._main_splitter.setSizes([350, width - 400])
             self._sidebar_frame.setMaximumWidth(520)
         
-        self._status(f"Window resized to {width}Ă—{height}")
+        self._status(f"Window resized to {width}x{height}")
     
     def closeEvent(self, event):
         """Save UI state on close."""
@@ -1689,9 +1689,9 @@ class MainWindow(QMainWindow):
             self.dual_stim_widget.retranslate_ui()
         repair_widget_tree(self)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  SIMULATION HELPERS
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def _lock_ui(self, busy: bool):
         for btn in (self.btn_run, self.btn_stoch, self.btn_sweep,
                     self.btn_sd, self.btn_excmap):
@@ -1795,12 +1795,12 @@ class MainWindow(QMainWindow):
     def _report_progress(self, i: int, n: int, val):
         """Update status bar with progress from long operations."""
         pct = int(100 * i / max(1, n))
-        self._status(f"Progress: {pct}% ({i}/{n}) â€” Value: {val:.3g}")
+        self._status(f"Progress: {pct}% ({i}/{n}) — Value: {val:.3g}")
         QApplication.processEvents()
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  1. STANDARD RUN
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def run_simulation(self):
         self._lock_ui(True)
         self._status(T.tr('status_computing'))
@@ -1820,7 +1820,7 @@ class MainWindow(QMainWindow):
         mc_trials = self.config_manager.config.analysis.mc_trials
 
         if run_mc:
-            self._status(f"Monte-Carlo ({mc_trials} trials)â€¦")
+            self._status(f"Monte-Carlo ({mc_trials} trials)...")
         QApplication.processEvents()
 
         # Run simulation through SimulationController
@@ -1859,9 +1859,9 @@ class MainWindow(QMainWindow):
         Handle completed simulation payloads and update the UI accordingly.
         
         Processes the provided result dictionary which may contain:
-        - 'single': a single-run result object â€” stores it as the last result, updates plots, analytics, topology, axon biophysics, sparkline, enables export actions, and updates the status with compartment count and ATP estimate. If the result indicates divergence (`res.diverged`), updates plots/analytics, sets a warning status, and aborts the normal completion flow.
-        - 'mc_results': a list of Monte Carlo trial results â€” updates oscilloscope Monte Carlo view and status with trial count.
-        - 'bif': bifurcation data (paired with 'bif_param') â€” updates the analytics bifurcation view.
+        - 'single': a single-run result object — stores it as the last result, updates plots, analytics, topology, axon biophysics, sparkline, enables export actions, and updates the status with compartment count and ATP estimate. If the result indicates divergence (`res.diverged`), updates plots/analytics, sets a warning status, and aborts the normal completion flow.
+        - 'mc_results': a list of Monte Carlo trial results — updates oscilloscope Monte Carlo view and status with trial count.
+        - 'bif': bifurcation data (paired with 'bif_param') — updates the analytics bifurcation view.
         
         The method always selects the oscilloscope tab, shows a critical message box on unexpected errors, and ensures the UI is unlocked at the end.
         
@@ -1898,8 +1898,8 @@ class MainWindow(QMainWindow):
                 self.btn_export_plot.setEnabled(True)
                 self.btn_export.setEnabled(True)
                 self._status(
-                    f"Done â€” {res.n_comp} compartments, "
-                    f"ATP â‰ {res.atp_estimate:.3e} nmol/cmÂ˛"
+                    f"Done — {res.n_comp} compartments, "
+                    f"ATP ≈ {res.atp_estimate:.3e} nmol/cm²"
                 )
 
             if 'bif' in result:
@@ -1908,7 +1908,7 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentWidget(self.oscilloscope)
         except Exception as e:
             QMessageBox.critical(self, "Simulation Error", str(e))
-            self._status("Error â€” check parameters.")
+            self._status("Error — check parameters.")
         finally:
             self._lock_ui(False)
 
@@ -1934,9 +1934,9 @@ class MainWindow(QMainWindow):
         else:
             self._status("Dual stimulation disabled")
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  2. STOCHASTIC
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def run_stochastic(self):
         self._lock_ui(True)
         self._status("Stochastic simulation...")
@@ -1976,9 +1976,9 @@ class MainWindow(QMainWindow):
         self._status("Stochastic run complete.")
         self.tabs.setCurrentWidget(self.oscilloscope)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  3. SWEEP
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def run_sweep(self):
         ana = self.config_manager.config.analysis
         if not hasattr(ana, 'sweep_param') or not ana.sweep_param:
@@ -1993,8 +1993,8 @@ class MainWindow(QMainWindow):
         param_vals = np.linspace(ana.sweep_min, ana.sweep_max, ana.sweep_steps)
 
         self._lock_ui(True)
-        self._status(f"Sweep: {ana.sweep_param}  [{ana.sweep_min}â€¦{ana.sweep_max}]  "
-                     f"{ana.sweep_steps} stepsâ€¦")
+        self._status(f"Sweep: {ana.sweep_param}  [{ana.sweep_min}...{ana.sweep_max}]  "
+                     f"{ana.sweep_steps} steps...")
         QApplication.processEvents()
 
         # Run sweep through SimulationController
@@ -2009,12 +2009,12 @@ class MainWindow(QMainWindow):
     def _on_sweep_done(self, results, param_name):
         self.analytics.update_sweep(results, param_name)
         self._lock_ui(False)
-        self._status(f"Sweep complete â€” {len(results)} steps.")
+        self._status(f"Sweep complete — {len(results)} steps.")
         self.tabs.setCurrentWidget(self.analytics)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  4. S-D CURVE
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def run_sd_curve(self):
         if not self._preflight_validate():
             return
@@ -2026,9 +2026,9 @@ class MainWindow(QMainWindow):
 
         self._lock_ui(True)
         if dual_enabled:
-            self._status("Computing Strength-Duration curve (dual-stim disabled for S-D analysis)â€¦")
+            self._status("Computing Strength-Duration curve (dual-stim disabled for S-D analysis)...")
         else:
-            self._status("Computing Strength-Duration curve (binary search)â€¦")
+            self._status("Computing Strength-Duration curve (binary search)...")
         QApplication.processEvents()
         # Run S-D curve through SimulationController
         self.sim_controller.run_sd_curve(
@@ -2044,14 +2044,14 @@ class MainWindow(QMainWindow):
         self.analytics.update_sd_curve(sd)
         self._lock_ui(False)
         self._status(
-            f"S-D done â€” Rheobase={rh:.2f} ÂµA/cmÂ˛  "
-            f"Chronaxie={'â€”' if tc != tc else f'{tc:.2f} ms'}"
+            f"S-D done — Rheobase={rh:.2f} µA/cmÂ˛  "
+            f"Chronaxie={'—' if tc != tc else f'{tc:.2f} ms'}"
         )
         self.tabs.setCurrentWidget(self.analytics)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  5. EXCITABILITY MAP
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def run_excmap(self):
         if not self._preflight_validate():
             return
@@ -2066,11 +2066,11 @@ class MainWindow(QMainWindow):
         self._lock_ui(True)
         if dual_enabled:
             self._status(
-                f"Excitability map {ana.excmap_NI}Ă—{ana.excmap_ND} = {total} runs "
-                "(dual-stim disabled for map analysis)â€¦"
+                f"Excitability map {ana.excmap_NI}x{ana.excmap_ND} = {total} runs "
+                "(dual-stim disabled for map analysis)..."
             )
         else:
-            self._status(f"Excitability map {ana.excmap_NI}Ă—{ana.excmap_ND} = {total} runsâ€¦")
+            self._status(f"Excitability map {ana.excmap_NI}x{ana.excmap_ND} = {total} runs...")
         QApplication.processEvents()
         # Run excitability map through SimulationController
         self.sim_controller.run_excmap(
@@ -2086,9 +2086,9 @@ class MainWindow(QMainWindow):
         self._status("Excitability map complete.")
         self.tabs.setCurrentWidget(self.analytics)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  EXPORT CSV
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def export_plot(self):
         if not hasattr(self, '_last_result'):
             QMessageBox.information(self, "Export Plot", "Run simulation first to export a plot.")
@@ -2212,9 +2212,9 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     #  EXPORT NEUROML (Stage 6.4)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
     def export_neuroml(self):
         """Export current FullModelConfig to NeuroML 2.2 XML."""
         from core.neuroml_export import export_neuroml as _export
@@ -2284,9 +2284,9 @@ class MainWindow(QMainWindow):
             self.form_preset_modes.refresh()
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 #  GUIDE HTML
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────
 _GUIDE_HTML = """
 <html><body style="background:#0D1117; color:#C9D1D9; font-family:Segoe UI,sans-serif; padding:20px;">
 
@@ -2385,14 +2385,14 @@ Interpret terminal modes as late-pathology behavior for analysis/education, not 
 When <b>Dual Stim</b> is enabled, an additional secondary stimulus can be configured in the Dual tab.
 </p>
 
-<h2 style="color:#A6E3A1;">đź’ľ Export</h2>
-<p>After a run, click <b>đź’ľ Export CSV</b> to save all traces (V, currents, gates, Ca) as a CSV file
+<h2 style="color:#A6E3A1;">💾 Export</h2>
+<p>After a run, click <b>💾 Export CSV</b> to save all traces (V, currents, gates, Ca) as a CSV file
 compatible with Excel, MATLAB, Python/pandas, etc. Use <b>Export Plot</b> to save the current
 oscilloscope view as PNG, SVG, or PDF.</p>
 
 <hr style="border-color:#45475A;">
 <p style="color:#585B70; font-size:11px;">
-HH Simulator v11.3 â€” Python/PySide6 port of Scilab HH v9.0 |
+HH Simulator v11.3 — Python/PySide6 port of Scilab HH v9.0 |
 Numba JIT kinetics | scipy.sparse Laplacian | BDF + Native Hines solvers
 </p>
 </body></html>

@@ -83,6 +83,12 @@ class ChannelRegistry:
             ]
         ))
 
+        # 9. I_M (M-type K+, muscarinic-sensitive)
+        self.channels.append(Channel(
+            name="IM", color=(0.5, 0.8, 0.2),
+            gates=[GateInfo('w', 1, aw_IM, bw_IM)]
+        ))
+
         # 10. I_NaP (Persistent Na+ — Magistretti & Alonso 1999)
         self.channels.append(Channel(
             name="NaP", color=(1.0, 0.4, 0.4),
