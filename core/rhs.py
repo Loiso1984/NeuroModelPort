@@ -1,17 +1,26 @@
-import numpy as np
+﻿import numpy as np
 from numba import njit, float64, int32
 from .kinetics import *
 from .dual_stimulation import (
     distributed_stimulus_current_for_comp,
 )
-from .physics_params import PhysicsParams, unpack_conductances, unpack_temperature_scaling
+from .physics_params import (
+    PhysicsParams,
+    unpack_conductances,
+    unpack_env_params,
+    unpack_temperature_scaling,
+)
 
-# Константы | Constants
+# ĐšĐľĐ˝ŃŃ‚Đ°Đ˝Ń‚Ń‹ | Constants
 F_CONST = 96485.33
 R_GAS = 8.314
 TEMP_ZERO = 273.15
 CA_I_MIN_M_M = 1e-9
 CA_I_MAX_M_M = 10.0
+NA_I_MIN_M_M = 1.0
+NA_I_MAX_M_M = 80.0
+K_O_MIN_M_M = 1.0
+K_O_MAX_M_M = 30.0
 CA_DAMPING_FACTOR = 0.5  # Damped reflection factor for calcium bounds (prevents oscillation)
 # When calcium hits its physiological bounds, instead of zeroing the derivative (which creates
 # an artificial equilibrium), we reflect it with damping. A value of 0.5 provides sufficient
@@ -45,7 +54,7 @@ if OU_NOISE_FREQUENCY <= 0.0:
 
 # Synaptic reversal potentials (mV)
 E_GABA_A = -75.0  # GABA-A (Cl-), Bormann 1988, J Physiol 406: 331-350
-E_GABA_B = -95.0  # GABA-B (K+ via GIRK), Lüscher 1997, Science 275: 1097-1100
+E_GABA_B = -95.0  # GABA-B (K+ via GIRK), LĂĽscher 1997, Science 275: 1097-1100
 E_EXCITATORY = 0.0  # AMPA, NMDA, Kainate, Nicotinic (cation), ~0 mV
 # Reference: Johnston & Wu 1995, Foundations of Cellular Neurophysiology
 
@@ -57,9 +66,29 @@ MG_BLOCK_VOLTAGE_FACTOR = -0.062  # mV^-1, voltage sensitivity
 
 @njit(float64(float64, float64, float64), cache=True)
 def nernst_ca_ion(ca_i, ca_ext, t_kelvin):
-    """Динамический потенциал Нернста для Кальция (z=2). | Dynamic Nernst potential for Calcium (z=2)."""
+    """Đ”Đ¸Đ˝Đ°ĐĽĐ¸Ń‡ĐµŃĐşĐ¸Đą ĐżĐľŃ‚ĐµĐ˝Ń†Đ¸Đ°Đ» ĐťĐµŃ€Đ˝ŃŃ‚Đ° Đ´Đ»ŃŹ ĐšĐ°Đ»ŃŚŃ†Đ¸ŃŹ (z=2). | Dynamic Nernst potential for Calcium (z=2)."""
     ca_i_safe = min(max(ca_i, CA_I_MIN_M_M), CA_I_MAX_M_M)
     return (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(ca_ext / ca_i_safe) * 1000.0
+
+
+@njit(float64(float64, float64, float64, float64), cache=True)
+def nernst_mono_ion(c_in, c_out, z_val, t_kelvin):
+    """Generic Nernst helper for monovalent ions when z_val=1 or -1."""
+    c_in_safe = max(c_in, 1e-9)
+    c_out_safe = max(c_out, 1e-9)
+    return (R_GAS * t_kelvin / (z_val * F_CONST)) * np.log(c_out_safe / c_in_safe) * 1000.0
+
+
+@njit(float64(float64, float64, float64), cache=True)
+def nernst_na_ion(na_i, na_ext, t_kelvin):
+    na_i_safe = min(max(na_i, NA_I_MIN_M_M), NA_I_MAX_M_M)
+    return nernst_mono_ion(na_i_safe, na_ext, 1.0, t_kelvin)
+
+
+@njit(float64(float64, float64, float64), cache=True)
+def nernst_k_ion(k_i, k_o, t_kelvin):
+    k_o_safe = min(max(k_o, K_O_MIN_M_M), K_O_MAX_M_M)
+    return nernst_mono_ion(k_i, k_o_safe, 1.0, t_kelvin)
 
 @njit(float64(float64, float64, float64, float64), cache=True)
 def _biexp_waveform(t, t0, tau_rise, tau_decay):
@@ -146,7 +175,7 @@ def _calculate_syn_tau(stype, atau_mult):
 def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     """Return stimulus current at time t for various stimulus types.
 
-    For stype >= 4, iext is a conductance amplitude [mS/cm²] and must be
+    For stype >= 4, iext is a conductance amplitude [mS/cmÂ˛] and must be
     non-negative. Current direction is determined later by (V - E_syn).
     """
     # Input validation
@@ -163,7 +192,7 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
         return iext if t >= t0 else 0.0
     elif stype == 1:  # pulse
         return iext if t0 <= t <= t0 + td else 0.0
-    elif stype == 2:  # alpha (EPSC) — current-based
+    elif stype == 2:  # alpha (EPSC) â€” current-based
         if t < t0:
             return 0.0
         dt = (t - t0) / atau
@@ -200,9 +229,9 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
 
 @njit(float64(float64, float64), cache=True)
 def nmda_mg_block(V, Mg_ext):
-    """Voltage-dependent Mg²⁺ block of NMDA receptors.
+    """Voltage-dependent MgÂ˛âş block of NMDA receptors.
 
-    B(V) = 1 / (1 + [Mg²⁺]/MG_BLOCK_CONST * exp(MG_BLOCK_VOLTAGE_FACTOR * V))
+    B(V) = 1 / (1 + [MgÂ˛âş]/MG_BLOCK_CONST * exp(MG_BLOCK_VOLTAGE_FACTOR * V))
     Reference: Jahr & Stevens 1990, J Neurosci 10:1830
     """
     return 1.0 / (1.0 + (Mg_ext / MG_BLOCK_CONST) * np.exp(MG_BLOCK_VOLTAGE_FACTOR * V))
@@ -224,14 +253,14 @@ def compute_ionic_currents_scalar(
     
     Parameters:
         vi (float): Membrane voltage in millivolts.
-        sk_gate (float): SK-channel activation variable (unitless, typically 0–1).
+        sk_gate (float): SK-channel activation variable (unitless, typically 0â€“1).
         dyn_ca (bool): If True, compute Ca reversal from concentrations and accumulate Ca influx.
         ca_i_val (float): Intracellular Ca concentration in mM; clamped to physiological bounds when used.
         ca_ext (float): Extracellular Ca concentration in mM (used for Nernst calculation).
         t_kelvin (float): Absolute temperature in Kelvin (used for Nernst calculation).
     
     Returns:
-        tuple: `(i_ion, i_ca_influx)` where `i_ion` is the net ionic current (signed, same units as input conductances × mV) and `i_ca_influx` is the positive magnitude of inward Ca current (0.0 if no inward Ca current).
+        tuple: `(i_ion, i_ca_influx)` where `i_ion` is the net ionic current (signed, same units as input conductances Ă— mV) and `i_ca_influx` is the positive magnitude of inward Ca current (0.0 if no inward Ca current).
     """
     i_ion = gl * (vi - el)
     i_ion += gna * (mi * mi * mi) * hi * (vi - ena)
@@ -314,7 +343,7 @@ def get_event_driven_conductance(t: float64, stype: int32, iext: float64,
                                    n_events (int32): Number of event entries from `event_times` to consider.
                                
                                Returns:
-                                   float64: Total conductance (mS/cm²) at time t, computed as `abs(iext)` times the sum of per-event normalized waveforms.
+                                   float64: Total conductance (mS/cmÂ˛) at time t, computed as `abs(iext)` times the sum of per-event normalized waveforms.
                                """
     if n_events == 0 or atau <= 0.0:
         return 0.0
@@ -323,7 +352,7 @@ def get_event_driven_conductance(t: float64, stype: int32, iext: float64,
     if n_events > len(event_times):
         return 0.0
     
-    # Use shared tau helper — keeps get_stim_current and event-driven paths consistent
+    # Use shared tau helper â€” keeps get_stim_current and event-driven paths consistent
     tau_r, tau_d = _calculate_syn_tau(stype, atau)
     if tau_r == 0.0 and tau_d == 0.0:
         return 0.0
@@ -343,10 +372,10 @@ def rhs_multicompartment(
     t, y, physics_params, dydt
 ):
     """
-    Compute time derivatives for a multi-compartment Hodgkin–Huxley–type neuron model.
+    Compute time derivatives for a multi-compartment Hodgkinâ€“Huxleyâ€“type neuron model.
     
     This function evaluates membrane voltage and gating-variable ODEs for all compartments, including:
-    - intrinsic ionic currents (Na, K, leak, Ih, Ca, A, T‑type Ca, M, SK, persistent/resurgent Na as configured),
+    - intrinsic ionic currents (Na, K, leak, Ih, Ca, A, Tâ€‘type Ca, M, SK, persistent/resurgent Na as configured),
     - synaptic/externally applied stimuli (supporting current- and conductance-based modes, event-driven conductances, NMDA Mg2+ block, and optional dual stimulation),
     - sparse axial coupling via a Laplacian representation,
     - optional calcium and ATP dynamics with physiologically bounded handling,
@@ -388,21 +417,27 @@ def rhs_multicompartment(
     (phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, 
      phi_im, phi_nap, phi_nar) = unpack_temperature_scaling(physics_params.phi_mat, n_comp)
     
-    # Environment and calcium
-    t_kelvin = physics_params.t_kelvin
-    ca_ext = physics_params.ca_ext
-    ca_rest = physics_params.ca_rest
-    tau_ca = physics_params.tau_ca
+    # Environment and ATP/metabolism scalars (packed for index-stable native/Jacobian use)
+    (
+        t_kelvin,
+        ca_ext,
+        ca_rest,
+        tau_ca,
+        mg_ext,
+        tau_sk,
+        im_speed_multiplier,
+        g_katp_max,
+        katp_kd_atp_mM,
+        atp_max_mM,
+        atp_synthesis_rate,
+        na_i_rest_mM,
+        na_ext_mM,
+        k_i_mM,
+        k_o_rest_mM,
+        ion_drift_gain,
+        k_o_clearance_tau_ms,
+    ) = unpack_env_params(physics_params.env_params)
     b_ca = physics_params.b_ca
-    mg_ext = physics_params.mg_ext
-    tau_sk = physics_params.tau_sk
-    im_speed_multiplier = physics_params.im_speed_multiplier
-
-    # ATP metabolism parameters
-    g_katp_max = physics_params.g_katp_max
-    katp_kd_atp_mM = physics_params.katp_kd_atp_mM
-    atp_max_mM = physics_params.atp_max_mM
-    atp_synthesis_rate = physics_params.atp_synthesis_rate
     
     # Primary stimulation
     stype = physics_params.stype
@@ -439,75 +474,34 @@ def rhs_multicompartment(
 
 
     
-    off_v = 0
-    off_m = n_comp
-    off_h = 2 * n_comp
-    off_n = 3 * n_comp
-    cursor = 4 * n_comp
-
-    off_r = cursor
-    if en_ih:
-        cursor += n_comp
-    off_s = cursor
-    off_u = cursor
-    if en_ica:
-        off_s = cursor
-        cursor += n_comp
-        off_u = cursor
-        cursor += n_comp
-    off_a = cursor
-    off_b = cursor
-    if en_ia:
-        off_a = cursor
-        cursor += n_comp
-        off_b = cursor
-        cursor += n_comp
-    off_p = cursor   # T-type Ca activation
-    off_q = cursor   # T-type Ca inactivation
-    if en_itca:
-        off_p = cursor
-        cursor += n_comp
-        off_q = cursor
-        cursor += n_comp
-    off_w = cursor   # M-type K activation
-    if en_im:
-        off_w = cursor
-        cursor += n_comp
-    off_x = cursor   # Persistent Na activation
-    if en_nap:
-        off_x = cursor
-        cursor += n_comp
-    off_y = cursor   # Resurgent Na activation
-    off_j = cursor   # Resurgent Na inactivation/block
-    if en_nar:
-        off_y = cursor
-        cursor += n_comp
-        off_j = cursor
-        cursor += n_comp
-    off_zsk = cursor   # SK gate (delayed kinetics)
-    if en_sk:
-        off_zsk = cursor
-        cursor += n_comp
-    off_ca = cursor
-    if dyn_ca:
-        cursor += n_comp
-
-    off_atp = cursor
-    if dyn_atp:
-        cursor += n_comp
-
-    # Dendritic filter state offsets
-    off_ifilt_primary = cursor
-    if use_dfilter_primary == 1:
-        cursor += 1
-    off_ifilt_secondary = cursor
-    if use_dfilter_secondary == 1:
-        cursor += 1
+    offsets = physics_params.state_offsets
+    off_v = int(offsets.off_v)
+    off_m = int(offsets.off_m)
+    off_h = int(offsets.off_h)
+    off_n = int(offsets.off_n)
+    off_r = int(offsets.off_r)
+    off_s = int(offsets.off_s)
+    off_u = int(offsets.off_u)
+    off_a = int(offsets.off_a)
+    off_b = int(offsets.off_b)
+    off_p = int(offsets.off_p)
+    off_q = int(offsets.off_q)
+    off_w = int(offsets.off_w)
+    off_x = int(offsets.off_x)
+    off_y = int(offsets.off_y)
+    off_j = int(offsets.off_j)
+    off_zsk = int(offsets.off_zsk)
+    off_ca = int(offsets.off_ca)
+    off_atp = int(offsets.off_atp)
+    off_na_i = int(offsets.off_na_i)
+    off_k_o = int(offsets.off_k_o)
+    off_ifilt_primary = int(offsets.off_ifilt_primary)
+    off_ifilt_secondary = int(offsets.off_ifilt_secondary)
 
     # --- Stimulus: compute once, apply to target compartments ---
-    # For stype >= 4 (synaptic): base_current is conductance g(t) [mS/cm²]
+    # For stype >= 4 (synaptic): base_current is conductance g(t) [mS/cmÂ˛]
     # and will be multiplied by (V - E_syn) per-compartment in the main loop.
-    # For stype < 4 (const/pulse/alpha): base_current is raw current [µA/cm²].
+    # For stype < 4 (const/pulse/alpha): base_current is raw current [ÂµA/cmÂ˛].
     is_conductance_based = (stype >= 4)
     # Stage 6.3: event-driven mode if queue is non-empty and stim is synaptic
     if n_events > 0 and is_conductance_based:
@@ -578,13 +572,17 @@ def rhs_multicompartment(
         zi = y[off_zsk + i] if en_sk else 0.0
         ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
         atp_i_val = y[off_atp + i] if dyn_atp else atp_max_mM
+        na_i_val = y[off_na_i + i] if off_na_i >= 0 else na_i_rest_mM
+        k_o_val = y[off_k_o + i] if off_k_o >= 0 else k_o_rest_mM
+        ena_i = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin) if dyn_atp else ena
+        ek_i = nernst_k_ion(k_i_mM, k_o_val, t_kelvin) if dyn_atp else ek
 
         i_ion, i_ca_influx = compute_ionic_currents_scalar(
             vi, mi, hi, ni,
             ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
             en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
             gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i], gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
-            ena, ek, el, eih,
+            ena_i, ek_i, el, eih,
             ca_i_val, ca_ext, ca_rest, t_kelvin,
         )
 
@@ -594,15 +592,24 @@ def rhs_multicompartment(
         if dyn_atp:
             atp_ratio = atp_i_val / katp_kd_atp_mM
             g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
-            i_katp = g_katp * (vi - ek)
+            i_katp = g_katp * (vi - ek_i)
             i_ion += i_katp
 
         # Electrogenic Na/K pump current: outward-positive, scales with inward Na load
-        i_na_total = gna_v[i] * (mi ** 3) * hi * (vi - ena)
+        i_na_total = gna_v[i] * (mi ** 3) * hi * (vi - ena_i)
         if en_nap:
-            i_na_total += gnap_v[i] * xi * (vi - ena)
+            i_na_total += gnap_v[i] * xi * (vi - ena_i)
         if en_nar:
-            i_na_total += gnar_v[i] * yi * ji * (vi - ena)
+            i_na_total += gnar_v[i] * yi * ji * (vi - ena_i)
+        i_k_total = gk_v[i] * (ni ** 4) * (vi - ek_i)
+        if en_ia:
+            i_k_total += ga_v[i] * ai * bi * (vi - ek_i)
+        if en_sk:
+            i_k_total += gsk_v[i] * zi * (vi - ek_i)
+        if en_im:
+            i_k_total += gim_v[i] * wi * (vi - ek_i)
+        if dyn_atp:
+            i_k_total += i_katp
         pump_atp_val = atp_i_val if dyn_atp else atp_max_mM
         i_pump = compute_na_k_pump_current(i_na_total, pump_atp_val)
 
@@ -618,7 +625,7 @@ def rhs_multicompartment(
             use_dfilter_primary_eff, dfilter_attenuation, dfilter_tau_ms, i_filtered_primary,
         )
         if is_conductance_based:
-            g_syn = i_stim_primary  # distributed conductance [mS/cm²]
+            g_syn = i_stim_primary  # distributed conductance [mS/cmÂ˛]
             if is_nmda:
                 g_syn *= nmda_mg_block(vi, mg_ext)
             i_stim_eff = -(g_syn * (vi - e_syn))
@@ -642,7 +649,7 @@ def rhs_multicompartment(
         # dV/dt
         dydt[off_v + i] = (i_stim_eff - i_ion - i_pump + i_ax) / max(cm_v[i], 1e-12)
 
-        # Gate derivatives (HH core) — per-compartment Q10 (Stage 6.2: thermal gradient)
+        # Gate derivatives (HH core) â€” per-compartment Q10 (Stage 6.2: thermal gradient)
         dydt[off_m + i] = phi_na[i] * (am(vi) * (1.0 - mi) - bm(vi) * mi)
         dydt[off_h + i] = phi_na[i] * (ah(vi) * (1.0 - hi) - bh(vi) * hi)
         dydt[off_n + i] = phi_k[i] * (an(vi) * (1.0 - ni) - bn(vi) * ni)
@@ -661,20 +668,20 @@ def rhs_multicompartment(
         if en_ia:
             ai = y[off_a + i]
             bi = y[off_b + i]
-            # A-current is a K channel — scale with phi_k (not phi_ia)
+            # A-current is a K channel â€” scale with phi_k (not phi_ia)
             dydt[off_a + i] = phi_k[i] * (aa_IA(vi) * (1.0 - ai) - ba_IA(vi) * ai)
             dydt[off_b + i] = phi_k[i] * (ab_IA(vi) * (1.0 - bi) - bb_IA(vi) * bi)
 
         if en_itca:
             pi = y[off_p + i]
             qi = y[off_q + i]
-            # T-type Ca is a Ca channel — scale with phi_ca (not phi_tca)
+            # T-type Ca is a Ca channel â€” scale with phi_ca (not phi_tca)
             dydt[off_p + i] = phi_ca[i] * (am_TCa(vi) * (1.0 - pi) - bm_TCa(vi) * pi)
             dydt[off_q + i] = phi_ca[i] * (ah_TCa(vi) * (1.0 - qi) - bh_TCa(vi) * qi)
 
         if en_im:
             wi = y[off_w + i]
-            # M-type K is a K channel — scale with phi_k (not phi_im)
+            # M-type K is a K channel â€” scale with phi_k (not phi_im)
             dydt[off_w + i] = (
                 phi_k[i] * im_speed_multiplier * (aw_IM(vi) * (1.0 - wi) - bw_IM(vi) * wi)
             )
@@ -690,13 +697,13 @@ def rhs_multicompartment(
             dydt[off_j + i] = phi_nar[i] * (aj_NaR(vi) * (1.0 - ji) - bj_NaR(vi) * ji)
 
         # SK gate ODE: dz/dt = phi_k * (z_inf(Ca) - z) / tau_SK
-        # SK is a Ca-activated K channel — temperature scaling via phi_k.
+        # SK is a Ca-activated K channel â€” temperature scaling via phi_k.
         # Hirschberg et al. 1998, J Gen Physiol 111:565
         if en_sk:
             zi = y[off_zsk + i]
             if dyn_ca:
-                # Clamp calcium for SK gating to prevent saturation (limit to 10 µM)
-                ca_sk = min(max(y[off_ca + i], CA_I_MIN_M_M), 0.01)
+                # Local microdomain proxy: SK sensors see higher Ca near open Ca channels.
+                ca_sk = min(max(y[off_ca + i] * 10.0, CA_I_MIN_M_M), 1.0)
             else:
                 ca_sk = ca_rest
             z_inf = z_inf_SK(ca_sk)
@@ -722,15 +729,8 @@ def rhs_multicompartment(
         # ATP dynamics
         if dyn_atp:
             atp_i_val = y[off_atp + i]
-            # Pump consumption: proportional to Na+ and Ca2+ influx
-            # Simplified model: consumption ~ |I_Na| + 3*|I_Ca| (Na/K pump uses 3 Na per ATP)
-            i_na = gna_v[i] * (mi * mi * mi) * hi * (vi - ena)
-            if en_nap:
-                i_na += gnap_v[i] * xi * (vi - ena)
-            if en_nar:
-                i_na += gnar_v[i] * yi * ji * (vi - ena)
             pump_availability = _pump_availability_from_atp(atp_i_val)
-            pump_consumption = max(0.0, -i_na) * pump_availability * _NA_PUMP_FACTOR
+            pump_consumption = max(0.0, -i_na_total) * pump_availability * _NA_PUMP_FACTOR
             if dyn_ca:
                 pump_consumption += i_ca_influx * _CA_PUMP_FACTOR
 
@@ -752,10 +752,28 @@ def rhs_multicompartment(
 
             dydt[off_atp + i] = datp
 
-    # Dendritic filter ODEs (outside main loop — not per-compartment)
+            if off_na_i >= 0:
+                dnai = ion_drift_gain * (max(0.0, -i_na_total) - 3.0 * i_pump)
+                if na_i_val <= NA_I_MIN_M_M and dnai < 0.0:
+                    dnai = abs(dnai) * 0.5
+                elif na_i_val >= NA_I_MAX_M_M and dnai > 0.0:
+                    dnai = -abs(dnai) * 0.5
+                dydt[off_na_i + i] = dnai
+
+            if off_k_o >= 0:
+                dko = ion_drift_gain * (max(0.0, i_k_total) - 2.0 * i_pump)
+                dko -= (k_o_val - k_o_rest_mM) / max(k_o_clearance_tau_ms, 1e-12)
+                if k_o_val <= K_O_MIN_M_M and dko < 0.0:
+                    dko = abs(dko) * 0.5
+                elif k_o_val >= K_O_MAX_M_M and dko > 0.0:
+                    dko = -abs(dko) * 0.5
+                dydt[off_k_o + i] = dko
+
+    # Dendritic filter ODEs (outside main loop â€” not per-compartment)
     if use_dfilter_primary == 1:
         dydt[off_ifilt_primary] = d_ifiltered_dt_primary
     if use_dfilter_secondary == 1:
         dydt[off_ifilt_secondary] = d_ifiltered_dt_secondary
 
     return dydt
+

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+﻿from pydantic import BaseModel, Field, model_validator
 from typing import Literal, List, Optional, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -14,7 +14,7 @@ class MorphologyParams(BaseModel):
     N_ais: int          = Field(default=2,   ge=0,  description="Number of AIS segments")
     d_ais: float        = Field(default=1.5e-4, gt=0, description="AIS diameter (cm)")
     l_ais: float        = Field(default=0.002, gt=0, description="AIS segment length (cm)")
-    gNa_ais_mult: float = Field(default=40.0, ge=1.0, description="gNa multiplier in AIS (40–100×)")
+    gNa_ais_mult: float = Field(default=40.0, ge=1.0, description="gNa multiplier in AIS (40â€“100Ă—)")
     gK_ais_mult:  float = Field(default=5.0,  ge=1.0, description="gK multiplier in AIS")
     gIh_ais_mult: float = Field(default=1.0,           description="gIh multiplier in AIS")
     gCa_ais_mult: float = Field(default=2.0,           description="gCa multiplier in AIS")
@@ -24,7 +24,7 @@ class MorphologyParams(BaseModel):
     N_trunk: int   = Field(default=35, ge=0, description="Number of trunk segments")
     d_trunk: float = Field(default=2e-4,  gt=0, description="Trunk diameter (cm)")
     gNa_trunk_mult: float = Field(default=1.0, ge=0.0, le=1.0,
-        description="gNa multiplier in trunk (0–1×). Default 1.0 = uniform density; "
+        description="gNa multiplier in trunk (0â€“1Ă—). Default 1.0 = uniform density; "
                     "set <1 to model internodal Na-channel scarcity (demyelination).")
     gL_trunk_mult: float = Field(default=1.0, ge=0.0, description="gL multiplier in trunk/branches. Default 1.0. "
                     "Set >1 to model myelin loss (massive leak in exposed membrane).")
@@ -37,20 +37,20 @@ class MorphologyParams(BaseModel):
     N_b2: int  = Field(default=4,    ge=0, description="Branch 2 segments")
     d_b2: float = Field(default=1.0e-4, gt=0, description="Branch 2 diameter (cm)")
 
-    Ra: float = Field(default=150.0, gt=0, description="Axial resistance (Ω·cm)")
+    Ra: float = Field(default=150.0, gt=0, description="Axial resistance (Î©Â·cm)")
     dx: float = Field(default=0.002, gt=0, description="Segment length (cm)")
 
 
 class ChannelParams(BaseModel):
     """Ion channel conductances and reversal potentials.
     
-    All conductances are stored as density (mS/cm²) for consistency with the 
+    All conductances are stored as density (mS/cmÂ˛) for consistency with the 
     multi-compartment system. They are not pre-scaled by area.
     """
-    Cm:       float = Field(default=1.0,      gt=0, description="Membrane capacitance (µF/cm²)")
-    gNa_max:  float = Field(default=120.0,    ge=0, description="Max Na conductance (mS/cm²)")
-    gK_max:   float = Field(default=36.0,     ge=0, description="Max K conductance (mS/cm²)")
-    gL:       float = Field(default=0.3,      ge=0, description="Leak conductance (mS/cm²)")
+    Cm:       float = Field(default=1.0,      gt=0, description="Membrane capacitance (ÂµF/cmÂ˛)")
+    gNa_max:  float = Field(default=120.0,    ge=0, description="Max Na conductance (mS/cmÂ˛)")
+    gK_max:   float = Field(default=36.0,     ge=0, description="Max K conductance (mS/cmÂ˛)")
+    gL:       float = Field(default=0.3,      ge=0, description="Leak conductance (mS/cmÂ˛)")
     ENa:      float = Field(default=50.0,           description="Na reversal potential (mV)")
     EK:       float = Field(default=-77.0,          description="K reversal potential (mV)")
     EL:       float = Field(default=-54.387,         description="Leak reversal potential (mV)")
@@ -58,15 +58,15 @@ class ChannelParams(BaseModel):
     e_rev_syn_secondary: float = Field(default=-75.0, description="Secondary stimulus synaptic reversal (mV, for pathology)")
 
     enable_Ih: bool  = Field(default=False, description="Enable Ih (HCN pacemaker current)")
-    gIh_max:   float = Field(default=0.02,  description="Max Ih conductance (mS/cm²)")
+    gIh_max:   float = Field(default=0.02,  description="Max Ih conductance (mS/cmÂ˛)")
     E_Ih:      float = Field(default=-30.0, description="Ih reversal potential (mV)")
 
-    enable_ICa: bool  = Field(default=False, description="Enable L-type Ca²⁺ current")
-    gCa_max:    float = Field(default=1.0, description="Max Ca conductance (mS/cm²)")
+    enable_ICa: bool  = Field(default=False, description="Enable L-type CaÂ˛âş current")
+    gCa_max:    float = Field(default=1.0, description="Max Ca conductance (mS/cmÂ˛)")
     E_Ca:       float = Field(default=120.0, description="Ca reversal potential (mV) [overridden by Nernst if dynamic Ca]")
 
-    enable_IA: bool  = Field(default=False, description="Enable A-current (transient K⁺, Connor-Stevens)")
-    gA_max:    float = Field(default=0.4, description="Max A-current conductance (mS/cm²)")  # Default 0.4, NOT 10.0 (was unphysiologically high)
+    enable_IA: bool  = Field(default=False, description="Enable A-current (transient Kâş, Connor-Stevens)")
+    gA_max:    float = Field(default=0.4, description="Max A-current conductance (mS/cmÂ˛)")  # Default 0.4, NOT 10.0 (was unphysiologically high)
     
     @property
     def E_A(self) -> float:
@@ -78,34 +78,34 @@ class ChannelParams(BaseModel):
         """Backward-compatible alias: writing E_A updates EK."""
         self.EK = float(value)
 
-    enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated K⁺, spike adaptation)")
-    gSK_max:   float = Field(default=2.0,  description="Max SK conductance (mS/cm²)")
+    enable_SK: bool  = Field(default=False, description="Enable SK channel (Ca-activated Kâş, spike adaptation)")
+    gSK_max:   float = Field(default=2.0,  description="Max SK conductance (mS/cmÂ˛)")
     tau_SK:    float = Field(default=10.0,  description="SK gate time constant (ms, Hirschberg 1998: 5-50 ms)")
 
-    enable_ITCa: bool  = Field(default=False, description="Enable T-type Ca²⁺ current (low-threshold, CaV3.x)")
-    gTCa_max:    float = Field(default=2.0,  description="Max T-type Ca conductance (mS/cm², Destexhe 1998)")
+    enable_ITCa: bool  = Field(default=False, description="Enable T-type CaÂ˛âş current (low-threshold, CaV3.x)")
+    gTCa_max:    float = Field(default=2.0,  description="Max T-type Ca conductance (mS/cmÂ˛, Destexhe 1998)")
 
-    enable_IM: bool  = Field(default=False, description="Enable M-type K⁺ current (KCNQ2/3, muscarinic-sensitive)")
-    gIM_max:   float = Field(default=0.5,   description="Max M-type K conductance (mS/cm², Yamada 1989)")
+    enable_IM: bool  = Field(default=False, description="Enable M-type Kâş current (KCNQ2/3, muscarinic-sensitive)")
+    gIM_max:   float = Field(default=0.5,   description="Max M-type K conductance (mS/cmÂ˛, Yamada 1989)")
     im_speed_multiplier: float = Field(
         default=1.0,
         gt=0.0,
         description="Scales the kinetics of the M-current. 1.0=Awake, 0.1=Deep Sleep",
     )
 
-    enable_NaP: bool  = Field(default=False, description="Enable persistent Na⁺ current (subthreshold, non-inactivating)")
-    gNaP_max:   float = Field(default=0.1,   description="Max persistent Na conductance (mS/cm², Magistretti 1999)")
+    enable_NaP: bool  = Field(default=False, description="Enable persistent Naâş current (subthreshold, non-inactivating)")
+    gNaP_max:   float = Field(default=0.1,   description="Max persistent Na conductance (mS/cmÂ˛, Magistretti 1999)")
 
-    enable_NaR: bool  = Field(default=False, description="Enable resurgent Na⁺ current (repolarization-activated, Raman-Bean)")
-    gNaR_max:   float = Field(default=0.2,   description="Max resurgent Na conductance (mS/cm², Raman & Bean 2001)")
+    enable_NaR: bool  = Field(default=False, description="Enable resurgent Naâş current (repolarization-activated, Raman-Bean)")
+    gNaR_max:   float = Field(default=0.2,   description="Max resurgent Na conductance (mS/cmÂ˛, Raman & Bean 2001)")
 
 
 class CalciumParams(BaseModel):
     """Intracellular calcium dynamics."""
-    dynamic_Ca: bool  = Field(default=False, description="Track [Ca²⁺]ᵢ with Nernst correction")
-    Ca_ext:     float = Field(default=2.0,   description="Extracellular [Ca²⁺] (mM)")
-    Ca_rest:    float = Field(default=50e-6, description="Resting [Ca²⁺]ᵢ (mM)")
-    tau_Ca:     float = Field(default=200.0, description="Ca²⁺ pump time constant (ms)")
+    dynamic_Ca: bool  = Field(default=False, description="Track [CaÂ˛âş]áµ˘ with Nernst correction")
+    Ca_ext:     float = Field(default=2.0,   description="Extracellular [CaÂ˛âş] (mM)")
+    Ca_rest:    float = Field(default=50e-6, description="Resting [CaÂ˛âş]áµ˘ (mM)")
+    tau_Ca:     float = Field(default=200.0, description="CaÂ˛âş pump time constant (ms)")
     B_Ca:       float = Field(default=0.001, description="Current-to-concentration conversion")
 
 
@@ -113,15 +113,21 @@ class MetabolismParams(BaseModel):
     """Dynamic intracellular ATP pool and metabolic feedback."""
     enable_dynamic_atp: bool = Field(default=False, description="Enable dynamic ATP metabolism")
     atp_max_mM: float = Field(default=2.0, ge=0.1, le=10.0, description="Maximum ATP concentration (mM, literature: 2-5 mM)")
-    atp_synthesis_rate: float = Field(default=0.6, ge=0.0, description="ATP synthesis rate (nmol/cm²/s)")
-    g_katp_max: float = Field(default=5.0, ge=0.0, description="Max K_ATP channel conductance (mS/cm²)")
+    atp_synthesis_rate: float = Field(default=0.6, ge=0.0, description="ATP synthesis rate (nmol/cmÂ˛/s)")
+    g_katp_max: float = Field(default=5.0, ge=0.0, description="Max K_ATP channel conductance (mS/cmÂ˛)")
     katp_kd_atp_mM: float = Field(default=0.5, ge=0.01, description="ATP concentration for half-activation of K_ATP (mM)")
+    na_i_rest_mM: float = Field(default=12.0, ge=1.0, le=40.0, description="Resting intracellular sodium (mM) for ATP-linked ion-gradient mode")
+    na_ext_mM: float = Field(default=145.0, ge=50.0, le=200.0, description="Extracellular sodium (mM) for ATP-linked ion-gradient mode")
+    k_i_mM: float = Field(default=140.0, ge=50.0, le=200.0, description="Intracellular potassium (mM) for ATP-linked ion-gradient mode")
+    k_o_rest_mM: float = Field(default=3.5, ge=1.0, le=15.0, description="Resting extracellular potassium (mM) for ATP-linked ion-gradient mode")
+    ion_drift_gain: float = Field(default=2.5e-5, ge=0.0, le=1e-2, description="Phenomenological conversion from membrane current to Na_i / K_o drift")
+    k_o_clearance_tau_ms: float = Field(default=800.0, ge=1.0, le=20000.0, description="Extracellular potassium clearance time constant (ms)")
 
 
 class EnvironmentParams(BaseModel):
     """Thermodynamics and temperature scaling."""
-    T_celsius: float = Field(default=6.3,  ge=0, le=45.0, description="Experiment temperature (°C)")
-    T_ref:     float = Field(default=6.3,              description="Reference temperature for kinetics (°C)")
+    T_celsius: float = Field(default=6.3,  ge=0, le=45.0, description="Experiment temperature (Â°C)")
+    T_ref:     float = Field(default=6.3,              description="Reference temperature for kinetics (Â°C)")
     Q10:       float = Field(default=3.0,              description="Global Q10 (legacy, used as fallback)")
     # Channel-specific Q10 values (literature-based defaults)
     # Na: Hodgkin & Huxley 1952, J Physiol 117:500-544 (Q10 ~ 2.2-3.0 for m/h)
@@ -134,22 +140,22 @@ class EnvironmentParams(BaseModel):
     Q10_Ca:    float = Field(default=2.5,              description="Q10 for Ca channels (s,u gates)")
     # IA: Huguenard et al 1991, J Neurophysiol 65:1271 (Q10 ~ 2.8-3.5)
     Q10_IA:    float = Field(default=3.0,              description="Q10 for A-type K channel (a,b gates)")
-    # T-type Ca: Destexhe 1998, J Neurosci 18:3574 — Q10_m=5.0, Q10_h=3.0 at 24°C ref.
+    # T-type Ca: Destexhe 1998, J Neurosci 18:3574 â€” Q10_m=5.0, Q10_h=3.0 at 24Â°C ref.
     # Using geometric mean ~3.9 for combined gate scaling in single-phi model.
     Q10_TCa:   float = Field(default=3.9,              description="Q10 for T-type Ca channel (m,h gates)")
     # M-type K (KCNQ2/3): Pan et al. 2006, J Physiol 576:215 (Q10 ~ 2.5)
     Q10_IM:    float = Field(default=2.5,              description="Q10 for M-type K channel (w gate)")
     # Persistent Na: same family as transient Na (Q10 ~ 2.2)
     Q10_NaP:   float = Field(default=2.2,              description="Q10 for persistent Na channel (x gate)")
-    # Resurgent Na: Raman & Bean 2001 — same Na channel family (Q10 ~ 2.2)
+    # Resurgent Na: Raman & Bean 2001 â€” same Na channel family (Q10 ~ 2.2)
     Q10_NaR:   float = Field(default=2.2,              description="Q10 for resurgent Na channel (y,j gates)")
-    # NMDA Mg²⁺ block: Jahr & Stevens 1990, J Neurosci 10:1830
-    Mg_ext:    float = Field(default=1.0,              description="Extracellular [Mg²⁺] (mM, for NMDA block)")
-    # Thermal gradient: soma–dendrite temperature offset (°C).
+    # NMDA MgÂ˛âş block: Jahr & Stevens 1990, J Neurosci 10:1830
+    Mg_ext:    float = Field(default=1.0,              description="Extracellular [MgÂ˛âş] (mM, for NMDA block)")
+    # Thermal gradient: somaâ€“dendrite temperature offset (Â°C).
     # Positive = dendrites warmer than soma (rare), negative = cooler (typical for in vitro slices).
-    # Bhattacharyya et al. 2008 (J Neurophysiol 100:927) measured ~0.5–1.5°C axial gradients.
+    # Bhattacharyya et al. 2008 (J Neurophysiol 100:927) measured ~0.5â€“1.5Â°C axial gradients.
     T_dend_offset: float = Field(default=0.0, ge=-15.0, le=15.0,
-                                  description="Dendrite–soma temperature offset (°C, positive=dendrites warmer)")
+                                  description="Dendriteâ€“soma temperature offset (Â°C, positive=dendrites warmer)")
 
     @property
     def phi(self) -> float:
@@ -186,7 +192,7 @@ class DendriticFilterParams(BaseModel):
     Physics:
     1. Amplitude attenuation: A(d) = exp(-distance/space_constant)
        - Models cable decay with distance from stimulation site
-       - Typical parameters: exp(-150/150) ≈ 0.368 (63% loss)
+       - Typical parameters: exp(-150/150) â‰ 0.368 (63% loss)
     
     2. Temporal filtering: tau_dendritic determines the low-pass corner frequency
        - Fast components (synaptic transients): heavily attenuated
@@ -194,23 +200,23 @@ class DendriticFilterParams(BaseModel):
        - Results in more realistic somatic response
     
     Default values are PHYSIOLOGICALLY REALISTIC for L5 pyramidal neurons:
-    - distance_um: 150 µm (middle-range dendrite, soma to proximal/distal transition)
-    - space_constant_um: 150 µm (cable space constant for soma-proximal dendrites)
+    - distance_um: 150 Âµm (middle-range dendrite, soma to proximal/distal transition)
+    - space_constant_um: 150 Âµm (cable space constant for soma-proximal dendrites)
     - tau_dendritic_ms: 10 ms (dendritic integration time scale)
     """
     
     enabled: bool = Field(default=True, description="Enable dendritic filtering")
     distance_um: float = Field(
         default=150.0, gt=0,
-        description="Distance soma→synapse stimulation site (µm). Typical range: 50-300 µm"
+        description="Distance somaâ†’synapse stimulation site (Âµm). Typical range: 50-300 Âµm"
     )
     space_constant_um: float = Field(
         default=150.0, gt=0,
-        description="Cable space constant λ (µm). λ = sqrt(a/(4ρ*g_m)). Typical: 100-200 µm"
+        description="Cable space constant Î» (Âµm). Î» = sqrt(a/(4Ď*g_m)). Typical: 100-200 Âµm"
     )
     tau_dendritic_ms: float = Field(
         default=10.0, gt=0,
-        description="Dendritic low-pass filter time constant τ (ms). Typical: 5-20 ms"
+        description="Dendritic low-pass filter time constant Ď„ (ms). Typical: 5-20 ms"
     )
 
 
@@ -221,10 +227,10 @@ class StimulationLocationParams(BaseModel):
     1. 'soma': Direct injection into soma (soma current clamp)
        - Laboratory condition (whole-cell patch-clamp)
        - UNPHYSIOLOGICAL for natural neuron operation
-       - High current (4× rheobase) gives high-amplitude spikes
+       - High current (4Ă— rheobase) gives high-amplitude spikes
        
     2. 'ais': Direct injection into AIS (axon initial segment)
-       - Very sensitive due to 40× higher Na density
+       - Very sensitive due to 40Ă— higher Na density
        - Minimal current needed for spike
        - Models direct axonal stimulation (electrode on axon)
        
@@ -232,7 +238,7 @@ class StimulationLocationParams(BaseModel):
        - PHYSIOLOGICAL mode (models synaptic inputs)
        - Current attenuated by exponential decay (cable properties)
        - Temporally filtered (low-pass)
-       - Requires larger input current (~100 µA/cm²) because of attenuation
+       - Requires larger input current (~100 ÂµA/cmÂ˛) because of attenuation
        - Results in realistic spike amplitude and firing rates
     """
     
@@ -246,13 +252,13 @@ class SimulationParams(BaseModel):
     """Solver settings, stimulation, and noise.
 
     Note: The system operates in a density-based mode for backward compatibility.
-    Iext is in µA/cm² (current density). The unit_converter module provides
+    Iext is in ÂµA/cmÂ˛ (current density). The unit_converter module provides
     display conversions for user-facing interfaces.
 
     For GUI display, absolute current in nanoamperes (nA) is computed
     from `FullModelConfig.Iext_absolute_nA` property:
-        I_absolute_nA = Iext * Area_soma_cm² * 1000
-        Area_soma_cm² = π * (d_soma_cm)²
+        I_absolute_nA = Iext * Area_soma_cmÂ˛ * 1000
+        Area_soma_cmÂ˛ = Ď€ * (d_soma_cm)Â˛
     """
     t_sim:      float   = Field(default=150.0, gt=0,  description="Simulation duration (ms)")
     dt_eval:    float   = Field(default=0.05,  gt=0,  description="Output time step (ms)")
@@ -373,8 +379,8 @@ class AnalysisParams(BaseModel):
 
     # Excitability Map
     run_excmap:   bool  = Field(default=False, description="Compute 2-D excitability map")
-    excmap_I_min: float = Field(default=0.5,   description="Excitability map: min current (µA/cm²)")
-    excmap_I_max: float = Field(default=20.0,  description="Excitability map: max current (µA/cm²)")
+    excmap_I_min: float = Field(default=0.5,   description="Excitability map: min current (ÂµA/cmÂ˛)")
+    excmap_I_max: float = Field(default=20.0,  description="Excitability map: max current (ÂµA/cmÂ˛)")
     excmap_NI:    int   = Field(default=15,   ge=2, description="Excitability map: current resolution")
     excmap_D_min: float = Field(default=0.1,   description="Excitability map: min duration (ms)")
     excmap_D_max: float = Field(default=5.0,   description="Excitability map: max duration (ms)")
@@ -422,9 +428,9 @@ class PresetModeParams(BaseModel):
         default='tonic',
         description="Purkinje mode: tonic firing baseline or climbing_fiber complex-spike pulse"
     )
-    dravet_mode: Literal['normal', 'febrile'] = Field(
-        default='normal',
-        description="Dravet syndrome mode: normal or febrile (temperature-triggered failure)"
+    dravet_mode: Literal['baseline', 'febrile'] = Field(
+        default='baseline',
+        description="Dravet syndrome mode: baseline or febrile (temperature-triggered failure)"
     )
     anesthesia_mode: Literal['partial_block', 'full_block'] = Field(
         default='full_block',
@@ -478,3 +484,5 @@ try:
     from .dual_stimulation import DualStimulationConfig
 except ImportError:
     pass
+
+

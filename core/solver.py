@@ -12,9 +12,9 @@ from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import (
     rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS,
-    ATP_ISCHEMIC_THRESHOLD,
+    ATP_ISCHEMIC_THRESHOLD, NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
 )
-from core.physics_params import create_physics_params
+from core.physics_params import create_physics_params, build_state_offsets
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
 
@@ -105,35 +105,6 @@ class SimulationResult:
 
         self.v_all  = y[0:n_comp, :]
         self.v_soma = self.v_all[0, :]
-        ch = config.channels
-        cursor = 4 * n_comp  # V, m, h, n
-        if ch.enable_Ih:
-            cursor += n_comp
-        if ch.enable_ICa:
-            cursor += 2 * n_comp
-        if ch.enable_IA:
-            cursor += 2 * n_comp
-        if ch.enable_ITCa:
-            cursor += 2 * n_comp
-        if ch.enable_IM:
-            cursor += n_comp
-        if ch.enable_NaP:
-            cursor += n_comp
-        if ch.enable_NaR:
-            cursor += 2 * n_comp
-
-        self.ca_i = None
-        if ch.enable_SK:
-            cursor += n_comp
-        if config.calcium.dynamic_Ca:
-            self.ca_i = y[cursor:cursor + n_comp, :]
-            cursor += n_comp
-
-        self.atp_level = None
-        if config.metabolism.enable_dynamic_atp:
-            self.atp_level = y[cursor:cursor + n_comp, :]
-            cursor += n_comp
-
         primary_loc = config.stim_location.location
         use_dfilter_primary = (
             primary_loc == "dendritic_filtered"
@@ -147,14 +118,45 @@ class SimulationResult:
             and getattr(dual, "secondary_location", "soma") == "dendritic_filtered"
             and getattr(dual, "secondary_tau_dendritic_ms", 0.0) > 0.0
         )
+        ch = config.channels
+        offsets = build_state_offsets(
+            n_comp,
+            en_ih=ch.enable_Ih,
+            en_ica=ch.enable_ICa,
+            en_ia=ch.enable_IA,
+            en_sk=ch.enable_SK,
+            dyn_ca=config.calcium.dynamic_Ca,
+            en_itca=ch.enable_ITCa,
+            en_im=ch.enable_IM,
+            en_nap=ch.enable_NaP,
+            en_nar=ch.enable_NaR,
+            dyn_atp=config.metabolism.enable_dynamic_atp,
+            use_dfilter_primary=1 if use_dfilter_primary else 0,
+            use_dfilter_secondary=1 if use_dfilter_secondary else 0,
+        )
+
+        self.ca_i = None
+        if int(offsets.off_ca) >= 0:
+            self.ca_i = y[int(offsets.off_ca):int(offsets.off_ca) + n_comp, :]
+
+        self.atp_level = None
+        if int(offsets.off_atp) >= 0:
+            self.atp_level = y[int(offsets.off_atp):int(offsets.off_atp) + n_comp, :]
+
+        self.na_i = None
+        if int(offsets.off_na_i) >= 0:
+            self.na_i = y[int(offsets.off_na_i):int(offsets.off_na_i) + n_comp, :]
+
+        self.k_o = None
+        if int(offsets.off_k_o) >= 0:
+            self.k_o = y[int(offsets.off_k_o):int(offsets.off_k_o) + n_comp, :]
 
         self.v_dendritic_filtered = None
         self.v_dendritic_filtered_secondary = None
-        if use_dfilter_primary:
-            self.v_dendritic_filtered = y[cursor, :]
-            cursor += 1
-        if use_dfilter_secondary:
-            self.v_dendritic_filtered_secondary = y[cursor, :]
+        if int(offsets.off_ifilt_primary) >= 0:
+            self.v_dendritic_filtered = y[int(offsets.off_ifilt_primary), :]
+        if int(offsets.off_ifilt_secondary) >= 0:
+            self.v_dendritic_filtered_secondary = y[int(offsets.off_ifilt_secondary), :]
 
         self.currents:    dict  = {}
         self.atp_estimate: float = 0.0
@@ -474,6 +476,12 @@ class NeuronSolver:
             "katp_kd_atp_mM": cfg.metabolism.katp_kd_atp_mM,
             "atp_max_mM": cfg.metabolism.atp_max_mM,
             "atp_synthesis_rate": cfg.metabolism.atp_synthesis_rate,
+            "na_i_rest_mM": cfg.metabolism.na_i_rest_mM,
+            "na_ext_mM": cfg.metabolism.na_ext_mM,
+            "k_i_mM": cfg.metabolism.k_i_mM,
+            "k_o_rest_mM": cfg.metabolism.k_o_rest_mM,
+            "ion_drift_gain": cfg.metabolism.ion_drift_gain,
+            "k_o_clearance_tau_ms": cfg.metabolism.k_o_clearance_tau_ms,
             "stype": stype,
             "iext": primary_iext,
             "t0": primary_t0,
@@ -539,6 +547,7 @@ class NeuronSolver:
             en_ia=cfg.channels.enable_IA,
             en_sk=cfg.channels.enable_SK,
             dyn_ca=cfg.calcium.dynamic_Ca,
+            dyn_atp=cfg.metabolism.enable_dynamic_atp,
             l_indices=morph["L_indices"],
             l_indptr=morph["L_indptr"],
             use_dfilter_primary=use_dfilter_primary,
@@ -672,56 +681,76 @@ class NeuronSolver:
                 logger.error(f"Missing morph key: {key}")
                 return
         
+        t_kelvin = cfg.env.T_celsius + 273.15
+        ena_eff = cfg.channels.ENa
+        ek_eff = cfg.channels.EK
+        if cfg.metabolism.enable_dynamic_atp and res.na_i is not None:
+            na_i = np.clip(np.asarray(res.na_i, dtype=float), NA_I_MIN_M_M, NA_I_MAX_M_M)
+            ena_eff = (R_GAS * t_kelvin / F_CONST) * np.log(cfg.metabolism.na_ext_mM / na_i) * 1000.0
+        if cfg.metabolism.enable_dynamic_atp and res.k_o is not None:
+            k_o = np.clip(np.asarray(res.k_o, dtype=float), K_O_MIN_M_M, K_O_MAX_M_M)
+            ek_eff = (R_GAS * t_kelvin / F_CONST) * np.log(cfg.metabolism.k_i_mM / k_o) * 1000.0
+
         # Broadcast conductances to shape (n_comp, 1) for 2D current calculation
         g_na = morph['gNa_v'][:, np.newaxis]
         g_k  = morph['gK_v'][:, np.newaxis]
         g_l  = morph['gL_v'][:, np.newaxis]
         
-        res.currents['Na']   = g_na * (m ** 3) * h * (v - cfg.channels.ENa)
-        res.currents['K']    = g_k  * (nk ** 4) * (v - cfg.channels.EK)
+        res.currents['Na']   = g_na * (m ** 3) * h * (v - ena_eff)
+        res.currents['K']    = g_k  * (nk ** 4) * (v - ek_eff)
         res.currents['Leak'] = g_l  * (v - cfg.channels.EL)
 
-        cursor = 4 * n
+        offsets = build_state_offsets(
+            n,
+            en_ih=cfg.channels.enable_Ih,
+            en_ica=cfg.channels.enable_ICa,
+            en_ia=cfg.channels.enable_IA,
+            en_sk=cfg.channels.enable_SK,
+            dyn_ca=cfg.calcium.dynamic_Ca,
+            en_itca=cfg.channels.enable_ITCa,
+            en_im=cfg.channels.enable_IM,
+            en_nap=cfg.channels.enable_NaP,
+            en_nar=cfg.channels.enable_NaR,
+            dyn_atp=cfg.metabolism.enable_dynamic_atp,
+            use_dfilter_primary=1 if res.v_dendritic_filtered is not None else 0,
+            use_dfilter_secondary=1 if res.v_dendritic_filtered_secondary is not None else 0,
+        )
 
         if cfg.channels.enable_Ih:
             if 'gIh_v' in morph:
-                r = y[cursor:cursor + n, :]
+                r = y[int(offsets.off_r):int(offsets.off_r) + n, :]
                 g_ih = morph['gIh_v'][:, np.newaxis]
                 res.currents['Ih'] = g_ih * r * (v - cfg.channels.E_Ih)
-                cursor += n
             else:
                 logger.warning("Ih channel enabled but gIh_v missing from morph")
 
         if cfg.channels.enable_ICa:
             if 'gCa_v' in morph:
-                s = y[cursor:cursor + n, :]
-                u = y[cursor + n:cursor + 2*n, :]
+                s = y[int(offsets.off_s):int(offsets.off_s) + n, :]
+                u = y[int(offsets.off_u):int(offsets.off_u) + n, :]
                 g_ca = morph['gCa_v'][:, np.newaxis]
                 if cfg.calcium.dynamic_Ca and res.ca_i is not None:
-                    t_kelvin = cfg.env.T_celsius + 273.15
                     ca_i = np.maximum(res.ca_i, 1e-9)
                     e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_i) * 1000.0
                 else:
                     e_ca = 120.0
                 res.currents['ICa'] = g_ca * (s ** 2) * u * (v - e_ca)
-                cursor += 2 * n
             else:
                 logger.warning("ICa channel enabled but gCa_v missing from morph")
 
         if cfg.channels.enable_IA:
             if 'gA_v' in morph:
-                a = y[cursor:cursor + n, :]
-                b = y[cursor + n:cursor + 2*n, :]
+                a = y[int(offsets.off_a):int(offsets.off_a) + n, :]
+                b = y[int(offsets.off_b):int(offsets.off_b) + n, :]
                 g_a = morph['gA_v'][:, np.newaxis]
-                res.currents['IA'] = g_a * a * b * (v - cfg.channels.EK)  # A-current uses EK
-                cursor += 2 * n
+                res.currents['IA'] = g_a * a * b * (v - ek_eff)  # A-current uses EK
             else:
                 logger.warning("IA channel enabled but gA_v missing from morph")
 
         if cfg.channels.enable_ITCa:
             if 'gTCa_v' in morph:
-                p_t = y[cursor:cursor + n, :]
-                q_t = y[cursor + n:cursor + 2*n, :]
+                p_t = y[int(offsets.off_p):int(offsets.off_p) + n, :]
+                q_t = y[int(offsets.off_q):int(offsets.off_q) + n, :]
                 g_tca = morph['gTCa_v'][:, np.newaxis]
                 if not cfg.channels.enable_ICa:
                     # e_ca not yet computed - compute here
@@ -732,44 +761,39 @@ class NeuronSolver:
                     else:
                         e_ca = 120.0
                 res.currents['ITCa'] = g_tca * (p_t ** 2) * q_t * (v - e_ca)
-                cursor += 2 * n
             else:
                 logger.warning("ITCa channel enabled but gTCa_v missing from morph")
 
         if cfg.channels.enable_IM:
             if 'gIM_v' in morph:
-                w_m = y[cursor:cursor + n, :]
+                w_m = y[int(offsets.off_w):int(offsets.off_w) + n, :]
                 g_im = morph['gIM_v'][:, np.newaxis]
-                res.currents['IM'] = g_im * w_m * (v - cfg.channels.EK)
-                cursor += n
+                res.currents['IM'] = g_im * w_m * (v - ek_eff)
             else:
                 logger.warning("IM channel enabled but gIM_v missing from morph")
 
         if cfg.channels.enable_NaP:
             if 'gNaP_v' in morph:
-                x_p = y[cursor:cursor + n, :]
+                x_p = y[int(offsets.off_x):int(offsets.off_x) + n, :]
                 g_nap = morph['gNaP_v'][:, np.newaxis]
-                res.currents['NaP'] = g_nap * x_p * (v - cfg.channels.ENa)
-                cursor += n
+                res.currents['NaP'] = g_nap * x_p * (v - ena_eff)
             else:
                 logger.warning("NaP channel enabled but gNaP_v missing from morph")
 
         if cfg.channels.enable_NaR:
             if 'gNaR_v' in morph:
-                y_r = y[cursor:cursor + n, :]
-                j_r = y[cursor + n:cursor + 2*n, :]
+                y_r = y[int(offsets.off_y):int(offsets.off_y) + n, :]
+                j_r = y[int(offsets.off_j):int(offsets.off_j) + n, :]
                 g_nar = morph['gNaR_v'][:, np.newaxis]
-                res.currents['NaR'] = g_nar * y_r * j_r * (v - cfg.channels.ENa)
-                cursor += 2 * n
+                res.currents['NaR'] = g_nar * y_r * j_r * (v - ena_eff)
             else:
                 logger.warning("NaR channel enabled but gNaR_v missing from morph")
 
         if cfg.channels.enable_SK:
             if 'gSK_v' in morph:
-                z_sk = y[cursor:cursor + n, :]
+                z_sk = y[int(offsets.off_zsk):int(offsets.off_zsk) + n, :]
                 g_sk = morph['gSK_v'][:, np.newaxis]
-                res.currents['SK'] = g_sk * z_sk * (v - cfg.channels.EK)
-                cursor += n
+                res.currents['SK'] = g_sk * z_sk * (v - ek_eff)
             else:
                 logger.warning("SK channel enabled but gSK_v missing from morph")
 
@@ -777,7 +801,7 @@ class NeuronSolver:
         if cfg.metabolism.enable_dynamic_atp and res.atp_level is not None:
             atp_ratio = res.atp_level / cfg.metabolism.katp_kd_atp_mM
             g_katp = cfg.metabolism.g_katp_max / (1.0 + atp_ratio ** 2)
-            res.currents['KATP'] = g_katp * (v - cfg.channels.EK)
+            res.currents['KATP'] = g_katp * (v - ek_eff)
 
         # Electrogenic Na/K pump current: outward-positive, ATP-limited, driven by inward Na load
         i_na_drive = np.asarray(res.currents['Na'], dtype=float)
@@ -938,46 +962,40 @@ class NeuronSolver:
 
         # ── Reconstruct state offsets (must match rhs.py exactly) ──
         cc = cfg.channels
-        cursor = 4 * n_comp  # V, m, h, n_K are always first 4*n_comp
-        off_m, off_h, off_n = n_comp, 2 * n_comp, 3 * n_comp
+        offsets = build_state_offsets(
+            n_comp,
+            en_ih=cc.enable_Ih,
+            en_ica=cc.enable_ICa,
+            en_ia=cc.enable_IA,
+            en_sk=cc.enable_SK,
+            dyn_ca=cfg.calcium.dynamic_Ca,
+            en_itca=cc.enable_ITCa,
+            en_im=cc.enable_IM,
+            en_nap=cc.enable_NaP,
+            en_nar=cc.enable_NaR,
+            dyn_atp=cfg.metabolism.enable_dynamic_atp,
+            use_dfilter_primary=use_dfilter_primary,
+            use_dfilter_secondary=use_dfilter_secondary,
+        )
+        off_m = int(offsets.off_m)
+        off_h = int(offsets.off_h)
+        off_n = int(offsets.off_n)
+        off_r = int(offsets.off_r)
+        off_s = int(offsets.off_s)
+        off_u = int(offsets.off_u)
+        off_a = int(offsets.off_a)
+        off_b = int(offsets.off_b)
+        off_p = int(offsets.off_p)
+        off_q = int(offsets.off_q)
+        off_w = int(offsets.off_w)
+        off_x = int(offsets.off_x)
+        off_y = int(offsets.off_y)
+        off_j = int(offsets.off_j)
+        off_zsk = int(offsets.off_zsk)
+        off_ca = int(offsets.off_ca)
+        off_vfilt_primary = int(offsets.off_ifilt_primary)
+        off_vfilt_secondary = int(offsets.off_ifilt_secondary)
 
-        off_r = cursor
-        if cc.enable_Ih:
-            cursor += n_comp
-        off_s = off_u = cursor
-        if cc.enable_ICa:
-            off_s = cursor;  cursor += n_comp
-            off_u = cursor;  cursor += n_comp
-        off_a = off_b = cursor
-        if cc.enable_IA:
-            off_a = cursor;  cursor += n_comp
-            off_b = cursor;  cursor += n_comp
-        off_p = off_q = cursor
-        if cc.enable_ITCa:
-            off_p = cursor;  cursor += n_comp
-            off_q = cursor;  cursor += n_comp
-        off_w = cursor
-        if cc.enable_IM:
-            cursor += n_comp
-        off_x = cursor
-        if cc.enable_NaP:
-            cursor += n_comp
-        off_y = off_j = cursor
-        if cc.enable_NaR:
-            off_y = cursor;  cursor += n_comp
-            off_j = cursor;  cursor += n_comp
-        off_zsk = cursor
-        if cc.enable_SK:
-            cursor += n_comp
-        off_ca = cursor
-        if cfg.calcium.dynamic_Ca:
-            cursor += n_comp
-        off_vfilt_primary = cursor
-        if use_dfilter_primary == 1:
-            cursor += 1
-        off_vfilt_secondary = cursor
-
-        # ── Temperature scaling ──
         phi_na  = cfg.env.build_phi_vector(cfg.env.Q10_Na,  n_comp)
         phi_k   = cfg.env.build_phi_vector(cfg.env.Q10_K,   n_comp)
         phi_ih  = cfg.env.build_phi_vector(cfg.env.Q10_Ih,  n_comp)
@@ -1097,6 +1115,12 @@ class NeuronSolver:
             katp_kd_atp_mM      = float(cfg.metabolism.katp_kd_atp_mM),
             atp_max_mM          = float(cfg.metabolism.atp_max_mM),
             atp_synthesis_rate  = float(cfg.metabolism.atp_synthesis_rate),
+            na_i_rest_mM        = float(cfg.metabolism.na_i_rest_mM),
+            na_ext_mM           = float(cfg.metabolism.na_ext_mM),
+            k_i_mM              = float(cfg.metabolism.k_i_mM),
+            k_o_rest_mM         = float(cfg.metabolism.k_o_rest_mM),
+            ion_drift_gain      = float(cfg.metabolism.ion_drift_gain),
+            k_o_clearance_tau_ms = float(cfg.metabolism.k_o_clearance_tau_ms),
             stype               = np.int32(stype),
             iext                = float(iext),
             t0                  = float(t0),

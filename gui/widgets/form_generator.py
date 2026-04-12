@@ -35,6 +35,31 @@ class PydanticFormWidget(QWidget):
                 return True
         return False
 
+    def _configure_numeric_spinbox(self, widget: QDoubleSpinBox, field_name: str, val: float) -> None:
+        lower, upper = -5000.0, 5000.0
+        step = 0.1 if abs(val) > 0.1 else 0.0001
+        nonnegative_time_fields = {
+            "t_sim", "dt_eval", "pulse_start", "pulse_dur", "alpha_tau",
+            "zap_f0_hz", "zap_f1_hz", "synaptic_train_freq_hz",
+            "synaptic_train_duration_ms", "secondary_start", "secondary_duration",
+            "secondary_alpha_tau", "secondary_train_freq_hz", "secondary_train_duration_ms",
+        }
+        if (
+            field_name in nonnegative_time_fields
+            or field_name.endswith("_ms")
+            or field_name.endswith("_start")
+            or field_name.endswith("_dur")
+            or "duration" in field_name
+        ):
+            lower, upper = 0.0, 100000.0
+            if "freq" in field_name:
+                upper = 10000.0
+            if field_name == "dt_eval":
+                upper = 1000.0
+        widget.setRange(lower, upper)
+        widget.setDecimals(6)
+        widget.setSingleStep(step)
+
     def _build_form(self):
         for field_name, field_info in self.instance.model_fields.items():
             field_type = field_info.annotation
@@ -96,9 +121,7 @@ class PydanticFormWidget(QWidget):
                     w.setRange(0, 1000000)
                 else:
                     w = QDoubleSpinBox()
-                    w.setRange(-5000.0, 5000.0)
-                    w.setDecimals(6)
-                    w.setSingleStep(0.1 if abs(val) > 0.1 else 0.0001)
+                    self._configure_numeric_spinbox(w, field_name, float(val))
                 w.setValue(val)
                 w.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
                 w.setKeyboardTracking(True)

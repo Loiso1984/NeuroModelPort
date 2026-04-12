@@ -205,8 +205,13 @@ class OscilloscopeWidget(QWidget):
         target_height = self._target_plot_height()
         if hasattr(self, "_plot_container"):
             self._plot_container.setMinimumHeight(target_height)
+            self._plot_container.setFixedHeight(target_height)
+        if hasattr(self, "_win"):
+            self._win.setMinimumHeight(target_height)
+            self._win.setFixedHeight(target_height)
         if hasattr(self, "_plot_scroll"):
             self._plot_scroll.setMinimumHeight(min(target_height + 16, 1200))
+            self._plot_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
     # ─────────────────────────────────────────────────────────────────
     def _mouse_moved(self, evt):
@@ -318,7 +323,8 @@ class OscilloscopeWidget(QWidget):
         self._plot_scroll = QScrollArea()
         self._plot_scroll.setWidgetResizable(True)
         self._plot_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self._plot_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._plot_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._plot_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._plot_scroll.setStyleSheet("QScrollArea { background: #0D1117; border: none; }")
         self._plot_scroll.setWidget(self._plot_container)
 

@@ -150,5 +150,7 @@ class ChannelRegistry:
         # Динамика АТФ (metabolism) - LAST variable in state vector
         if config.metabolism.enable_dynamic_atp:
             y0_list.append(np.full(N, config.metabolism.atp_max_mM))
+            y0_list.append(np.full(N, config.metabolism.na_i_rest_mM))
+            y0_list.append(np.full(N, config.metabolism.k_o_rest_mM))
 
         return np.concatenate(y0_list)

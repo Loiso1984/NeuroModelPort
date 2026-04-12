@@ -169,9 +169,11 @@ def _apply_l5_mode(cfg: FullModelConfig) -> None:
         cfg.channels.enable_IM = False  # ACh blocks I_M
         cfg.channels.gIM_max = 0.0
         cfg.channels.gSK_max = 0.6  # Reduce SK by 50% (1.2 → 0.6)
-        # Increase synaptic drive to compensate for reduced adaptation and show arousal effect
-        cfg.stim.synaptic_train_freq_hz = 40.0  # Higher frequency for arousal state
-        cfg.stim.Iext = 80.0  # Stronger drive to overcome reduced adaptation
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        cfg.stim.synaptic_train_type = "none"
+        cfg.stim.stim_type = "const"
+        cfg.stim.Iext = 30.0  # Arousal proxy: stronger depolarizing drive with reduced adaptation
         # Title suffix added by GUI
     # Normal mode: use default IM (0.04) and SK (1.2) from preset
 
@@ -232,12 +234,14 @@ def _apply_k_mode(cfg: FullModelConfig) -> None:
         cfg.channels.gTCa_max = 1.2
         cfg.channels.EL = -75.0  # Rest Vm = -75mV (sleep)
     elif cfg.preset_modes.k_mode == "delta_oscillator":
-        # Self-sustained delta oscillations: constant hyperpolarization + strong Ih + I_T
+        # Intrinsic delta-like surrogate: slow hyperpolarized oscillations without
+        # pretending to be a full thalamocortical network rhythm generator.
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = -3.0  # Constant hyperpolarization to drive Ih activation
-        cfg.channels.gIh_max = 0.05  # Increased Ih for pacemaker activity
-        cfg.channels.gTCa_max = 2.0  # I_T for burst generation
-        cfg.channels.EL = -70.0  # Rest Vm slightly hyperpolarized
+        cfg.stim.Iext = -2.0
+        cfg.stim.t_sim = max(cfg.stim.t_sim, 1000.0)
+        cfg.channels.gIh_max = 0.10
+        cfg.channels.gTCa_max = 2.8
+        cfg.channels.EL = -74.0
     else:
         # Activated: tonic relay firing (I_T mostly inactivated at depolarized Vm)
         cfg.stim.stim_type = "const"
@@ -282,31 +286,36 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
 
     # Enable dynamic ATP metabolism for hypoxia pathology
     cfg.metabolism.enable_dynamic_atp = True
-    cfg.metabolism.atp_synthesis_rate = 0.1
-    # Axonal failure under energy depletion: reduced effective Na conductance in trunk.
-    cfg.morphology.gNa_trunk_mult = 0.5
+    cfg.stim_location.location = "soma"
+    cfg.dendritic_filter.enabled = False
+    cfg.channels.EK = -90.0
+    cfg.channels.EL = -70.0
+    cfg.channels.gL = 0.08
+    cfg.metabolism.ion_drift_gain = 8.0e-5
+    cfg.metabolism.k_o_clearance_tau_ms = 1600.0
 
     if cfg.preset_modes.hypoxia_mode == "terminal":
-        # Terminal stage: profound depolarization block and pump collapse.
-        # ATP synthesis stops completely, K_ATP fully opens, pumps fail
-        cfg.morphology.gL_trunk_mult = 10.0  # Massive demyelination-like leak in trunk
-        cfg.channels.EK = -45.0
-        cfg.channels.EL = -40.0
-        cfg.channels.gL = 0.4
+        # Terminal stage: severe energy failure; weak initial response and rapid collapse.
+        cfg.morphology.gNa_trunk_mult = 0.35
+        cfg.morphology.gL_trunk_mult = 8.0
+        cfg.metabolism.atp_synthesis_rate = 0.03
+        cfg.metabolism.g_katp_max = 3.0
         cfg.calcium.tau_Ca = 1200.0
         cfg.channels.gCa_max = 0.10
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 80.0
+        cfg.stim.Iext = 18.0
+        cfg.stim.t_sim = max(cfg.stim.t_sim, 500.0)
     else:
-        # Progressive stage: short early spiking epoch, then attenuation.
-        # Reduced ATP synthesis causes gradual depletion, K_ATP opens, spiking slows
-        cfg.channels.EK = -60.0
-        cfg.channels.EL = -50.0
-        cfg.channels.gL = 0.15
+        # Progressive stage: a small initial firing epoch followed by ATP-linked failure.
+        cfg.morphology.gNa_trunk_mult = 0.65
+        cfg.morphology.gL_trunk_mult = 3.0
+        cfg.metabolism.atp_synthesis_rate = 0.18
+        cfg.metabolism.g_katp_max = 0.8
         cfg.calcium.tau_Ca = 900.0
         cfg.channels.gCa_max = 0.08
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 95.0
+        cfg.stim.Iext = 30.0
+        cfg.stim.t_sim = max(cfg.stim.t_sim, 500.0)
 
 
 def _apply_ca1_theta_protocol(cfg: FullModelConfig) -> None:
@@ -380,24 +389,21 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 1. CLASSIC: SQUID GIANT AXON (HH 1952) ---
     if code == "A":
         cfg.dendritic_filter.enabled = False  # Squid axon has no dendrites
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 120.0, 36.0, 0.3
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 120.0, 30.0, 0.3
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -77.0, -54.387
         cfg.channels.Cm = 1.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 6.3, 6.3, 3.0
         # Space-clamped preparation (HH 1952 original): single-compartment
         cfg.morphology.single_comp = True
         cfg.morphology.d_soma = 500e-4  # 500 µm giant axon diameter
-        cfg.stim.Iext = 10.0  # Classic HH: ~68 Hz tonic firing, Vmax ≈ 40 mV
+        cfg.stim.Iext = 14.0  # Slightly stronger tonic clamp preserves repetitive HH spiking with the pump-enabled solver
         cfg.stim.jacobian_mode = 'native_hines'  # Use native Hines for Squid Axon
 
     # --- 2. БАЗОВЫЙ ПРЕСЕТ: ПИРАМИДАЛЬНЫЙ L5 (Млекопитающие) ---
     elif code == "B":
         cfg.morphology.single_comp = False
-        cfg.stim_location.location = "dendritic_filtered"  # v12.0: Use dendritic filtering
-        cfg.dendritic_filter.enabled = True
-        cfg.dendritic_filter.distance_um = 150.0
-        cfg.dendritic_filter.space_constant_um = 150.0
-        cfg.dendritic_filter.tau_dendritic_ms = 10.0
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
         
         # CONDUCTANCE DENSITY (mS/cm²) - SIZE INDEPENDENT
         # These values are SOMA-SPECIFIC from Mainen et al. 1996 calibration
@@ -437,15 +443,14 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.enable_IM = True  # KCNQ2/3 channels for adaptation
         cfg.channels.gIM_max = 0.04  # v12.0: Increased M-current for stronger SFA
         
-        # SYNAPTIC TRAIN: Poisson 30Hz for natural cortical jitter
-        cfg.stim.synaptic_train_type = 'poisson'
-        cfg.stim.synaptic_train_freq_hz = 30.0
-        cfg.stim.synaptic_train_duration_ms = 500.0
-
-        # CALIBRATED: Literature-based rheobase (Mainen 1996)
-        cfg.stim.stim_type = 'AMPA'  # v12.0: Fixed - 'synaptic_train' not in s_map
-        cfg.stim.alpha_tau = 2.0
-        cfg.stim.Iext = 60.0  # v12.0: Further increased for SFA with multiple spikes
+        # Layer-5 identity should be readable under standard current clamp before
+        # any neuromodulatory overlays are applied.
+        cfg.stim.synaptic_train_type = 'none'
+        cfg.stim.event_times = []
+        cfg.stim.jacobian_mode = 'native_hines'
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 24.0
+        cfg.stim.t_sim = 500.0
 
     # Stage/mode overlays for selected presets.
     if code == "B":
@@ -496,23 +501,21 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.dynamic_Ca = True
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
-        cfg.calcium.tau_Ca = 50.0  # v12.0: Fast initial buffering (was 200.0)
+        cfg.calcium.tau_Ca = 80.0  # Preserve PIC support without unrealistically abrupt calcium washout
         cfg.calcium.B_Ca = 2e-6  # v12.0: Large volume = high dilution (was 1e-5)
         cfg.channels.enable_ICa = True  # L-type calcium channels for PICs
-        cfg.channels.gCa_max = 0.08  # Moderate L-type Ca for persistent inward currents
+        cfg.channels.gCa_max = 0.05  # Keep PIC support while reducing exaggerated conductance excursions
         cfg.channels.enable_SK = True  # SK channels for AHP
-        cfg.channels.gSK_max = 2.0  # v12.0: Reduced from 4.0 to 2.0 (was 1.0)
-        
-        # IA channel: Moderate for frequency adaptation and spike-frequency accommodation
+        cfg.channels.gSK_max = 1.2  # Enough AHP for adaptation, but not enough to quench tonic firing
         cfg.channels.enable_IA = True
         cfg.channels.gA_max = 0.25  # Moderate IA for adaptation dynamics
         cfg.channels.EK = -77.0    # K+ reversal potential
         
         # Alpha stimulus: represents one synaptic volley from descending pathways
         # Multi-comp with AIS produces burst of ~16 spikes, Vmax ≈ 34 mV
-        cfg.stim.stim_type = 'alpha'
+        cfg.stim.stim_type = 'const'
         cfg.stim.alpha_tau = 1.5
-        cfg.stim.Iext = 50.0
+        cfg.stim.Iext = 18.0
 
     # --- 5. КЛЕТКА ПУРКИНЬЕ (МОЗЖЕЧОК) ---
     elif code == "E":
@@ -664,21 +667,22 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.N_trunk = 10
         cfg.morphology.N_ais = 5
         cfg.morphology.gNa_ais_mult = 20.0
-        # Ion imbalance from pump failure
-        cfg.channels.EK = -50.0  # Reduced: -90 → -50 (K+ accumulation)
-        cfg.channels.EL = -45.0  # Reduced: -65 → -45 (Na+ accumulation)
-        # CALCIUM OVERLOAD: Hypoxia causes Ca2+ accumulation and mitochondrial dysfunction
+        cfg.stim_location.location = "soma"
+        cfg.dendritic_filter.enabled = False
+        # Start from a still-excitable neuron and let ATP failure / ion-gradient
+        # collapse create the depolarization block progressively.
+        cfg.channels.EK = -90.0
+        cfg.channels.EL = -70.0
+        cfg.channels.gL = 0.08
         cfg.calcium.tau_Ca = 900.0  # Slow clearance: pump failure (fixed from 1500ms)
-        cfg.calcium.B_Ca = 2e-5  # v12.0: Slower metabolic suffocation (was 1e-5)
-        cfg.channels.gCa_max = 0.08  # Elevated ICa - PHYSIOLOGICAL range (was 1.2, too high)
+        cfg.calcium.B_Ca = 2e-5
+        cfg.channels.gCa_max = 0.08
         cfg.stim.jacobian_mode = 'native_hines'
-        # Pathology: depolarization block after 1-2 spikes due to ion imbalance + Ca overload
-        cfg.stim.stim_type = 'alpha'
-        cfg.stim.alpha_tau = 1.0
-        cfg.stim.Iext = 80.0  # Higher stim, but fails due to block
-        # Enable dynamic ATP metabolism for hypoxia pathology
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 35.0
+        cfg.stim.t_sim = 500.0
         cfg.metabolism.enable_dynamic_atp = True
-        cfg.metabolism.atp_synthesis_rate = 0.1  # Reduced synthesis causes gradual depletion
+        cfg.metabolism.atp_synthesis_rate = 0.20
 
     # --- 11. С-ВОЛОКНО (БОЛЬ / БЕЗМИЕЛИНОВОЕ) ---
     elif code == "J":
@@ -739,11 +743,11 @@ def apply_preset(cfg: FullModelConfig, name: str):
     # --- 14. ГИПЕРКАЛИЕМИЯ (HIGH K+ REDUCES DRIVING FORCE) ---
     elif code == "H":
         _apply_base_preset(cfg, "A: Squid Giant Axon (HH 1952)")
-        cfg.channels.EK = -55.0  # Elevated external K+: -77 → -55 (Nernst shift)
-        # Pathology: depolarization block — elevated K+ reduces repolarization reserve
+        cfg.channels.EK = -60.0  # Elevated external K+ reduces repolarization reserve without fully abolishing oscillations
+        cfg.channels.gK_max = 32.0
+        # Pathology: near-threshold unstable repetitive firing, not an immediate flat transient.
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 15.0
-
+        cfg.stim.Iext = 8.0
     # --- 15. IN VITRO (SLICE AT 23C - SLOW KINETICS) ---
     elif code == "I":
         _apply_base_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
@@ -765,15 +769,15 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.single_comp = True
         cfg.stim_location.location = "soma"
         cfg.dendritic_filter.enabled = False
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 60.0, 10.0, 0.05
-        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -76.0
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 95.0, 7.0, 0.05
+        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -75.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 24.0, 2.3
         # I_T: very high density in TRN dendrites (Huguenard & Prince 1992)
         # Somatic density ~3-5× higher than in relay neurons
         cfg.channels.enable_ITCa = True
-        cfg.channels.gTCa_max = 7.0     # Larger T-current reserve for rebound bursts
+        cfg.channels.gTCa_max = 6.5     # Strong rebound reserve without runaway hyperpolarization
         cfg.channels.enable_Ih = True
-        cfg.channels.gIh_max = 0.005    # Lower Ih than relay — less sag, more burst
+        cfg.channels.gIh_max = 0.004    # Lower Ih than relay — less sag, more burst
         cfg.channels.E_Ih = -43.0  # Standardized reversal potential
         cfg.channels.enable_ICa = False
         cfg.channels.enable_SK = False
@@ -786,8 +790,9 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.jacobian_mode = 'native_hines'
         # Hyperpolarizing pulse de-inactivates I_T; release evokes the rebound burst.
         cfg.stim.stim_type = 'pulse'
-        cfg.stim.Iext = -4.0
-        cfg.stim.pulse_dur = 40.0
+        cfg.stim.Iext = -3.0
+        cfg.stim.pulse_dur = 45.0
+        cfg.stim.t_sim = 450.0
 
     # --- 17. ШИПОВАТЫЙ ПРОЕКЦИОННЫЙ НЕЙРОН СТРИАТУМА (SPN) ---
     elif code == "Q":
@@ -857,19 +862,22 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.dendritic_filter.enabled = False
         # SCN1A haploinsufficiency: ~50% reduction in Nav1.1
         # FS interneurons depend heavily on Nav1.1 for sustained firing
-        cfg.channels.gNa_max = 60.0     # Reduced: 120 → 60 (50% Nav1.1 loss)
-        cfg.channels.enable_IA = True
-        cfg.channels.gA_max = 0.8       # FS baseline
+        cfg.channels.gNa_max = 80.0     # Impaired but still capable of a brief inhibitory train
+        cfg.channels.gK_max = 20.0
+        cfg.channels.enable_IA = False
+        cfg.channels.gA_max = 0.0
+        cfg.channels.enable_NaR = False
         cfg.stim.jacobian_mode = 'native_hines'
-        # Strong const stimulus: FS interneuron fails to maintain high-freq firing
-        # → reduced inhibitory output → network disinhibition
+        # Brief, weakened FS-like firing: reduced inhibitory output rather than total silence.
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 40.0            # Same drive as FS base, but fewer spikes
+        cfg.stim.Iext = 30.0
+        cfg.stim.t_sim = 300.0
 
         # Fever mode: temperature-triggered failure
         if cfg.preset_modes.dravet_mode == "febrile":
             cfg.env.T_celsius = 40.0  # Fever temperature
-            cfg.channels.gNa_max = 42.0  # Further 30% reduction from baseline (60 → 42)
+            cfg.channels.gNa_max = 55.0  # Further failure reserve collapses under fever
+            cfg.channels.gK_max = 20.0
             cfg.env.Q10_Na = 3.0  # Thermal hyper-sensitivity: Na channels become more sensitive to heat
 
     # --- 20. PASSIVE CABLE (LINEAR DECAY) ---

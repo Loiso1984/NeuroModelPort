@@ -218,6 +218,15 @@ def _tab_with_toolbar(
     if min_canvas_height is not None:
         canvas.setMinimumHeight(int(min_canvas_height))
     canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    min_canvas_width = None
+    fig = getattr(canvas, "figure", None)
+    if fig is not None:
+        try:
+            min_canvas_width = int(fig.get_figwidth() * fig.dpi)
+        except Exception:
+            min_canvas_width = None
+    if min_canvas_width:
+        canvas.setMinimumWidth(min_canvas_width)
 
     content = QWidget()
     content_lay = QVBoxLayout(content)
@@ -235,7 +244,10 @@ def _tab_with_toolbar(
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        if min_canvas_width:
+            content.setMinimumWidth(min_canvas_width + 24)
         scroll.setWidget(content)
         lay.addWidget(scroll, 1)
     else:
@@ -1000,7 +1012,7 @@ class AnalyticsWidget(QTabWidget):
         )
 
     def _build_tab_phase(self) -> QWidget:
-        self.fig_phase, cvs = _mpl_fig(1, 1)
+        self.fig_phase, cvs = _mpl_fig(1, 1, figsize=(9.4, 6.6))
         self.ax_phase = self.fig_phase.add_subplot(1, 1, 1)
         self.cvs_phase = cvs
         self._tab_figures['Phase Plane'] = self.fig_phase
@@ -1008,7 +1020,18 @@ class AnalyticsWidget(QTabWidget):
         self._phase_warning_text = None
 
         # Add time slider for trajectory evolution
-        from PySide6.QtWidgets import QSlider, QHBoxLayout, QLabel, QWidget, QComboBox
+        from PySide6.QtWidgets import QSlider, QHBoxLayout, QLabel, QWidget, QComboBox, QVBoxLayout
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(4)
+        self._phase_intro_label = QLabel(
+            "How to read: the trajectory shows how membrane voltage and a chosen gate evolve together. "
+            "A clipped window helps isolate threshold approach, rebound, burst loops, or late adaptation."
+        )
+        self._phase_intro_label.setWordWrap(True)
+        self._phase_intro_label.setStyleSheet("color:#A6ADC8; font-size:11px;")
+        controls_layout.addWidget(self._phase_intro_label)
         slider_widget = QWidget()
         slider_layout = QHBoxLayout(slider_widget)
         slider_layout.setContentsMargins(0, 0, 0, 0)
@@ -1063,6 +1086,10 @@ class AnalyticsWidget(QTabWidget):
         self._phase_time_label.setStyleSheet("color:#CBA6F7; font-size:11px;")
         self._phase_time_label.setMinimumWidth(120)
         slider_layout.addWidget(self._phase_time_label)
+        self._phase_window_source_label = QLabel("Source: full trace")
+        self._phase_window_source_label.setStyleSheet("color:#94E2D5; font-size:11px;")
+        self._phase_window_source_label.setMinimumWidth(140)
+        slider_layout.addWidget(self._phase_window_source_label)
 
         # Store slider widget reference
         self._phase_slider_widget = slider_widget
@@ -1093,12 +1120,18 @@ class AnalyticsWidget(QTabWidget):
             ha='left', va='top', color='#F38BA8', fontsize=10,
             bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8)
         )
+        self._phase_explain_label = QLabel("")
+        self._phase_explain_label.setWordWrap(True)
+        self._phase_explain_label.setStyleSheet("color:#BAC2DE; font-size:11px;")
+        controls_layout.addWidget(slider_widget)
+        controls_layout.addWidget(self._phase_explain_label)
 
         return _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Phase Plane'),
-            extra_widget=slider_widget,
-            min_canvas_height=620,
+            extra_widget=controls,
+            scroll_canvas=True,
+            min_canvas_height=760,
         )
 
     def _build_tab_kymo(self) -> QWidget:
@@ -1122,7 +1155,7 @@ class AnalyticsWidget(QTabWidget):
     def _build_tab_energy_balance(self) -> QWidget:
         import matplotlib.gridspec as gridspec
         # Create larger figure for taller/wider graphs
-        self.fig_energy, cvs = _mpl_fig(1, 1, figsize=(12, 12))
+        self.fig_energy, cvs = _mpl_fig(1, 1, figsize=(10.5, 12), tight=False)
         # v11.19: Updated layout - 4 time-series plots on left, pie chart in top-right corner
         gs = gridspec.GridSpec(4, 2, width_ratios=[8, 2], height_ratios=[1, 1, 1, 1],
                                figure=self.fig_energy, hspace=0.35, wspace=0.25)
@@ -1138,6 +1171,7 @@ class AnalyticsWidget(QTabWidget):
         self._tab_figures['Energy & Balance'] = self.fig_energy
         self._energy_lines: dict[str, object] = {}
         self._balance_lines: dict[str, object] = {}
+        self._energy_texts: dict[str, object] = {}
         self._atp_line = None
         self._atp_threshold_line = None
         self._pie_chart = None
@@ -1320,11 +1354,29 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Poincare (ISI)'))
 
     def _build_tab_bif(self) -> QWidget:
-        self.fig_bif, cvs = _mpl_fig(2, 2)
+        self.fig_bif, cvs = _mpl_fig(2, 2, figsize=(10.2, 9.2), tight=False)
         self.ax_bif = [self.fig_bif.add_subplot(2, 2, k) for k in range(1, 5)]
+        from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(4)
+        hint = QLabel(
+            "How to read: this scan tracks when a control parameter moves the cell from rest into tonic spiking, bursting, or block. "
+            "Peaks show branch structure; rate and spike-count panels help separate true oscillation from isolated responses."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#A6ADC8; font-size:11px;")
+        self._bif_summary_label = QLabel("Run a bifurcation scan to map rest → tonic → burst/block transitions.")
+        self._bif_summary_label.setWordWrap(True)
+        self._bif_summary_label.setStyleSheet("color:#BAC2DE; font-size:11px;")
+        controls_layout.addWidget(hint)
+        controls_layout.addWidget(self._bif_summary_label)
         self.tab_bif = _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Bifurcation'),
+            extra_widget=controls,
+            extra_widget_position="above",
             scroll_canvas=True,
             min_canvas_height=900,
         )
@@ -1335,16 +1387,35 @@ class AnalyticsWidget(QTabWidget):
         return self.tab_bif
 
     def _build_tab_sweep(self) -> QWidget:
-        self.fig_sweep, cvs = _mpl_fig(2, 2)
+        self.fig_sweep, cvs = _mpl_fig(2, 2, figsize=(10.2, 9.2), tight=False)
         self.ax_sweep = [self.fig_sweep.add_subplot(2, 2, k) for k in range(1, 5)]
+        from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(4)
+        hint = QLabel(
+            "How to read: the upper-left panel shows representative traces, while the lower panels convert the same sweep into peak voltage, firing-rate, and spike-count summaries. "
+            "For an f-I run, focus on onset current, slope, and adaptation across the sweep."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#A6ADC8; font-size:11px;")
+        self._sweep_summary_label = QLabel("Run a sweep or dedicated f-I scan to populate this dashboard.")
+        self._sweep_summary_label.setWordWrap(True)
+        self._sweep_summary_label.setStyleSheet("color:#BAC2DE; font-size:11px;")
+        controls_layout.addWidget(hint)
+        controls_layout.addWidget(self._sweep_summary_label)
         self.tab_sweep = _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Sweep'),
+            extra_widget=controls,
+            extra_widget_position="above",
             scroll_canvas=True,
             min_canvas_height=900,
         )
         self.cvs_sweep = cvs
         self._tab_figures['Sweep'] = self.fig_sweep
+        self._tab_figures['f-I Curve'] = self.fig_sweep
         self._sweep_cbar = None
         self._sweep_trace_lines: list = []
         self._sweep_trace_max = 64
@@ -1352,7 +1423,7 @@ class AnalyticsWidget(QTabWidget):
         return self.tab_sweep
 
     def _build_tab_sd(self) -> QWidget:
-        self.fig_sd, cvs = _mpl_fig(1, 2)
+        self.fig_sd, cvs = _mpl_fig(1, 2, figsize=(10.0, 7.6), tight=False)
         self.ax_sd = [self.fig_sd.add_subplot(1, 2, k) for k in range(1, 3)]
         self.tab_sd = _tab_with_toolbar(
             cvs,
@@ -1366,7 +1437,7 @@ class AnalyticsWidget(QTabWidget):
         return self.tab_sd
 
     def _build_tab_excmap(self) -> QWidget:
-        self.fig_excmap, cvs = _mpl_fig(1, 2)
+        self.fig_excmap, cvs = _mpl_fig(1, 2, figsize=(10.0, 7.6), tight=False)
         self.ax_excmap = [self.fig_excmap.add_subplot(1, 2, k) for k in range(1, 3)]
         self.tab_excmap = _tab_with_toolbar(
             cvs,
@@ -1408,7 +1479,7 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Impedance'))
 
     def _build_tab_chaos(self) -> QWidget:
-        self.fig_chaos, cvs = _mpl_fig(3, 1, figsize=(11, 18), tight=False)
+        self.fig_chaos, cvs = _mpl_fig(3, 1, figsize=(9.6, 18), tight=False)
         self.ax_chaos = [self.fig_chaos.add_subplot(3, 1, k) for k in range(1, 4)]
         _set_canvas_margins(self.fig_chaos, left=0.08, right=0.97, top=0.96, bottom=0.06, hspace=0.42, wspace=0.24)
         self.cvs_chaos = cvs
@@ -1421,71 +1492,73 @@ class AnalyticsWidget(QTabWidget):
         self._chaos_dynamic_artists: list[object] = []
         self._chaos_click_cid = self.cvs_chaos.mpl_connect('button_press_event', self._on_chaos_plot_clicked)
 
-        from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpinBox, QDoubleSpinBox, QComboBox
+        from PySide6.QtWidgets import QWidget, QGridLayout, QLabel, QSpinBox, QDoubleSpinBox, QComboBox
         controls = QWidget()
-        layout = QHBoxLayout(controls)
+        layout = QGridLayout(controls)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(4)
 
-        def _add_label(text_label: str):
+        def _add_label(text_label: str, row: int, col: int):
             lbl = QLabel(text_label)
             lbl.setStyleSheet('color:#CDD6F4; font-size:11px;')
-            layout.addWidget(lbl)
+            layout.addWidget(lbl, row, col)
             return lbl
 
-        _add_label('Embed')
+        _add_label('Embed', 0, 0)
         self._chaos_embed_spin = QSpinBox()
         self._chaos_embed_spin.setRange(2, 8)
         self._chaos_embed_spin.setValue(3)
         self._chaos_embed_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_embed_spin)
+        layout.addWidget(self._chaos_embed_spin, 0, 1)
 
-        _add_label('Lag')
+        _add_label('Lag', 0, 2)
         self._chaos_lag_spin = QSpinBox()
         self._chaos_lag_spin.setRange(1, 20)
         self._chaos_lag_spin.setValue(2)
         self._chaos_lag_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_lag_spin)
+        layout.addWidget(self._chaos_lag_spin, 0, 3)
 
-        _add_label('Fit start')
+        _add_label('Fit start', 0, 4)
         self._chaos_fit_start_spin = QDoubleSpinBox()
         self._chaos_fit_start_spin.setRange(0.0, 500.0)
         self._chaos_fit_start_spin.setDecimals(1)
         self._chaos_fit_start_spin.setValue(5.0)
         self._chaos_fit_start_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_fit_start_spin)
+        layout.addWidget(self._chaos_fit_start_spin, 0, 5)
 
-        _add_label('Fit end')
+        _add_label('Fit end', 1, 0)
         self._chaos_fit_end_spin = QDoubleSpinBox()
         self._chaos_fit_end_spin.setRange(1.0, 1000.0)
         self._chaos_fit_end_spin.setDecimals(1)
         self._chaos_fit_end_spin.setValue(40.0)
         self._chaos_fit_end_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_fit_end_spin)
+        layout.addWidget(self._chaos_fit_end_spin, 1, 1)
 
-        _add_label('Min sep')
+        _add_label('Min sep', 1, 2)
         self._chaos_sep_spin = QDoubleSpinBox()
         self._chaos_sep_spin.setRange(0.0, 500.0)
         self._chaos_sep_spin.setDecimals(1)
         self._chaos_sep_spin.setValue(10.0)
         self._chaos_sep_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_sep_spin)
+        layout.addWidget(self._chaos_sep_spin, 1, 3)
 
-        _add_label('Pair')
+        _add_label('Pair', 1, 4)
         self._chaos_pair_mode = QComboBox()
         self._chaos_pair_mode.addItems(['Representative', 'First pair', 'Pair index'])
         self._chaos_pair_mode.currentTextChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_pair_mode)
+        layout.addWidget(self._chaos_pair_mode, 1, 5)
 
         self._chaos_pair_spin = QSpinBox()
         self._chaos_pair_spin.setRange(1, 1)
         self._chaos_pair_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_pair_spin)
+        layout.addWidget(self._chaos_pair_spin, 1, 6)
 
-        layout.addStretch(1)
         tip = QLabel('Click the divergence curve to inspect a specific separation horizon.')
         tip.setStyleSheet('color:#A6ADC8; font-size:11px;')
-        layout.addWidget(tip)
+        tip.setWordWrap(True)
+        layout.addWidget(tip, 0, 6, 1, 2)
+        layout.setColumnStretch(7, 1)
 
         return _tab_with_toolbar(
             cvs,
@@ -1496,7 +1569,7 @@ class AnalyticsWidget(QTabWidget):
         )
 
     def _build_tab_modulation(self) -> QWidget:
-        self.fig_mod, cvs = _mpl_fig(1, 1)
+        self.fig_mod, cvs = _mpl_fig(1, 1, figsize=(8.8, 7.2), tight=False)
         # Use polar projection for phase-locking
         self.ax_mod = self.fig_mod.add_subplot(1, 1, 1, polar=True)
         self.cvs_mod = cvs
@@ -1508,6 +1581,12 @@ class AnalyticsWidget(QTabWidget):
         # Initialize error text
         self._mod_error_text = self.ax_mod.text(0.5, 0.5, '', ha='center', va='center', 
                                                  transform=self.ax_mod.transAxes, fontsize=12, color='#666666', visible=False)
+        self._mod_soft_warning = self.ax_mod.text(
+            0.5, 0.5,
+            '[WARNING: LOW STATISTICAL POWER (<3 CYCLES)]',
+            ha='center', va='center', transform=self.ax_mod.transAxes,
+            fontsize=13, color='#F38BA8', alpha=0.28, rotation=18, visible=False,
+        )
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
 
     # ─────────────────────────────────────────────────────────────────
@@ -1972,6 +2051,8 @@ class AnalyticsWidget(QTabWidget):
 
         # Reset error text visibility to clean state
         self._mod_error_text.set_visible(False)
+        if hasattr(self, '_mod_soft_warning'):
+            self._mod_soft_warning.set_visible(False)
 
         # Handle invalid state
         if not stats.get('modulation_valid', False) or len(centers) == 0 or len(rates) == 0:
@@ -2022,6 +2103,8 @@ class AnalyticsWidget(QTabWidget):
             self._mod_vec.set_data([], [])
 
         self.ax_mod.set_title("Spike Phase-Locking (Firing Rate vs LFP Phase)", fontsize=11, fontweight='bold', pad=15)
+        if hasattr(self, '_mod_soft_warning') and stats.get('modulation_low_statistical_power', False):
+            self._mod_soft_warning.set_visible(True)
         self.cvs_mod.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
@@ -2306,7 +2389,15 @@ class AnalyticsWidget(QTabWidget):
             return
 
         params = self._chaos_control_values()
-        analysis = estimate_ftle_lle(np.asarray(result.v_soma, dtype=float), np.asarray(result.t, dtype=float), **params)
+        analysis = estimate_ftle_lle(
+            np.asarray(result.v_soma, dtype=float),
+            np.asarray(result.t, dtype=float),
+            is_stochastic=bool(
+                getattr(result.config.stim, 'stoch_gating', False)
+                or getattr(result.config.stim, 'synaptic_train_type', 'none') == 'poisson'
+            ),
+            **params,
+        )
         self._chaos_analysis = analysis
 
         t_div = np.asarray(analysis.get('ftle_time_ms', []), dtype=float)
@@ -2343,15 +2434,27 @@ class AnalyticsWidget(QTabWidget):
             coeffs = np.polyfit(t_div[fit_mask], div[fit_mask], 1)
             self._chaos_dynamic_artists.append(ax_div.plot(t_div[fit_mask], np.polyval(coeffs, t_div[fit_mask]), '--', color='#F38BA8', lw=2.0, label='Linear trend')[0])
         summary = (
-            f"class = {stats.get('lyapunov_class', 'n/a')}\n"
+            f"class = {analysis.get('classification', stats.get('lyapunov_class', 'n/a'))}\n"
             f"LLE = {analysis.get('lle_per_s', np.nan):+.3f} 1/s\n"
             f"pairs = {int(analysis.get('valid_pairs', 0))}\n"
-            f"selected k = {k}"
+            f"selected k = {k}\n"
+            f"mode = {analysis.get('preprocess_mode', 'standard')}"
         )
         self._chaos_dynamic_artists.append(
             ax_div.text(0.02, 0.96, summary, transform=ax_div.transAxes, ha='left', va='top', fontsize=10,
                         bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4')
         )
+        if analysis.get('is_stochastic', False):
+            self._chaos_dynamic_artists.append(
+                ax_div.text(
+                    0.5, 0.46,
+                    'STOCHASTIC INPUT: LLE mainly reflects noise entropy.',
+                    transform=ax_div.transAxes,
+                    ha='center', va='center',
+                    fontsize=12, color='#F38BA8', alpha=0.42,
+                    bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.65, edgecolor='#F38BA8'),
+                )
+            )
         _configure_ax_interactive(ax_div, title='Lyapunov Exponent (Trajectory Separation)', xlabel='Time (ms)', ylabel='Log divergence ln(d)', show_legend=True)
 
         dims = emb.shape[1]
@@ -2766,8 +2869,12 @@ class AnalyticsWidget(QTabWidget):
                 self._phase_time_end.blockSignals(False)
             if start_val <= 0 and end_val >= max_time:
                 self._phase_time_label.setText("All")
+                if hasattr(self, '_phase_window_source_label'):
+                    self._phase_window_source_label.setText("Source: full trace")
             else:
                 self._phase_time_label.setText(f"{start_val}-{end_val} ms")
+                if hasattr(self, '_phase_window_source_label'):
+                    self._phase_window_source_label.setText("Source: selected segment")
                 window_start = start_val
                 window_end = end_val
 
@@ -2852,6 +2959,17 @@ class AnalyticsWidget(QTabWidget):
             self._phase_lines['v_null'].set_visible(False)
             if self._phase_warning_text is not None:
                 self._phase_warning_text.set_text('⚠ Nullclines hidden (complex channels active or non-Na/K projection)')
+        if hasattr(self, '_phase_explain_label'):
+            if nullclines_valid:
+                self._phase_explain_label.setText(
+                    f"Projection: V vs {gate_key}. Window={self._phase_time_label.text()}. "
+                    "Nullclines are available here because the view is close to a classic HH-style reduced plane."
+                )
+            else:
+                self._phase_explain_label.setText(
+                    f"Projection: V vs {gate_key}. Window={self._phase_time_label.text()}. "
+                    "Use this to inspect loops, threshold turns, and rebound structure; treat nullclines cautiously because extra channel families make the system higher-dimensional."
+                )
 
         ax.set_xlabel('V (mV)', fontsize=11)
         ax.set_ylabel(f'Gate: {gate_key}', fontsize=11)
@@ -3115,6 +3233,7 @@ class AnalyticsWidget(QTabWidget):
                 atp_data = atp_arr.reshape(-1)
 
         if atp_data is not None:
+            _hide_axis_message(self._energy_texts, "atp_disabled")
             if self._atp_line is None:
                 self._atp_line = ax4.plot([], [], color='#A6E3A1', lw=2, label='[ATP]i')[0]
             if self._atp_threshold_line is None:
@@ -3131,12 +3250,20 @@ class AnalyticsWidget(QTabWidget):
             ax4.set_title('Intracellular ATP Pool (Metabolic Breath)')
             ax4.legend(fontsize=8, loc='upper right')
             ax4.grid(alpha=0.3)
+            ax4.relim()
+            ax4.autoscale_view()
         else:
-            ax4.text(0.5, 0.5, 'Enable dynamic ATP in config\nto see metabolic dynamics',
-                     ha='center', va='center', transform=ax4.transAxes, fontsize=10, color='gray')
-            ax4.set_xlabel('Time (ms)')
-            ax4.set_ylabel('[ATP]i (mM)')
-            ax4.set_title('Intracellular ATP Pool (Disabled)')
+            if self._atp_line is not None:
+                _set_line_data(self._atp_line)
+            _axis_message(
+                ax4,
+                self._energy_texts,
+                "atp_disabled",
+                'Enable dynamic ATP in config\nto see metabolic dynamics',
+                title='Intracellular ATP Pool (Disabled)',
+                xlabel='Time (ms)',
+                ylabel='[ATP]i (mM)',
+            )
         
         _set_canvas_margins(self.fig_energy, left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
 
@@ -3505,6 +3632,18 @@ class AnalyticsWidget(QTabWidget):
         self._ensure_built('_build_tab_bif')
         self._last_bif_data = bif_data
         self._last_bif_param_name = param_name
+        if not bif_data:
+            if hasattr(self, '_bif_summary_label'):
+                self._bif_summary_label.setText(
+                    f"No bifurcation samples yet for {param_name}. Run the scan to reveal rest, tonic, burst, or block transitions."
+                )
+            for line in getattr(self, '_bif_lines', {}).values():
+                try:
+                    line.set_data([], [])
+                except Exception:
+                    pass
+            self.cvs_bif.draw_idle()
+            return
         vals   = np.array([d['val']   for d in bif_data])
         vmax   = np.array([d['max']   for d in bif_data])
         vmin   = np.array([d['min']   for d in bif_data])
@@ -3553,6 +3692,28 @@ class AnalyticsWidget(QTabWidget):
         ax4.set_xlabel(param_name);  ax4.set_ylabel('N spikes')
         ax4.set_title('Spike count');  ax4.grid(alpha=0.3)
         ax4.relim(); ax4.autoscale_view()
+
+        if hasattr(self, '_bif_summary_label'):
+            active = n_sp > 0
+            if not np.any(active):
+                summary = f"{param_name}: rest-only in scanned range."
+            else:
+                onset = float(vals[np.argmax(active)])
+                max_freq = float(np.nanmax(freq[active])) if np.any(np.isfinite(freq[active])) else 0.0
+                max_spikes = int(np.nanmax(n_sp[active])) if np.any(active) else 0
+                block_like = bool(np.any(active) and n_sp[-1] == 0 and np.any(n_sp[:-1] > 0))
+                if max_spikes >= 4 and max_freq < 25.0:
+                    regime = "burst-prone"
+                elif max_freq >= 25.0:
+                    regime = "tonic-spiking"
+                else:
+                    regime = "low-rate / near-threshold"
+                suffix = " High-end block is suggested." if block_like else ""
+                summary = (
+                    f"{param_name}: onset around {onset:.2f}. Dominant regime looks {regime}; "
+                    f"peak firing rate ≈ {max_freq:.1f} Hz, max spike count {max_spikes}.{suffix}"
+                )
+            self._bif_summary_label.setText(summary)
 
         _set_canvas_margins(self.fig_bif, left=0.08, right=0.96, top=0.94, bottom=0.07, hspace=0.42, wspace=0.26)
         self.cvs_bif.draw_idle()
@@ -3631,6 +3792,26 @@ class AnalyticsWidget(QTabWidget):
         ax4.set_xlabel(param_name);  ax4.set_ylabel('N spikes')
         ax4.set_title('Spike count');  ax4.grid(alpha=0.3)
         ax4.relim(); ax4.autoscale_view()
+
+        if hasattr(self, '_sweep_summary_label'):
+            if not param_vals:
+                self._sweep_summary_label.setText(
+                    f"No successful sweep traces for {param_name}. Check solver stability or sweep bounds."
+                )
+            else:
+                active = [i for i, nsp in enumerate(n_sps) if nsp > 0]
+                max_freq = float(np.nanmax(freqs)) if len(freqs) else 0.0
+                max_spikes = int(np.nanmax(n_sps)) if len(n_sps) else 0
+                if active:
+                    onset_val = float(param_vals[active[0]])
+                    onset_txt = f"onset ≈ {onset_val:.2f}"
+                else:
+                    onset_txt = "no spike onset in range"
+                mode_txt = "Dedicated f-I readout" if str(param_name).lower() == "iext" else "General sweep"
+                self._sweep_summary_label.setText(
+                    f"{mode_txt}: {param_name} scan with {len(param_vals)} successful samples, {onset_txt}, "
+                    f"peak firing rate ≈ {max_freq:.1f} Hz, max spike count {max_spikes}."
+                )
 
         _set_canvas_margins(self.fig_sweep, left=0.08, right=0.96, top=0.94, bottom=0.07, hspace=0.42, wspace=0.26)
         self.cvs_sweep.draw_idle()

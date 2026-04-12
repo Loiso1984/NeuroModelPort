@@ -11,6 +11,7 @@ import hashlib
 from numba import njit
 from scipy.signal import butter, find_peaks, hilbert, sosfiltfilt
 from scipy.spatial import cKDTree
+from core.physics_params import build_state_offsets, state_slices_from_offsets
 from core.rhs import get_stim_current, get_event_driven_conductance, _get_syn_reversal, nmda_mg_block
 
 
@@ -728,40 +729,72 @@ def extract_gate_traces(result) -> dict:
     Returns dict mapping gate name → 1-D numpy array (soma compartment).
     Keys: 'm', 'h', 'n', optionally 'r', 's', 'u', 'a', 'b'.
     """
-    y   = result.y
-    n   = result.n_comp
-    cfg = result.config.channels
+    y = result.y
+    n = int(result.n_comp)
+    ch = result.config.channels
+    st = result.config.stim
+    meta = result.config.metabolism
+    stim_location = getattr(result.config, "stim_location", None)
 
-    gates  = {}
-    cursor = n          # skip V rows
+    offsets = build_state_offsets(
+        n,
+        en_ih=ch.enable_Ih,
+        en_ica=ch.enable_ICa,
+        en_ia=ch.enable_IA,
+        en_sk=ch.enable_SK,
+        dyn_ca=result.config.calcium.dynamic_Ca,
+        en_itca=getattr(ch, "enable_ITCa", False),
+        en_im=getattr(ch, "enable_IM", False),
+        en_nap=getattr(ch, "enable_NaP", False),
+        en_nar=getattr(ch, "enable_NaR", False),
+        dyn_atp=getattr(meta, "enable_dynamic_atp", False),
+        use_dfilter_primary=getattr(stim_location, "location", "") == "dendritic_filtered",
+        use_dfilter_secondary=getattr(result.config, "dual_stimulation", None) is not None and getattr(result.config.dual_stimulation, "enabled", False) and getattr(result.config.dual_stimulation, "secondary_location", "") == "dendritic_filtered",
+    )
+    idx = state_slices_from_offsets(offsets, n)
 
-    gates['m'] = y[cursor, :];  cursor += n
-    gates['h'] = y[cursor, :];  cursor += n
-    gates['n'] = y[cursor, :];  cursor += n
-
-    if cfg.enable_Ih:
-        gates['r'] = y[cursor, :];  cursor += n
-
-    if cfg.enable_ICa:
-        gates['s'] = y[cursor, :];  cursor += n
-        gates['u'] = y[cursor, :];  cursor += n
-
-    if cfg.enable_IA:
-        gates['a'] = y[cursor, :];  cursor += n
-        gates['b'] = y[cursor, :];  cursor += n
-
+    gates = {}
+    gate_map = {
+        "m": "m",
+        "h": "h",
+        "n": "n",
+        "r": "r",
+        "s": "s",
+        "u": "u",
+        "a": "a",
+        "b": "b",
+        "p": "p",
+        "q": "q",
+        "w": "w",
+        "x": "x",
+        "y": "y_nr",
+        "j": "j_nr",
+        "z_sk": "z_sk",
+    }
+    for out_name, key in gate_map.items():
+        sl = idx.get(key)
+        if sl is not None:
+            gates[out_name] = y[sl.start, :]
     return gates
 
 
-def classify_lyapunov(ftle_per_ms: float, tol_per_ms: float = 1e-3) -> str:
+def classify_lyapunov(
+    ftle_per_ms: float,
+    tol_per_ms: float = 1e-3,
+    *,
+    is_stochastic: bool = False,
+    spike_dominated: bool = False,
+) -> str:
     """Qualitative regime label from FTLE/LLE estimate."""
     if np.isnan(ftle_per_ms):
         return "unknown"
+    if is_stochastic:
+        return "stochastic/noise-dominated"
     if ftle_per_ms > tol_per_ms:
-        return "unstable_or_chaotic"
+        return "spike-dominated divergence" if spike_dominated else "candidate chaotic"
     if ftle_per_ms < -tol_per_ms:
         return "stable"
-    return "limit_cycle_like"
+    return "subthreshold oscillatory" if spike_dominated else "limit-cycle-like"
 
 
 def estimate_ftle_lle(
@@ -773,6 +806,7 @@ def estimate_ftle_lle(
     min_separation_ms: float = 10.0,
     fit_start_ms: float = 5.0,
     fit_end_ms: float = 40.0,
+    is_stochastic: bool = False,
 ) -> dict:
     """
     Estimate FTLE/LLE from scalar time-series using Rosenstein-style divergence.
@@ -790,6 +824,11 @@ def estimate_ftle_lle(
         "dt_ms": np.nan,
         "lag_steps": int(lag_steps),
         "embedding_dim": int(embedding_dim),
+        "transient_ms": 0.0,
+        "is_stochastic": bool(is_stochastic),
+        "preprocess_mode": "auto_clip",
+        "spike_dominated_hint": False,
+        "classification": "unknown",
     }
 
     if len(x) < 50 or len(t) < 50:
@@ -805,6 +844,7 @@ def estimate_ftle_lle(
     # first 200 ms of transients before attractor reconstruction.
     t_sim_ms = float(t[-1] - t[0])
     transient_ms = min(200.0, 0.2 * t_sim_ms)
+    out["transient_ms"] = transient_ms
     if transient_ms > 0.0:
         transient_mask = t >= (t[0] + transient_ms)
         if np.sum(transient_mask) >= 50:
@@ -827,7 +867,13 @@ def estimate_ftle_lle(
     x_std = float(np.std(x))
     if x_std < 1e-12:
         return out
-    xn = (x - float(np.mean(x))) / x_std
+    center = float(np.median(x))
+    mad = float(np.median(np.abs(x - center)))
+    robust_scale = max(x_std, 1.4826 * mad, 1e-9)
+    xn = (x - center) / robust_scale
+    xn = np.clip(xn, -3.0, 3.0)
+    spike_fraction = float(np.mean(xn > 1.5))
+    out["spike_dominated_hint"] = bool(spike_fraction > 0.01 and spike_fraction < 0.35)
 
     emb = np.empty((max_start, embedding_dim), dtype=float)
     for d in range(embedding_dim):
@@ -887,6 +933,11 @@ def estimate_ftle_lle(
     out["lle_per_ms"] = float(slope)
     out["lle_per_s"] = float(slope * 1000.0)
     out["valid_pairs"] = int(len(pair_i))
+    out["classification"] = classify_lyapunov(
+        out["lle_per_ms"],
+        is_stochastic=bool(out["is_stochastic"]),
+        spike_dominated=bool(out["spike_dominated_hint"]),
+    )
     return out
 
 
@@ -1209,6 +1260,7 @@ def estimate_spike_modulation(
         "band_high_hz": float(high_hz),
         "phase_bin_centers_rad": np.array([]),
         "phase_rate_hz": np.array([]),
+        "low_statistical_power": False,
     }
 
     n = min(len(t_ms), len(mod_signal))
@@ -1228,8 +1280,7 @@ def estimate_spike_modulation(
     t_sim_ms = float(t[-1] - t[0])
     min_periods = 3.0
     min_duration_ms = min_periods * (1000.0 / max(float(low_hz), 1e-6))
-    if t_sim_ms < min_duration_ms:
-        return out
+    out["low_statistical_power"] = bool(t_sim_ms < min_duration_ms)
 
     dt_ms = float(np.median(np.diff(t))) if len(t) > 1 else 0.1
     dt_ms = max(dt_ms, 1e-9)
@@ -1330,6 +1381,7 @@ def estimate_spike_modulation(
             "band_high_hz": high,
             "phase_bin_centers_rad": centers,
             "phase_rate_hz": rate_hz,
+            "low_statistical_power": bool(out["low_statistical_power"]),
         }
     )
     return out
@@ -1606,14 +1658,20 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
             min_separation_ms=getattr(ana, "lyapunov_min_separation_ms", 10.0),
             fit_start_ms=getattr(ana, "lyapunov_fit_start_ms", 5.0),
             fit_end_ms=getattr(ana, "lyapunov_fit_end_ms", 40.0),
+            is_stochastic=bool(
+                getattr(cfg.stim, "stoch_gating", False)
+                or getattr(cfg.stim, "synaptic_train_type", "none") == "poisson"
+            ),
         )
         lyap = {
             "lle_per_ms": float(lyap_raw["lle_per_ms"]) if np.isfinite(lyap_raw["lle_per_ms"]) else np.nan,
             "lle_per_s": float(lyap_raw["lle_per_s"]) if np.isfinite(lyap_raw["lle_per_s"]) else np.nan,
-            "lyapunov_class": classify_lyapunov(lyap_raw["lle_per_ms"]),
+            "lyapunov_class": lyap_raw.get("classification", classify_lyapunov(lyap_raw["lle_per_ms"])),
             "lyapunov_valid_pairs": int(lyap_raw["valid_pairs"]),
             "ftle_time_ms": lyap_raw.get("ftle_time_ms", np.array([])),
             "ftle_log_divergence": lyap_raw.get("ftle_log_divergence", np.array([])),
+            "lyapunov_is_stochastic": bool(lyap_raw.get("is_stochastic", False)),
+            "lyapunov_transient_ms": float(lyap_raw.get("transient_ms", np.nan)),
         }
 
     # Optional non-FFT modulation decomposition (default OFF).
@@ -1632,6 +1690,7 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         "band_high_hz": np.nan,
         "phase_bin_centers_rad": np.array([]),
         "phase_rate_hz": np.array([]),
+        "low_statistical_power": False,
     }
     if getattr(ana, "enable_modulation_decomposition", False):
         source = getattr(ana, "modulation_source", "voltage")
@@ -1696,6 +1755,8 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         'lyapunov_valid_pairs': lyap["lyapunov_valid_pairs"],
         'ftle_time_ms':         lyap["ftle_time_ms"],
         'ftle_log_divergence':  lyap["ftle_log_divergence"],
+        'lyapunov_is_stochastic': lyap.get("lyapunov_is_stochastic", False),
+        'lyapunov_transient_ms': lyap.get("lyapunov_transient_ms", np.nan),
         'modulation_valid':    modulation["valid"],
         'modulation_source':   modulation["source"],
         'modulation_plv':      modulation["plv"],
@@ -1710,4 +1771,5 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         'modulation_band_high_hz': modulation["band_high_hz"],
         'modulation_phase_bin_centers_rad': modulation["phase_bin_centers_rad"],
         'modulation_phase_rate_hz': modulation["phase_rate_hz"],
+        'modulation_low_statistical_power': modulation["low_statistical_power"],
     }

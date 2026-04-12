@@ -33,8 +33,23 @@ from .kinetics import (
     bx_NaP,
     by_NaR,
 )
-from .rhs import CA_I_MAX_M_M, CA_I_MIN_M_M, F_CONST, R_GAS
-from .physics_params import PhysicsParams, unpack_conductances, unpack_temperature_scaling
+from .rhs import (
+    ATP_PUMP_FAILURE_THRESHOLD,
+    CA_I_MAX_M_M,
+    CA_I_MIN_M_M,
+    F_CONST,
+    K_O_MIN_M_M,
+    NA_I_MIN_M_M,
+    R_GAS,
+)
+from .physics_params import (
+    PhysicsParams,
+    build_state_offsets,
+    state_slices_from_offsets,
+    unpack_conductances,
+    unpack_env_params,
+    unpack_temperature_scaling,
+)
 
 _LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
 _MAX_JAC_CACHE = 8
@@ -60,6 +75,7 @@ def _state_slices(
     en_ica: bool,
     en_ia: bool,
     dyn_ca: bool,
+    dyn_atp: bool,
     use_dfilter_primary: int,
     use_dfilter_secondary: int,
     en_itca: bool = False,
@@ -68,85 +84,22 @@ def _state_slices(
     en_nar: bool = False,
     en_sk: bool = False,
 ) -> tuple[dict[str, slice | int | None], int]:
-    cursor = 0
-    out: dict[str, slice | int | None] = {}
-    out["v"] = slice(cursor, cursor + n_comp)
-    cursor += n_comp
-    out["m"] = slice(cursor, cursor + n_comp)
-    cursor += n_comp
-    out["h"] = slice(cursor, cursor + n_comp)
-    cursor += n_comp
-    out["n"] = slice(cursor, cursor + n_comp)
-    cursor += n_comp
-
-    out["r"] = None
-    if en_ih:
-        out["r"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["s"] = None
-    out["u"] = None
-    if en_ica:
-        out["s"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-        out["u"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["a"] = None
-    out["b"] = None
-    if en_ia:
-        out["a"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-        out["b"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["p"] = None  # T-type Ca activation
-    out["q"] = None  # T-type Ca inactivation
-    if en_itca:
-        out["p"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-        out["q"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["w"] = None  # M-type K activation
-    if en_im:
-        out["w"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["x"] = None  # Persistent Na activation
-    if en_nap:
-        out["x"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["y_nr"] = None  # Resurgent Na activation
-    out["j_nr"] = None  # Resurgent Na inactivation/block
-    if en_nar:
-        out["y_nr"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-        out["j_nr"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["z_sk"] = None  # SK gate (ODE-based, Ca-dependent)
-    if en_sk:
-        out["z_sk"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["ca"] = None
-    if dyn_ca:
-        out["ca"] = slice(cursor, cursor + n_comp)
-        cursor += n_comp
-
-    out["dfilter_primary"] = None
-    if use_dfilter_primary == 1:
-        out["dfilter_primary"] = cursor
-        cursor += 1
-
-    out["dfilter_secondary"] = None
-    if use_dfilter_secondary == 1:
-        out["dfilter_secondary"] = cursor
-        cursor += 1
-
-    return out, cursor
+    offsets = build_state_offsets(
+        n_comp,
+        en_ih=en_ih,
+        en_ica=en_ica,
+        en_ia=en_ia,
+        en_sk=en_sk,
+        dyn_ca=dyn_ca,
+        en_itca=en_itca,
+        en_im=en_im,
+        en_nap=en_nap,
+        en_nar=en_nar,
+        dyn_atp=dyn_atp,
+        use_dfilter_primary=use_dfilter_primary,
+        use_dfilter_secondary=use_dfilter_secondary,
+    )
+    return state_slices_from_offsets(offsets, n_comp), int(offsets.n_state)
 
 
 def _rate_derivative(fn, v: np.ndarray, eps: float = 1e-4) -> np.ndarray:
@@ -160,6 +113,7 @@ def build_jacobian_sparsity(
     en_ia: bool,
     en_sk: bool,
     dyn_ca: bool,
+    dyn_atp: bool,
     l_indices: np.ndarray,
     l_indptr: np.ndarray,
     use_dfilter_primary: int,
@@ -190,7 +144,7 @@ def build_jacobian_sparsity(
         voltage-equation sparsity row.
     """
     idx, n_state = _state_slices(
-        n_comp, en_ih, en_ica, en_ia, dyn_ca, use_dfilter_primary, use_dfilter_secondary,
+        n_comp, en_ih, en_ica, en_ia, dyn_ca, dyn_atp, use_dfilter_primary, use_dfilter_secondary,
         en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar, en_sk=en_sk,
     )
     sp = lil_matrix((n_state, n_state), dtype=float)
@@ -212,6 +166,9 @@ def build_jacobian_sparsity(
     j_nr_slice = idx["j_nr"]
     z_sk_slice = idx["z_sk"]
     ca_slice = idx["ca"]
+    atp_slice = idx["atp"]
+    na_i_slice = idx["na_i"]
+    k_o_slice = idx["k_o"]
     dfilter_primary_idx = idx["dfilter_primary"]
     dfilter_secondary_idx = idx["dfilter_secondary"]
 
@@ -338,6 +295,21 @@ def build_jacobian_sparsity(
                 sp[ca_row, v_row] = 1.0
                 sp[ca_row, p_slice.start + i] = 1.0
                 sp[ca_row, q_slice.start + i] = 1.0
+        if atp_slice is not None:
+            atp_row = atp_slice.start + i
+            sp[atp_row, atp_row] = 1.0
+            sp[atp_row, v_row] = 1.0
+        if na_i_slice is not None:
+            nai_row = na_i_slice.start + i
+            sp[nai_row, nai_row] = 1.0
+            sp[nai_row, v_row] = 1.0
+            sp[nai_row, m_slice.start + i] = 1.0
+            sp[nai_row, h_slice.start + i] = 1.0
+        if k_o_slice is not None:
+            ko_row = k_o_slice.start + i
+            sp[ko_row, ko_row] = 1.0
+            sp[ko_row, v_row] = 1.0
+            sp[ko_row, n_slice.start + i] = 1.0
 
     if dfilter_primary_idx is not None:
         sp[int(dfilter_primary_idx), int(dfilter_primary_idx)] = 1.0
@@ -366,7 +338,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
     pos = _build_csr_pos_map(J_csr)
     zero_vec_cache: dict[int, np.ndarray] = {}
     ca_rest_vec_cache: dict[tuple[int, float], np.ndarray] = {}
-    state_slices_cache: dict[tuple[int, bool, bool, bool, bool, int, int, bool, bool, bool, bool, bool], tuple[dict[str, slice | int | None], int]] = {}
+    state_slices_cache: dict[tuple[int, bool, bool, bool, bool, bool, int, int, bool, bool, bool, bool, bool], tuple[dict[str, slice | int | None], int]] = {}
 
     def _zero_vec(n: int) -> np.ndarray:
         v = zero_vec_cache.get(n)
@@ -383,12 +355,16 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             ca_rest_vec_cache[key] = v
         return v
 
+    def _const_vec(n: int, scalar: float) -> np.ndarray:
+        return np.full(n, float(scalar), dtype=float)
+
     def _cached_state_slices(
         n_comp_local: int,
         en_ih_local: bool,
         en_ica_local: bool,
         en_ia_local: bool,
         dyn_ca_local: bool,
+        dyn_atp_local: bool,
         use_dfilter_primary_local: int,
         use_dfilter_secondary_local: int,
         en_itca_local: bool,
@@ -403,6 +379,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             bool(en_ica_local),
             bool(en_ia_local),
             bool(dyn_ca_local),
+            bool(dyn_atp_local),
             int(use_dfilter_primary_local),
             int(use_dfilter_secondary_local),
             bool(en_itca_local),
@@ -419,6 +396,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 en_ica_local,
                 en_ia_local,
                 dyn_ca_local,
+                dyn_atp_local,
                 use_dfilter_primary_local,
                 use_dfilter_secondary_local,
                 en_itca=en_itca_local,
@@ -451,6 +429,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         en_ia = physics_params.en_ia
         en_sk = physics_params.en_sk
         dyn_ca = physics_params.dyn_ca
+        dyn_atp = physics_params.dyn_atp
         en_itca = physics_params.en_itca
         en_im = physics_params.en_im
         en_nap = physics_params.en_nap
@@ -476,14 +455,27 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         (phi_na, phi_k, phi_ih, phi_ca, phi_ia, phi_tca, 
          phi_im, phi_nap, phi_nar) = unpack_temperature_scaling(physics_params.phi_mat, n_comp)
         
-        # Environment and calcium
-        t_kelvin = physics_params.t_kelvin
-        ca_ext = physics_params.ca_ext
-        ca_rest = physics_params.ca_rest
-        tau_ca = physics_params.tau_ca
+        # Environment and calcium (packed env_params is the single source of truth)
+        (
+            t_kelvin,
+            ca_ext,
+            ca_rest,
+            tau_ca,
+            mg_ext,
+            tau_sk,
+            _im_speed_multiplier,
+            _g_katp_max,
+            _katp_kd_atp_mM,
+            _atp_max_mM,
+            _atp_synthesis_rate,
+            na_i_rest_mM,
+            na_ext_mM,
+            k_i_mM,
+            k_o_rest_mM,
+            ion_drift_gain,
+            k_o_clearance_tau_ms,
+        ) = unpack_env_params(physics_params.env_params)
         b_ca = physics_params.b_ca
-        mg_ext = physics_params.mg_ext
-        tau_sk = physics_params.tau_sk
         
         # Stimulation parameters (needed for state slice calculation)
         stype = physics_params.stype
@@ -518,20 +510,8 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         # Zero all entries
         J_csr.data[:] = 0.0
 
-        idx, n_state = _cached_state_slices(
-            n_comp,
-            en_ih,
-            en_ica,
-            en_ia,
-            dyn_ca,
-            use_dfilter_primary,
-            use_dfilter_secondary,
-            en_itca,
-            en_im,
-            en_nap,
-            en_nar,
-            en_sk,
-        )
+        idx = state_slices_from_offsets(physics_params.state_offsets, n_comp)
+        n_state = int(physics_params.state_offsets.n_state)
 
         v = y[idx["v"]]
         m = y[idx["m"]]
@@ -548,8 +528,26 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         y_nr = y[idx["y_nr"]] if idx["y_nr"] is not None else zero_v
         j_nr = y[idx["j_nr"]] if idx["j_nr"] is not None else zero_v
         ca_i = y[idx["ca"]] if idx["ca"] is not None else _ca_rest_vec(n_comp, ca_rest)
+        atp_i = y[idx["atp"]] if idx["atp"] is not None else _zero_vec(n_comp)
+        na_i = y[idx["na_i"]] if idx["na_i"] is not None else _const_vec(n_comp, na_i_rest_mM)
+        k_o = y[idx["k_o"]] if idx["k_o"] is not None else _const_vec(n_comp, k_o_rest_mM)
 
         k_nernst = (R_GAS * t_kelvin / (2.0 * F_CONST)) * 1000.0
+        mono_nernst = (R_GAS * t_kelvin / F_CONST) * 1000.0
+        if dyn_atp and idx["na_i"] is not None:
+            na_safe = np.maximum(na_i, max(NA_I_MIN_M_M, 1e-12))
+            ena_v = mono_nernst * np.log(na_ext_mM / na_safe)
+            dena_dna = -mono_nernst / na_safe
+        else:
+            ena_v = _const_vec(n_comp, ena)
+            dena_dna = zero_v
+        if dyn_atp and idx["k_o"] is not None:
+            k_safe = np.maximum(k_o, max(K_O_MIN_M_M, 1e-12))
+            ek_v = mono_nernst * np.log(k_i_mM / k_safe)
+            dek_dko = -mono_nernst / k_safe
+        else:
+            ek_v = _const_vec(n_comp, ek)
+            dek_dko = zero_v
 
         am_v = am(v);  bm_v = bm(v)
         ah_v = ah(v);  bh_v = bh(v)
@@ -593,6 +591,10 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         for i in range(n_comp):
             v_row = idx["v"].start + i
             cm = max(cm_v[i], 1e-12)  # Guard against zero capacitance
+            ena_i = ena_v[i]
+            ek_i = ek_v[i]
+            dena_dna_i = dena_dna[i]
+            dek_dko_i = dek_dko[i]
 
             # Axial coupling
             for p in range(int(l_indptr[i]), int(l_indptr[i + 1])):
@@ -600,10 +602,19 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 _add(v_row, idx["v"].start + col, l_data[p] / cm)
 
             d_iion_dv = gl_v[i] + gna_v[i] * (m[i] ** 3) * h[i] + gk_v[i] * (n[i] ** 4)
-            d_iion_dm = gna_v[i] * 3.0 * (m[i] ** 2) * h[i] * (v[i] - ena)
-            d_iion_dh = gna_v[i] * (m[i] ** 3) * (v[i] - ena)
-            d_iion_dn = gk_v[i] * 4.0 * (n[i] ** 3) * (v[i] - ek)
+            d_iion_dm = gna_v[i] * 3.0 * (m[i] ** 2) * h[i] * (v[i] - ena_i)
+            d_iion_dh = gna_v[i] * (m[i] ** 3) * (v[i] - ena_i)
+            d_iion_dn = gk_v[i] * 4.0 * (n[i] ** 3) * (v[i] - ek_i)
             d_iion_dca = 0.0
+            d_iion_dna = 0.0
+            d_iion_dko = 0.0
+            d_iion_datp = 0.0
+            d_iion_dz = 0.0
+
+            if dyn_atp and idx["na_i"] is not None:
+                d_iion_dna += gna_v[i] * (m[i] ** 3) * h[i] * (-dena_dna_i)
+            if dyn_atp and idx["k_o"] is not None:
+                d_iion_dko += gk_v[i] * (n[i] ** 4) * (-dek_dko_i)
 
             if en_ih:
                 d_iion_dv += gih_v[i] * r[i]
@@ -631,8 +642,10 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
             if en_ia:
                 d_iion_dv += ga_v[i] * a[i] * b[i]
-                _add(v_row, idx["a"].start + i, -(ga_v[i] * b[i] * (v[i] - ek)) / cm)
-                _add(v_row, idx["b"].start + i, -(ga_v[i] * a[i] * (v[i] - ek)) / cm)
+                _add(v_row, idx["a"].start + i, -(ga_v[i] * b[i] * (v[i] - ek_i)) / cm)
+                _add(v_row, idx["b"].start + i, -(ga_v[i] * a[i] * (v[i] - ek_i)) / cm)
+                if dyn_atp and idx["k_o"] is not None:
+                    d_iion_dko += ga_v[i] * a[i] * b[i] * (-dek_dko_i)
 
             i_tca_val = 0.0
             if en_itca and idx["p"] is not None:
@@ -662,20 +675,40 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             if en_sk and idx["z_sk"] is not None:
                 z_sk_val = y[idx["z_sk"].start + i]
                 d_iion_dv += gsk_v[i] * z_sk_val
-                _add(v_row, idx["z_sk"].start + i, -(gsk_v[i] * (v[i] - ek)) / cm)
+                d_iion_dz = gsk_v[i] * (v[i] - ek_i)
+                _add(v_row, idx["z_sk"].start + i, -d_iion_dz / cm)
+                if dyn_atp and idx["k_o"] is not None:
+                    d_iion_dko += gsk_v[i] * z_sk_val * (-dek_dko_i)
 
             if en_im and idx["w"] is not None:
                 d_iion_dv += gim_v[i] * w_g[i]
-                _add(v_row, idx["w"].start + i, -(gim_v[i] * (v[i] - ek)) / cm)
+                _add(v_row, idx["w"].start + i, -(gim_v[i] * (v[i] - ek_i)) / cm)
+                if dyn_atp and idx["k_o"] is not None:
+                    d_iion_dko += gim_v[i] * w_g[i] * (-dek_dko_i)
 
             if en_nap and idx["x"] is not None:
                 d_iion_dv += gnap_v[i] * x_g[i]
-                _add(v_row, idx["x"].start + i, -(gnap_v[i] * (v[i] - ena)) / cm)
+                _add(v_row, idx["x"].start + i, -(gnap_v[i] * (v[i] - ena_i)) / cm)
+                if dyn_atp and idx["na_i"] is not None:
+                    d_iion_dna += gnap_v[i] * x_g[i] * (-dena_dna_i)
 
             if en_nar and idx["y_nr"] is not None:
                 d_iion_dv += gnar_v[i] * y_nr[i] * j_nr[i]
-                _add(v_row, idx["y_nr"].start + i, -(gnar_v[i] * j_nr[i] * (v[i] - ena)) / cm)
-                _add(v_row, idx["j_nr"].start + i, -(gnar_v[i] * y_nr[i] * (v[i] - ena)) / cm)
+                _add(v_row, idx["y_nr"].start + i, -(gnar_v[i] * j_nr[i] * (v[i] - ena_i)) / cm)
+                _add(v_row, idx["j_nr"].start + i, -(gnar_v[i] * y_nr[i] * (v[i] - ena_i)) / cm)
+                if dyn_atp and idx["na_i"] is not None:
+                    d_iion_dna += gnar_v[i] * y_nr[i] * j_nr[i] * (-dena_dna_i)
+
+            if dyn_atp and idx["atp"] is not None:
+                kd_safe = max(_katp_kd_atp_mM, 1e-12)
+                atp_safe = max(atp_i[i], 1e-12)
+                atp_ratio = atp_safe / kd_safe
+                g_katp = _g_katp_max / (1.0 + atp_ratio * atp_ratio)
+                dg_katp_datp = (-2.0 * _g_katp_max * atp_safe / (kd_safe * kd_safe)) / ((1.0 + atp_ratio * atp_ratio) ** 2)
+                d_iion_dv += g_katp
+                d_iion_datp += dg_katp_datp * (v[i] - ek_i)
+                if dyn_atp and idx["k_o"] is not None:
+                    d_iion_dko += g_katp * (-dek_dko_i)
 
             _add(v_row, idx["v"].start + i, -d_iion_dv / cm)
             _add(v_row, idx["m"].start + i, -d_iion_dm / cm)
@@ -683,6 +716,12 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             _add(v_row, idx["n"].start + i, -d_iion_dn / cm)
             if dyn_ca and idx["ca"] is not None:
                 _add(v_row, idx["ca"].start + i, -d_iion_dca / cm)
+            if dyn_atp and idx["na_i"] is not None:
+                _add(v_row, idx["na_i"].start + i, -d_iion_dna / cm)
+            if dyn_atp and idx["k_o"] is not None:
+                _add(v_row, idx["k_o"].start + i, -d_iion_dko / cm)
+            if dyn_atp and idx["atp"] is not None:
+                _add(v_row, idx["atp"].start + i, -d_iion_datp / cm)
             if i == 0:
                 if idx["dfilter_primary"] is not None:
                     _add(v_row, int(idx["dfilter_primary"]), 1.0 / cm)
@@ -751,18 +790,18 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 _set(j_row, v_col, phi_nar[i] * (dajr_v[i] * (1.0 - j_nr[i]) - dbjr_v[i] * j_nr[i]))
                 _set(j_row, j_row, -phi_nar[i] * (ajr_v[i] + bjr_v[i]))
 
-            if en_sk and idx["z_sk"] is not None:
-                zsk_row = idx["z_sk"].start + i
-                _set(zsk_row, zsk_row, -1.0 / max(tau_sk, 1e-12))
-                if dyn_ca and idx["ca"] is not None:
-                    # dz_inf/dCa * (1/tau_SK)
-                    ca_safe = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
-                    ca_sk = ca_safe if ca_i[i] > 0 else ca_rest
-                    ca_safe = max(ca_safe, 1e-12)  # Guard against zero
-                    kd = 0.0004
-                    q = (kd / ca_safe) ** 4
-                    dz_inf_dca = (4.0 * (kd ** 4) / (ca_safe ** 5)) / ((1.0 + q) ** 2)
-                    _set(zsk_row, idx["ca"].start + i, dz_inf_dca / max(tau_sk, 1e-12))
+                if en_sk and idx["z_sk"] is not None:
+                    zsk_row = idx["z_sk"].start + i
+                    _set(zsk_row, zsk_row, -1.0 / max(tau_sk, 1e-12))
+                    if dyn_ca and idx["ca"] is not None:
+                        # dz_inf/dCa * (1/tau_SK)
+                        ca_safe = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
+                        ca_sk = min(max(ca_safe * 10.0, CA_I_MIN_M_M), 1.0)
+                        ca_safe = max(ca_sk, 1e-12)  # Guard against zero
+                        kd = 0.0004
+                        q = (kd / ca_safe) ** 4
+                        dz_inf_dca = (4.0 * (kd ** 4) / (ca_safe ** 5)) / ((1.0 + q) ** 2)
+                        _set(zsk_row, idx["ca"].start + i, 10.0 * dz_inf_dca / max(tau_sk, 1e-12))
 
             if dyn_ca and idx["ca"] is not None:
                 ca_row = idx["ca"].start + i
@@ -778,6 +817,16 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                     _add(ca_row, idx["q"].start + i, b_ca[i] * (-dItdq))
                     d_dca += b_ca[i] * (-dItdca)
                 _set(ca_row, ca_row, d_dca)
+
+            if dyn_atp and idx["atp"] is not None:
+                atp_row = idx["atp"].start + i
+                _set(atp_row, atp_row, -1.0 / max(ATP_PUMP_FAILURE_THRESHOLD, 1e-12))
+            if dyn_atp and idx["na_i"] is not None:
+                na_row = idx["na_i"].start + i
+                _set(na_row, na_row, -max(ion_drift_gain, 1e-9))
+            if dyn_atp and idx["k_o"] is not None:
+                k_row = idx["k_o"].start + i
+                _set(k_row, k_row, -(1.0 / max(k_o_clearance_tau_ms, 1e-12) + max(ion_drift_gain, 1e-9)))
 
         if idx["dfilter_primary"] is not None:
             dr = int(idx["dfilter_primary"])
@@ -813,6 +862,7 @@ def _analytic_sparse_jacobian_impl(*args, **kwargs):
     en_ia = rhs["en_ia"]
     en_sk = rhs["en_sk"]
     dyn_ca = rhs["dyn_ca"]
+    dyn_atp = rhs.get("dyn_atp", False)
     en_itca = rhs["en_itca"]
     en_im = rhs["en_im"]
     en_nap = rhs["en_nap"]
@@ -822,13 +872,13 @@ def _analytic_sparse_jacobian_impl(*args, **kwargs):
     use_dfp = int(stim1_vec[9])
     use_dfs = int(stim2_vec[10])
     cache_key = (
-        n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, en_itca, en_im, en_nap, en_nar,
+        n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, dyn_atp, en_itca, en_im, en_nap, en_nar,
         use_dfp, use_dfs, _sparse_structure_signature(rhs["l_indices"], rhs["l_indptr"]),
     )
     fn = _LEGACY_JACOBIAN_CACHE.get(cache_key)
     if fn is None:
         sp = build_jacobian_sparsity(
-            n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca,
+            n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, dyn_atp,
             rhs["l_indices"], rhs["l_indptr"],
             use_dfp, use_dfs,
             en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,

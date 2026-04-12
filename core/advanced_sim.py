@@ -25,9 +25,11 @@ def run_euler_maruyama(config: FullModelConfig):
     """Compatibility shim for legacy stochastic tests.
 
     The project now routes stochastic dynamics through the primary solver path,
-    so this helper simply delegates to `NeuronSolver.run_single()`.
+    but stochastic gating and additive current noise only live on the native
+    fixed-step path. Preserve legacy Euler-Maruyama semantics by forcing the
+    native solver whenever stochastic terms are requested.
     """
-    return NeuronSolver(config).run_single()
+    return NeuronSolver(config).run_native(config)
 
 
 # -----------------------------------------------------------------------------

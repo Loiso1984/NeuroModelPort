@@ -292,6 +292,21 @@ class MainWindow(QMainWindow):
         self.btn_sweep.setToolTip("Run parametric sweep (configured in Analysis tab)")
         self.btn_sweep.clicked.connect(self.run_sweep)
 
+        self.btn_fi = QPushButton("f-I")
+        self.btn_fi.setMinimumHeight(38)
+        self.btn_fi.setStyleSheet("""
+            QPushButton {
+                font-weight: bold; font-size: 12px;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #2A8F7A, stop:1 #1D6758);
+                color: white; border-radius: 5px;
+            }
+            QPushButton:hover { background: #33A18A; }
+            QPushButton:disabled { background: #555568; color: #888; }
+        """)
+        self.btn_fi.setToolTip("Run a dedicated f-I sweep over Iext with results opened in the f-I analytics tab")
+        self.btn_fi.clicked.connect(self.run_fi_curve)
+
         # ── SD / ExcMap buttons ───────────────────────────────────────
         self.btn_sd = QPushButton("S-D")
         self.btn_sd.setMinimumHeight(38)
@@ -455,6 +470,7 @@ class MainWindow(QMainWindow):
         row1.addWidget(self.btn_hines, 2)
         row1.addWidget(self.btn_stoch, 2)
         row1.addWidget(self.btn_sweep, 2)
+        row1.addWidget(self.btn_fi, 1)
         row1.addWidget(self.btn_sd, 2)
         row1.addWidget(self.btn_excmap, 2)
         row1.addWidget(self.btn_export_plot, 2)
@@ -1372,12 +1388,19 @@ class MainWindow(QMainWindow):
 
     def _sync_preset_mode_controls(self):
         """Show only the mode selector that applies to the active preset."""
-        p = (self.config_manager.current_preset_name or "").lower()
+        preset_name = self.config_manager.current_preset_name or ""
+        preset_code = preset_name.partition(":")[0].strip().upper()
         active = {
-            "k_mode": "thalamic" in p,
-            "alzheimer_mode": "alzheimer" in p,
-            "hypoxia_mode": "hypoxia" in p,
+            "l5_mode": preset_code == "B",
+            "purkinje_mode": preset_code == "E",
+            "anesthesia_mode": preset_code == "G",
+            "k_mode": preset_code == "K",
+            "alzheimer_mode": preset_code == "N",
+            "hypoxia_mode": preset_code == "O",
+            "ach_mode": preset_code == "R",
+            "dravet_mode": preset_code == "S",
         }
+        title_suffix = []
         any_active = False
         for field_name, widget in self.form_preset_modes.widgets_map.items():
             is_active = bool(active.get(field_name, False))
@@ -1388,11 +1411,14 @@ class MainWindow(QMainWindow):
                 label.setVisible(is_active)
             if is_active:
                 any_active = True
+                title_suffix.append(field_name.replace("_mode", "").upper())
                 widget.setToolTip("Active for current preset.")
             else:
                 widget.setToolTip("Ignored for current preset.")
         if any_active:
-            self.form_preset_modes.group_box.setTitle("Preset Modes (K/N/O)")
+            self.form_preset_modes.group_box.setTitle(
+                f"Preset Modes ({'/'.join(title_suffix)})"
+            )
         else:
             self.form_preset_modes.group_box.setTitle("Preset Modes (not used for current preset)")
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
@@ -1485,7 +1511,8 @@ class MainWindow(QMainWindow):
             t_sim = cfg.t_sim
             if cfg.synaptic_train_type != 'none':
                 t_sim = max(t_sim, cfg.synaptic_train_duration_ms + cfg.pulse_start + 50)
-            t = np.linspace(0, t_sim, int(t_sim * 10))  # High resolution
+            n_preview = int(min(max(t_sim * 10, 1000), 50000))
+            t = np.linspace(0, t_sim, n_preview)
             
             # Use existing reconstruct_stimulus_trace logic
             # Construct a dummy SimulationResult with just t and config
@@ -1679,6 +1706,7 @@ class MainWindow(QMainWindow):
         self.btn_run.setText(T.tr('btn_run'))
         self.btn_stoch.setText(T.tr('btn_stoch'))
         self.btn_sweep.setText(T.tr('btn_sweep'))
+        self.btn_fi.setText("f-I")
         self.btn_sd.setText(T.tr('btn_sd'))
         self.btn_excmap.setText(T.tr('btn_excmap'))
         self.btn_export.setText(T.tr('btn_export'))
@@ -1695,7 +1723,7 @@ class MainWindow(QMainWindow):
     #  SIMULATION HELPERS
     # ─────────────────────────────────────────────────────────────────
     def _lock_ui(self, busy: bool):
-        for btn in (self.btn_run, self.btn_stoch, self.btn_sweep,
+        for btn in (self.btn_run, self.btn_stoch, self.btn_sweep, self.btn_fi,
                     self.btn_sd, self.btn_excmap):
             btn.setEnabled(not busy)
         self.btn_cancel.setVisible(busy)
@@ -2001,6 +2029,20 @@ class MainWindow(QMainWindow):
             on_success=lambda res: self._on_sweep_done(res, ana.sweep_param),
             on_error=self._on_sim_error
         )
+
+    def run_fi_curve(self):
+        ana = self.config_manager.config.analysis
+        ana.sweep_param = "Iext"
+        if not np.isfinite(float(ana.sweep_min)) or float(ana.sweep_min) < 0.0:
+            ana.sweep_min = 0.0
+        if not np.isfinite(float(ana.sweep_max)) or float(ana.sweep_max) <= float(ana.sweep_min):
+            ana.sweep_max = max(25.0, float(ana.sweep_min) + 20.0)
+        if int(ana.sweep_steps) < 8:
+            ana.sweep_steps = 16
+        self._status(
+            f"f-I sweep armed: Iext [{ana.sweep_min}...{ana.sweep_max}] over {ana.sweep_steps} steps."
+        )
+        self.run_sweep()
 
     def _on_sweep_done(self, results, param_name):
         self.analytics.update_sweep(results, param_name)

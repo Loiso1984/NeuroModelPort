@@ -1,1 +1,1 @@
-{"splitter_sizes": [378, 1008], "live_deck": ["stim.Iext", "channels.gNa_max", "env.T_celsius"]}
+{"splitter_sizes": [466, 800], "live_deck": ["channels.gNa_max", "channels.gK_max", "channels.gCa_max"]}

@@ -17,16 +17,17 @@ from core.analysis import estimate_spike_modulation, estimate_ftle_lle
 
 class TestPhaseLockingGuard:
 
-    def test_short_trace_returns_invalid(self):
-        """t_sim=200 ms with low_hz=4 Hz → need 750 ms minimum; must be invalid."""
+    def test_short_trace_returns_soft_warning_not_hard_invalid(self):
+        """t_sim=200 ms with low_hz=4 Hz → need 750 ms minimum; should compute, but be flagged as low-power."""
         dt = 0.1
         t = np.arange(0, 200, dt)  # 200 ms, too short for 4 Hz
         signal = np.sin(2 * np.pi * 4.0 * t / 1000.0)
         spikes = np.array([50.0, 100.0, 150.0])
 
         result = estimate_spike_modulation(spikes, t, signal, low_hz=4.0, high_hz=12.0)
-        assert result["valid"] is False
-        assert np.isnan(result["plv"])
+        assert result["valid"] is True
+        assert result["low_statistical_power"] is True
+        assert np.isfinite(result["plv"])
 
     def test_long_trace_can_be_valid(self):
         """t_sim=2000 ms with low_hz=4 Hz → should pass guard (3*250=750 ms)."""
@@ -42,6 +43,7 @@ class TestPhaseLockingGuard:
         # We don't assert valid=True because PLV depends on statistical power,
         # but we assert that it got past the guard (spikes_used > 0).
         assert result["spikes_used"] > 0
+        assert result["low_statistical_power"] is False
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -80,3 +82,4 @@ class TestLLEGuard:
         # If transients weren't discarded, the embedding would be pathological
         # We just verify valid_pairs > 0 meaning computation proceeded
         assert result["valid_pairs"] >= 0  # ran without error
+

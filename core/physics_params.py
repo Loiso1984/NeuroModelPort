@@ -11,6 +11,247 @@ import numpy as np
 from typing import NamedTuple, Optional
 
 
+ENV_T_KELVIN = 0
+ENV_CA_EXT = 1
+ENV_CA_REST = 2
+ENV_TAU_CA = 3
+ENV_MG_EXT = 4
+ENV_TAU_SK = 5
+ENV_IM_SPEED = 6
+ENV_G_KATP_MAX = 7
+ENV_KATP_KD = 8
+ENV_ATP_MAX = 9
+ENV_ATP_SYNTH = 10
+ENV_NA_I_REST = 11
+ENV_NA_EXT = 12
+ENV_K_I = 13
+ENV_K_O_REST = 14
+ENV_ION_DRIFT_GAIN = 15
+ENV_K_O_CLEARANCE_TAU = 16
+ENV_PARAM_COUNT = 17
+
+
+class StateOffsets(NamedTuple):
+    """Shared state-vector layout for solver, native loop, Jacobian, and analysis."""
+    off_v: int32
+    off_m: int32
+    off_h: int32
+    off_n: int32
+    off_r: int32
+    off_s: int32
+    off_u: int32
+    off_a: int32
+    off_b: int32
+    off_p: int32
+    off_q: int32
+    off_w: int32
+    off_x: int32
+    off_y: int32
+    off_j: int32
+    off_zsk: int32
+    off_ca: int32
+    off_atp: int32
+    off_na_i: int32
+    off_k_o: int32
+    off_ifilt_primary: int32
+    off_ifilt_secondary: int32
+    n_state: int32
+
+
+def build_env_params(
+    t_kelvin: float,
+    ca_ext: float,
+    ca_rest: float,
+    tau_ca: float,
+    mg_ext: float,
+    tau_sk: float,
+    im_speed_multiplier: float,
+    g_katp_max: float,
+    katp_kd_atp_mM: float,
+    atp_max_mM: float,
+    atp_synthesis_rate: float,
+    na_i_rest_mM: float,
+    na_ext_mM: float,
+    k_i_mM: float,
+    k_o_rest_mM: float,
+    ion_drift_gain: float,
+    k_o_clearance_tau_ms: float,
+) -> np.ndarray:
+    env = np.zeros(ENV_PARAM_COUNT, dtype=np.float64)
+    env[ENV_T_KELVIN] = t_kelvin
+    env[ENV_CA_EXT] = ca_ext
+    env[ENV_CA_REST] = ca_rest
+    env[ENV_TAU_CA] = tau_ca
+    env[ENV_MG_EXT] = mg_ext
+    env[ENV_TAU_SK] = tau_sk
+    env[ENV_IM_SPEED] = im_speed_multiplier
+    env[ENV_G_KATP_MAX] = g_katp_max
+    env[ENV_KATP_KD] = katp_kd_atp_mM
+    env[ENV_ATP_MAX] = atp_max_mM
+    env[ENV_ATP_SYNTH] = atp_synthesis_rate
+    env[ENV_NA_I_REST] = na_i_rest_mM
+    env[ENV_NA_EXT] = na_ext_mM
+    env[ENV_K_I] = k_i_mM
+    env[ENV_K_O_REST] = k_o_rest_mM
+    env[ENV_ION_DRIFT_GAIN] = ion_drift_gain
+    env[ENV_K_O_CLEARANCE_TAU] = k_o_clearance_tau_ms
+    return env
+
+
+def build_state_offsets(
+    n_comp: int,
+    *,
+    en_ih: bool,
+    en_ica: bool,
+    en_ia: bool,
+    en_sk: bool,
+    dyn_ca: bool,
+    en_itca: bool,
+    en_im: bool,
+    en_nap: bool,
+    en_nar: bool,
+    dyn_atp: bool,
+    use_dfilter_primary: int,
+    use_dfilter_secondary: int,
+) -> StateOffsets:
+    cursor = 0
+    off_v = cursor
+    cursor += n_comp
+    off_m = cursor
+    cursor += n_comp
+    off_h = cursor
+    cursor += n_comp
+    off_n = cursor
+    cursor += n_comp
+
+    off_r = cursor if en_ih else -1
+    if en_ih:
+        cursor += n_comp
+
+    off_s = cursor if en_ica else -1
+    if en_ica:
+        cursor += n_comp
+    off_u = cursor if en_ica else -1
+    if en_ica:
+        cursor += n_comp
+
+    off_a = cursor if en_ia else -1
+    if en_ia:
+        cursor += n_comp
+    off_b = cursor if en_ia else -1
+    if en_ia:
+        cursor += n_comp
+
+    off_p = cursor if en_itca else -1
+    if en_itca:
+        cursor += n_comp
+    off_q = cursor if en_itca else -1
+    if en_itca:
+        cursor += n_comp
+
+    off_w = cursor if en_im else -1
+    if en_im:
+        cursor += n_comp
+
+    off_x = cursor if en_nap else -1
+    if en_nap:
+        cursor += n_comp
+
+    off_y = cursor if en_nar else -1
+    if en_nar:
+        cursor += n_comp
+    off_j = cursor if en_nar else -1
+    if en_nar:
+        cursor += n_comp
+
+    off_zsk = cursor if en_sk else -1
+    if en_sk:
+        cursor += n_comp
+
+    off_ca = cursor if dyn_ca else -1
+    if dyn_ca:
+        cursor += n_comp
+
+    off_atp = cursor if dyn_atp else -1
+    if dyn_atp:
+        cursor += n_comp
+
+    off_na_i = cursor if dyn_atp else -1
+    if dyn_atp:
+        cursor += n_comp
+
+    off_k_o = cursor if dyn_atp else -1
+    if dyn_atp:
+        cursor += n_comp
+
+    off_ifilt_primary = cursor if use_dfilter_primary == 1 else -1
+    if use_dfilter_primary == 1:
+        cursor += 1
+
+    off_ifilt_secondary = cursor if use_dfilter_secondary == 1 else -1
+    if use_dfilter_secondary == 1:
+        cursor += 1
+
+    return StateOffsets(
+        np.int32(off_v),
+        np.int32(off_m),
+        np.int32(off_h),
+        np.int32(off_n),
+        np.int32(off_r),
+        np.int32(off_s),
+        np.int32(off_u),
+        np.int32(off_a),
+        np.int32(off_b),
+        np.int32(off_p),
+        np.int32(off_q),
+        np.int32(off_w),
+        np.int32(off_x),
+        np.int32(off_y),
+        np.int32(off_j),
+        np.int32(off_zsk),
+        np.int32(off_ca),
+        np.int32(off_atp),
+        np.int32(off_na_i),
+        np.int32(off_k_o),
+        np.int32(off_ifilt_primary),
+        np.int32(off_ifilt_secondary),
+        np.int32(cursor),
+    )
+
+
+def state_slices_from_offsets(offsets: StateOffsets, n_comp: int) -> dict[str, slice | int | None]:
+    def _slice(start: int) -> slice | None:
+        return None if int(start) < 0 else slice(int(start), int(start) + n_comp)
+
+    def _scalar(start: int) -> int | None:
+        return None if int(start) < 0 else int(start)
+
+    return {
+        "v": slice(int(offsets.off_v), int(offsets.off_v) + n_comp),
+        "m": slice(int(offsets.off_m), int(offsets.off_m) + n_comp),
+        "h": slice(int(offsets.off_h), int(offsets.off_h) + n_comp),
+        "n": slice(int(offsets.off_n), int(offsets.off_n) + n_comp),
+        "r": _slice(offsets.off_r),
+        "s": _slice(offsets.off_s),
+        "u": _slice(offsets.off_u),
+        "a": _slice(offsets.off_a),
+        "b": _slice(offsets.off_b),
+        "p": _slice(offsets.off_p),
+        "q": _slice(offsets.off_q),
+        "w": _slice(offsets.off_w),
+        "x": _slice(offsets.off_x),
+        "y_nr": _slice(offsets.off_y),
+        "j_nr": _slice(offsets.off_j),
+        "z_sk": _slice(offsets.off_zsk),
+        "ca": _slice(offsets.off_ca),
+        "atp": _slice(offsets.off_atp),
+        "na_i": _slice(offsets.off_na_i),
+        "k_o": _slice(offsets.off_k_o),
+        "dfilter_primary": _scalar(offsets.off_ifilt_primary),
+        "dfilter_secondary": _scalar(offsets.off_ifilt_secondary),
+    }
+
+
 class PhysicsParams(NamedTuple):
     """Structured container for all static physics parameters.
     
@@ -62,12 +303,19 @@ class PhysicsParams(NamedTuple):
     mg_ext: float64
     tau_sk: float64
     im_speed_multiplier: float64
+    env_params: np.ndarray
 
     # ATP metabolism parameters
     g_katp_max: float64
     katp_kd_atp_mM: float64
     atp_max_mM: float64
     atp_synthesis_rate: float64
+    na_i_rest_mM: float64
+    na_ext_mM: float64
+    k_i_mM: float64
+    k_o_rest_mM: float64
+    ion_drift_gain: float64
+    k_o_clearance_tau_ms: float64
     
     # Primary stimulation parameters
     stype: int32
@@ -108,6 +356,7 @@ class PhysicsParams(NamedTuple):
     gna_max: float64        # Max Na conductance for channel count scaling
     gk_max: float64         # Max K conductance for channel count scaling
     rng_state: Optional[np.ndarray]  # RNG state for reproducibility
+    state_offsets: StateOffsets
 
 
 def create_physics_params(**kwargs) -> PhysicsParams:
@@ -134,6 +383,12 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'katp_kd_atp_mM': 0.5,
         'atp_max_mM': 2.0,
         'atp_synthesis_rate': 0.6,
+        'na_i_rest_mM': 12.0,
+        'na_ext_mM': 145.0,
+        'k_i_mM': 140.0,
+        'k_o_rest_mM': 3.5,
+        'ion_drift_gain': 2.5e-5,
+        'k_o_clearance_tau_ms': 800.0,
         'e_rev_syn_primary': 0.0,      # Default: 0 mV (excitatory)
         'e_rev_syn_secondary': -75.0,  # Default: -75 mV (inhibitory)
         'im_speed_multiplier': 1.0,
@@ -141,8 +396,70 @@ def create_physics_params(**kwargs) -> PhysicsParams:
     for k, v in defaults.items():
         if k not in kwargs:
             kwargs[k] = v
-    
+
+    if 'env_params' not in kwargs:
+        kwargs['env_params'] = build_env_params(
+            kwargs['t_kelvin'],
+            kwargs['ca_ext'],
+            kwargs['ca_rest'],
+            kwargs['tau_ca'],
+            kwargs['mg_ext'],
+            kwargs['tau_sk'],
+            kwargs['im_speed_multiplier'],
+            kwargs['g_katp_max'],
+            kwargs['katp_kd_atp_mM'],
+            kwargs['atp_max_mM'],
+            kwargs['atp_synthesis_rate'],
+            kwargs['na_i_rest_mM'],
+            kwargs['na_ext_mM'],
+            kwargs['k_i_mM'],
+            kwargs['k_o_rest_mM'],
+            kwargs['ion_drift_gain'],
+            kwargs['k_o_clearance_tau_ms'],
+        )
+
+    if 'state_offsets' not in kwargs:
+        kwargs['state_offsets'] = build_state_offsets(
+            int(kwargs['n_comp']),
+            en_ih=bool(kwargs['en_ih']),
+            en_ica=bool(kwargs['en_ica']),
+            en_ia=bool(kwargs['en_ia']),
+            en_sk=bool(kwargs['en_sk']),
+            dyn_ca=bool(kwargs['dyn_ca']),
+            en_itca=bool(kwargs['en_itca']),
+            en_im=bool(kwargs['en_im']),
+            en_nap=bool(kwargs['en_nap']),
+            en_nar=bool(kwargs['en_nar']),
+            dyn_atp=bool(kwargs['dyn_atp']),
+            use_dfilter_primary=int(kwargs['use_dfilter_primary']),
+            use_dfilter_secondary=int(kwargs['use_dfilter_secondary']),
+        )
+
     return PhysicsParams(**kwargs)
+
+
+@njit
+def unpack_env_params(env_params):
+    """Unpack packed environment/metabolism scalars from env_params."""
+    return (
+        env_params[ENV_T_KELVIN],
+        env_params[ENV_CA_EXT],
+        env_params[ENV_CA_REST],
+        env_params[ENV_TAU_CA],
+        env_params[ENV_MG_EXT],
+        env_params[ENV_TAU_SK],
+        env_params[ENV_IM_SPEED],
+        env_params[ENV_G_KATP_MAX],
+        env_params[ENV_KATP_KD],
+        env_params[ENV_ATP_MAX],
+        env_params[ENV_ATP_SYNTH],
+        env_params[ENV_NA_I_REST],
+        env_params[ENV_NA_EXT],
+        env_params[ENV_K_I],
+        env_params[ENV_K_O_REST],
+        env_params[ENV_ION_DRIFT_GAIN],
+        env_params[ENV_K_O_CLEARANCE_TAU],
+    )
 
 
 @njit

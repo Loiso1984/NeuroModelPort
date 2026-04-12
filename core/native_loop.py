@@ -24,11 +24,12 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from .physics_params import PhysicsParams, unpack_conductances, unpack_temperature_scaling
+from .physics_params import PhysicsParams, unpack_conductances, unpack_env_params, unpack_temperature_scaling
 from .rhs import (
     get_stim_current, get_event_driven_conductance,
-    _get_syn_reversal, nernst_ca_ion, nmda_mg_block,
+    _get_syn_reversal, nernst_ca_ion, nernst_na_ion, nernst_k_ion, nmda_mg_block,
     CA_I_MIN_M_M, CA_I_MAX_M_M, CA_DAMPING_FACTOR,
+    NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
     ATP_MIN_M_M, ATP_MAX_M_M, ATP_PUMP_FAILURE_THRESHOLD,
     compute_na_k_pump_current, _pump_availability_from_atp,
 )
@@ -52,7 +53,7 @@ def _compute_ionic_currents_vectorized(
     r_arr, s_arr, u_arr, a_arr, b_arr, p_arr, q_arr, w_arr, x_arr, y_arr, j_arr, z_arr,
     ca_arr,
     gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-    ena, ek, el, eih,
+    ena_arr, ek_arr, el, eih,
     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
     ca_ext, t_kelvin, ca_rest,
     n_comp,
@@ -100,16 +101,19 @@ def _compute_ionic_currents_vectorized(
             eca_i = 120.0
         
         # Conductance-weighted sum: g_total and e_eff = ÎŁ g_ch * E_ch
+        ena_i = ena_arr[i]
+        ek_i = ek_arr[i]
+
         g_tot = gl_v[i]
         e_eff_i = gl_v[i] * el
         
         g_na = gna_v[i] * (mi ** 3) * hi
         g_tot += g_na
-        e_eff_i += g_na * ena
+        e_eff_i += g_na * ena_i
         
         g_k_dr = gk_v[i] * (ni ** 4)
         g_tot += g_k_dr
-        e_eff_i += g_k_dr * ek
+        e_eff_i += g_k_dr * ek_i
         
         if en_ih:
             g_ih = gih_v[i] * ri
@@ -127,7 +131,7 @@ def _compute_ionic_currents_vectorized(
         if en_ia:
             g_ia = ga_v[i] * ai * bi
             g_tot += g_ia
-            e_eff_i += g_ia * ek  # IA is a K+ channel, use ek
+            e_eff_i += g_ia * ek_i  # IA is a K+ channel, use ek
         
         if en_itca:
             g_tca = gtca_v[i] * (pi ** 2) * qi
@@ -140,22 +144,22 @@ def _compute_ionic_currents_vectorized(
         if en_sk:
             g_sk = gsk_v[i] * zi
             g_tot += g_sk
-            e_eff_i += g_sk * ek
+            e_eff_i += g_sk * ek_i
         
         if en_im:
             g_im = gim_v[i] * wi
             g_tot += g_im
-            e_eff_i += g_im * ek
+            e_eff_i += g_im * ek_i
         
         if en_nap:
             g_nap = gnap_v[i] * xi
             g_tot += g_nap
-            e_eff_i += g_nap * ena
+            e_eff_i += g_nap * ena_i
         
         if en_nar:
             g_nar = gnar_v[i] * yi * ji
             g_tot += g_nar
-            e_eff_i += g_nar * ena
+            e_eff_i += g_nar * ena_i
         
         g_total[i] = g_tot
         e_eff[i] = e_eff_i
@@ -220,85 +224,51 @@ def run_native_loop(
     el  = physics.el
     eih = physics.eih
 
-    # ── Calcium / SK ──
-    ca_rest  = physics.ca_rest
-    ca_ext   = physics.ca_ext
-    tau_ca   = physics.tau_ca
-    b_ca     = physics.b_ca
-    t_kelvin = physics.t_kelvin
-    tau_sk   = physics.tau_sk
-    mg_ext   = physics.mg_ext
-    im_speed_multiplier = physics.im_speed_multiplier
+    # ── Calcium / SK / ATP environment pack ──
+    (
+        t_kelvin,
+        ca_ext,
+        ca_rest,
+        tau_ca,
+        mg_ext,
+        tau_sk,
+        im_speed_multiplier,
+        g_katp_max,
+        katp_kd_atp_mM,
+        atp_max_mM,
+        atp_synthesis_rate,
+        na_i_rest_mM,
+        na_ext_mM,
+        k_i_mM,
+        k_o_rest_mM,
+        ion_drift_gain,
+        k_o_clearance_tau_ms,
+    ) = unpack_env_params(physics.env_params)
+    b_ca = physics.b_ca
 
-    # ── ATP metabolism ──
-    g_katp_max = physics.g_katp_max
-    katp_kd_atp_mM = physics.katp_kd_atp_mM
-    atp_max_mM = physics.atp_max_mM
-    atp_synthesis_rate = physics.atp_synthesis_rate
-
-    # ── State offsets (must mirror channels.py / rhs.py exactly) ──
-    # Layout: V(n_comp), m(n_comp), h(n_comp), n_K(n_comp),
-    #         [r], [s,u], [a,b], [p,q], [w], [x], [y,j], [zsk], [Ca],
-    #         [ifilt_primary], [ifilt_secondary]
-    off_m = n_comp
-    off_h = 2 * n_comp
-    off_n = 3 * n_comp
-    cursor = 4 * n_comp
-
-    off_r = cursor
-    if en_ih:
-        cursor += n_comp
-
-    off_s = cursor
-    off_u = cursor
-    if en_ica:
-        off_s = cursor;  cursor += n_comp
-        off_u = cursor;  cursor += n_comp
-
-    off_a = cursor
-    off_b = cursor
-    if en_ia:
-        off_a = cursor;  cursor += n_comp
-        off_b = cursor;  cursor += n_comp
-
-    off_p = cursor
-    off_q = cursor
-    if en_itca:
-        off_p = cursor;  cursor += n_comp
-        off_q = cursor;  cursor += n_comp
-
-    off_w = cursor
-    if en_im:
-        cursor += n_comp
-
-    off_x = cursor
-    if en_nap:
-        cursor += n_comp
-
-    off_y = cursor
-    off_j = cursor
-    if en_nar:
-        off_y = cursor;  cursor += n_comp
-        off_j = cursor;  cursor += n_comp
-
-    off_zsk = cursor
-    if en_sk:
-        cursor += n_comp
-
-    off_ca = cursor
-    if dyn_ca:
-        cursor += n_comp
-
-    off_atp = cursor
-    if dyn_atp:
-        cursor += n_comp
-
-    off_ifilt_primary = cursor
-    if physics.use_dfilter_primary == 1:
-        cursor += 1
-    off_ifilt_secondary = cursor
-    if physics.use_dfilter_secondary == 1:
-        cursor += 1
+    # ── Shared state offsets ──
+    offsets = physics.state_offsets
+    off_m = int(offsets.off_m)
+    off_h = int(offsets.off_h)
+    off_n = int(offsets.off_n)
+    off_r = int(offsets.off_r)
+    off_s = int(offsets.off_s)
+    off_u = int(offsets.off_u)
+    off_a = int(offsets.off_a)
+    off_b = int(offsets.off_b)
+    off_p = int(offsets.off_p)
+    off_q = int(offsets.off_q)
+    off_w = int(offsets.off_w)
+    off_x = int(offsets.off_x)
+    off_y = int(offsets.off_y)
+    off_j = int(offsets.off_j)
+    off_zsk = int(offsets.off_zsk)
+    off_ca = int(offsets.off_ca)
+    off_atp = int(offsets.off_atp)
+    off_na_i = int(offsets.off_na_i)
+    off_k_o = int(offsets.off_k_o)
+    off_ifilt_primary = int(offsets.off_ifilt_primary)
+    off_ifilt_secondary = int(offsets.off_ifilt_secondary)
 
     # ── Output sizing ──
     n_steps = int(t_sim / dt) + 1
@@ -335,6 +305,10 @@ def run_native_loop(
     z_arr_buf = np.zeros(n_comp, dtype=np.float64)
     ca_arr_buf = np.zeros(n_comp, dtype=np.float64)
     atp_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    na_i_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    k_o_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    ena_arr_buf = np.empty(n_comp, dtype=np.float64)
+    ek_arr_buf = np.empty(n_comp, dtype=np.float64)
 
     # ── Stimulus flags (computed once) ──
     is_cond   = (physics.stype >= 4)
@@ -453,9 +427,17 @@ def run_native_loop(
         if dyn_atp:
             for i in range(n_comp):
                 atp_arr_buf[i] = y[off_atp + i]
+                na_i_arr_buf[i] = y[off_na_i + i]
+                k_o_arr_buf[i] = y[off_k_o + i]
+                ena_arr_buf[i] = nernst_na_ion(na_i_arr_buf[i], na_ext_mM, t_kelvin)
+                ek_arr_buf[i] = nernst_k_ion(k_i_mM, k_o_arr_buf[i], t_kelvin)
         else:
             for i in range(n_comp):
                 atp_arr_buf[i] = atp_max_mM
+                na_i_arr_buf[i] = na_i_rest_mM
+                k_o_arr_buf[i] = k_o_rest_mM
+                ena_arr_buf[i] = ena
+                ek_arr_buf[i] = ek
 
         # Compute g_total and e_eff using vectorized function
         g_total_arr, e_eff_arr, i_ca_influx_v = _compute_ionic_currents_vectorized(
@@ -464,7 +446,7 @@ def run_native_loop(
             w_arr_buf, x_arr_buf, y_arr_buf, j_arr_buf, z_arr_buf,
             ca_arr_buf,
             gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-            ena, ek, el, eih,
+            ena_arr_buf, ek_arr_buf, el, eih,
             en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
             ca_ext, t_kelvin, ca_rest,
             n_comp,
@@ -501,6 +483,8 @@ def run_native_loop(
         # Build Hines system using pre-computed g_total and e_eff
         for i in range(n_comp):
             vi = y[i]   # V_n
+            ena_i = ena_arr_buf[i]
+            ek_i = ek_arr_buf[i]
             
             # Hines diagonal: Cm/dt + g_ion - L_diag[i]   (L_diag[i] < 0)
             cm_over_dt = physics.cm_v[i] / dt
@@ -548,15 +532,22 @@ def run_native_loop(
                 else:
                     i_stim_eff += i_stim_s
 
-            i_na_total = gna_v[i] * (y[off_m + i] ** 3) * y[off_h + i] * (vi - ena)
+            katp_rhs = 0.0
+            if dyn_atp:
+                atp_ratio = atp_arr_buf[i] / max(katp_kd_atp_mM, 1e-12)
+                g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
+                d[i] += g_katp
+                katp_rhs = g_katp * ek_i
+
+            i_na_total = gna_v[i] * (y[off_m + i] ** 3) * y[off_h + i] * (vi - ena_i)
             if physics.en_nap:
-                i_na_total += gnap_v[i] * y[off_x + i] * (vi - ena)
+                i_na_total += gnap_v[i] * y[off_x + i] * (vi - ena_i)
             if physics.en_nar:
-                i_na_total += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena)
+                i_na_total += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena_i)
             pump_atp_val = y[off_atp + i] if dyn_atp else atp_max_mM
             i_pump = compute_na_k_pump_current(i_na_total, pump_atp_val)
 
-            rhs[i] = cm_over_dt * vi + e_eff_arr[i] + i_stim_eff - i_pump
+            rhs[i] = cm_over_dt * vi + e_eff_arr[i] + katp_rhs + i_stim_eff - i_pump
 
             # ── Additive membrane noise if enabled ──
             if physics.noise_sigma > 0.0:
@@ -611,45 +602,61 @@ def run_native_loop(
         if dyn_atp:
             for i in range(n_comp):
                 atp_val = y[off_atp + i]
+                na_i_val = y[off_na_i + i]
+                k_o_val = y[off_k_o + i]
                 vi = y[i]
                 mi = y[off_m + i]
                 hi = y[off_h + i]
+                ena_i = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin)
+                ek_i = nernst_k_ion(k_i_mM, k_o_val, t_kelvin)
 
-                # Pump consumption: proportional to Na+ influx
-                # Na/K pump moves 3 Na+ per ATP, Faraday constant = 96485 C/mol
-                # Convert µA/cmÂ˛ to nmol/cmÂ˛/s: i_na (µA/cmÂ˛) * 1e-6 / (3*F) * 1e9 = i_na * 1e3 / (3*F)
-                i_na = gna_v[i] * (mi ** 3) * hi * (vi - ena)
-                
-                # Add NaP (persistent sodium) current if enabled
+                i_na = gna_v[i] * (mi ** 3) * hi * (vi - ena_i)
                 if physics.en_nap:
-                    i_na += gnap_v[i] * y[off_x + i] * (vi - ena)
-                
-                # Add NaR (resurgent sodium) current if enabled
+                    i_na += gnap_v[i] * y[off_x + i] * (vi - ena_i)
                 if physics.en_nar:
-                    i_na += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena)
-                
-                pump_availability = _pump_availability_from_atp(atp_val)
-                pump_consumption = max(0.0, -i_na) * pump_availability * _NA_PUMP_FACTOR
+                    i_na += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena_i)
 
-                # Add calcium pump consumption if dynamic Ca is enabled
-                # Ca pump moves 1 Ca2+ per ATP, z=2 for divalent ion
+                i_k_total = gk_v[i] * (y[off_n + i] ** 4) * (vi - ek_i)
+                if physics.en_ia:
+                    i_k_total += ga_v[i] * y[off_a + i] * y[off_b + i] * (vi - ek_i)
+                if physics.en_sk:
+                    i_k_total += gsk_v[i] * y[off_zsk + i] * (vi - ek_i)
+                if physics.en_im:
+                    i_k_total += gim_v[i] * y[off_w + i] * (vi - ek_i)
+
+                atp_ratio = atp_val / max(katp_kd_atp_mM, 1e-12)
+                g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
+                i_k_total += g_katp * (vi - ek_i)
+
+                i_pump = compute_na_k_pump_current(i_na, atp_val)
+                pump_consumption = max(0.0, i_pump) * _NA_PUMP_FACTOR
                 if dyn_ca:
                     pump_consumption += abs(i_ca_influx_v[i]) * _CA_PUMP_FACTOR
 
-                # ATP ODE: d[ATP]/dt = Synthesis - PumpConsumption
                 datp = atp_synthesis_rate * 0.001 - pump_consumption
-
-                # Metabolic feedback: reduce synthesis if ATP < 0.2 mM
                 if atp_val < ATP_PUMP_FAILURE_THRESHOLD:
                     datp *= atp_val / ATP_PUMP_FAILURE_THRESHOLD
-
-                # Clamp ATP to physiological bounds
                 if atp_val <= ATP_MIN_M_M and datp < 0.0:
                     datp = abs(datp) * 0.5
                 elif atp_val >= ATP_MAX_M_M and datp > 0.0:
                     datp = -abs(datp) * 0.5
 
-                y[off_atp + i] += datp * dt
+                dnai = ion_drift_gain * (max(0.0, -i_na) - 3.0 * max(0.0, i_pump))
+                dko = ion_drift_gain * (max(0.0, i_k_total) - 2.0 * max(0.0, i_pump))
+                dko -= (k_o_val - k_o_rest_mM) / max(k_o_clearance_tau_ms, 1e-12)
+
+                if na_i_val <= NA_I_MIN_M_M and dnai < 0.0:
+                    dnai = 0.0
+                elif na_i_val >= NA_I_MAX_M_M and dnai > 0.0:
+                    dnai = 0.0
+                if k_o_val <= K_O_MIN_M_M and dko < 0.0:
+                    dko = 0.0
+                elif k_o_val >= K_O_MAX_M_M and dko > 0.0:
+                    dko = 0.0
+
+                y[off_atp + i] = min(max(atp_val + datp * dt, ATP_MIN_M_M), ATP_MAX_M_M)
+                y[off_na_i + i] = min(max(na_i_val + dnai * dt, NA_I_MIN_M_M), NA_I_MAX_M_M)
+                y[off_k_o + i] = min(max(k_o_val + dko * dt, K_O_MIN_M_M), K_O_MAX_M_M)
 
         t += dt
 
@@ -661,3 +668,4 @@ def run_native_loop(
         out_idx += 1
 
     return t_out[:out_idx], y_out[:, :out_idx], bool(diverged)
+
