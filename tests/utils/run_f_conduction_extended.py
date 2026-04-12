@@ -74,7 +74,7 @@ def _run_case(
     cfg.channels.gL *= float(gl_mult)
     cfg.stim.t_sim = float(t_sim)
     cfg.stim.dt_eval = float(dt_eval)
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     try:
         res = NeuronSolver(cfg).run_single()

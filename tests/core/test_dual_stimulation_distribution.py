@@ -248,7 +248,7 @@ def test_preset_switch_clears_stale_dual_and_notes_state():
     cfg.dual_stimulation = DualStimulationConfig(enabled=True, secondary_Iext=99.0)
 
     apply_preset(cfg, "E: Cerebellar Purkinje (De Schutter)")
-    assert cfg.dual_stimulation is not None and cfg.dual_stimulation.enabled
+    assert cfg.dual_stimulation is None
 
     # Switching to a non-dual preset must clear dual state and notes.
     cfg.notes = "carry me"
@@ -271,7 +271,7 @@ def test_preset_switch_resets_mode_flags_to_defaults():
     assert cfg.preset_modes.alzheimer_mode == "progressive"
     assert cfg.preset_modes.hypoxia_mode == "progressive"
     assert cfg.preset_modes.l5_mode == "normal"
-    assert cfg.preset_modes.dravet_mode == "normal"
+    assert cfg.preset_modes.dravet_mode == "baseline"
     assert cfg.preset_modes.delay_target == "Terminal"
 
 
@@ -281,11 +281,10 @@ def test_all_presets_apply_without_leaking_previous_dual_state():
     assert len(names) > 0
 
     # Start from known dual-enabled state to catch leakage.
-    apply_preset(cfg, "E: Cerebellar Purkinje (De Schutter)")
+    apply_preset(cfg, "M: Epilepsy (v10 SCN1A mutation)")
     assert cfg.dual_stimulation is not None and cfg.dual_stimulation.enabled
 
     dual_expected_substrings = (
-        "Purkinje",
         "Epilepsy",
         "Hippocampal CA1",
     )

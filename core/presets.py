@@ -173,7 +173,7 @@ def _apply_l5_mode(cfg: FullModelConfig) -> None:
         cfg.dendritic_filter.enabled = False
         cfg.stim.synaptic_train_type = "none"
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 30.0  # Arousal proxy: stronger depolarizing drive with reduced adaptation
+        cfg.stim.Iext = 28.0  # Arousal proxy: stronger depolarizing drive with reduced adaptation
         # Title suffix added by GUI
     # Normal mode: use default IM (0.04) and SK (1.2) from preset
 
@@ -210,45 +210,70 @@ def _apply_anesthesia_mode(cfg: FullModelConfig) -> None:
     cfg.stim.stim_type = "const"
     if mode == "partial_block":
         cfg.channels.gNa_max = 48.0
-        cfg.stim.Iext = 24.0
+        cfg.stim.Iext = 12.0
     else:
         cfg.channels.gNa_max = 12.0
         cfg.stim.Iext = 20.0
 
 
+def _apply_dravet_mode(cfg: FullModelConfig) -> None:
+    """Apply baseline vs febrile Nav1.1 failure for the Dravet interneuron preset."""
+    mode = getattr(cfg.preset_modes, "dravet_mode", "baseline")
+    cfg.stim.stim_type = "const"
+    cfg.channels.gK_max = 22.0
+    cfg.channels.enable_IA = False
+    cfg.channels.gA_max = 0.0
+    cfg.channels.enable_NaR = False
+    if mode == "febrile":
+        cfg.env.T_celsius = 40.0
+        cfg.env.Q10_Na = 3.0
+        cfg.channels.gNa_max = 44.0
+        # Febrile stress further reduces firing reserve in Nav1.1-poor interneurons.
+        cfg.stim.Iext = 14.0
+    else:
+        cfg.env.T_celsius = 37.0
+        cfg.env.Q10_Na = 2.2
+        cfg.channels.gNa_max = 64.0
+        # Baseline Dravet stays weakened but should still produce a small number of
+        # compromised inhibitory spikes before failing.
+        cfg.stim.Iext = 14.0
+
+
 def _apply_k_mode(cfg: FullModelConfig) -> None:
     """
     Configure the model's thalamic relay behavior according to cfg.preset_modes.k_mode.
-    
-    For "baseline": set a hyperpolarizing pulse to promote post-inhibitory rebound bursting (bursty/sleep-like relay).
-    For "delta_oscillator": set a sustained hyperpolarizing drive with enhanced pacemaker currents to support slow (~delta) oscillations.
-    For other values ("activated"): set a tonic depolarizing drive to favor tonic relay (awake) behaviour.
+
+    For "baseline": set a hyperpolarizing pulse to promote post-inhibitory rebound bursting.
+    For "delta_oscillator": use a long hyperpolarized epoch followed by a sparse late rebound.
+    For other values ("activated"): set a tonic depolarizing drive for tonic relay firing.
     """
     if cfg.preset_modes.k_mode == "baseline":
-        # Sleep/drowsy: hyperpolarizing pulse de-inactivates I_T → Post-Inhibitory Rebound burst
         cfg.stim.stim_type = "pulse"
-        cfg.stim.Iext = -4.0  # Gentler hyperpolarization preserves low-throughput rebound output
+        cfg.stim.Iext = -4.0
         cfg.stim.pulse_start = 10.0
         cfg.stim.pulse_dur = 60.0
         cfg.channels.gIh_max = 0.02
         cfg.channels.gTCa_max = 1.2
-        cfg.channels.EL = -75.0  # Rest Vm = -75mV (sleep)
+        cfg.channels.EL = -75.0
     elif cfg.preset_modes.k_mode == "delta_oscillator":
-        # Intrinsic delta-like surrogate: slow hyperpolarized oscillations without
-        # pretending to be a full thalamocortical network rhythm generator.
-        cfg.stim.stim_type = "const"
-        cfg.stim.Iext = -2.0
-        cfg.stim.t_sim = max(cfg.stim.t_sim, 1000.0)
-        cfg.channels.gIh_max = 0.10
-        cfg.channels.gTCa_max = 2.8
-        cfg.channels.EL = -74.0
+        # Intrinsic delta-like surrogate: prolonged hyperpolarization followed by
+        # a late, sparse rebound burst. This stays honest about the missing
+        # network loop while still showing slow thalamic recruitment.
+        cfg.stim.stim_type = "pulse"
+        cfg.stim.Iext = -2.2
+        cfg.stim.pulse_start = 20.0
+        cfg.stim.pulse_dur = 180.0
+        cfg.stim.t_sim = max(cfg.stim.t_sim, 500.0)
+        cfg.channels.gIh_max = 0.018
+        cfg.channels.gTCa_max = 1.2
+        cfg.channels.EL = -77.0
+        cfg.channels.gL = 0.05
     else:
-        # Activated: tonic relay firing (I_T mostly inactivated at depolarized Vm)
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 8.0  # Tonic drive
+        cfg.stim.Iext = 8.0
         cfg.channels.gIh_max = 0.02
         cfg.channels.gTCa_max = 2.0
-        cfg.channels.EL = -60.0  # Rest Vm = -60mV (awake)
+        cfg.channels.EL = -60.0
 
 
 def _apply_alzheimer_mode(cfg: FullModelConfig) -> None:
@@ -273,7 +298,7 @@ def _apply_alzheimer_mode(cfg: FullModelConfig) -> None:
         cfg.channels.gSK_max = 1.0
         cfg.channels.gCa_max = 0.08
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 30.0
+        cfg.stim.Iext = 28.0
         cfg.stim.t_sim = 500.0
 
 
@@ -298,8 +323,8 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         # Terminal stage: severe energy failure; weak initial response and rapid collapse.
         cfg.morphology.gNa_trunk_mult = 0.35
         cfg.morphology.gL_trunk_mult = 8.0
-        cfg.metabolism.atp_synthesis_rate = 0.03
-        cfg.metabolism.g_katp_max = 3.0
+        cfg.metabolism.atp_synthesis_rate = 0.04
+        cfg.metabolism.g_katp_max = 2.5
         cfg.calcium.tau_Ca = 1200.0
         cfg.channels.gCa_max = 0.10
         cfg.stim.stim_type = 'const'
@@ -310,11 +335,11 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         cfg.morphology.gNa_trunk_mult = 0.65
         cfg.morphology.gL_trunk_mult = 3.0
         cfg.metabolism.atp_synthesis_rate = 0.18
-        cfg.metabolism.g_katp_max = 0.8
+        cfg.metabolism.g_katp_max = 0.6
         cfg.calcium.tau_Ca = 900.0
         cfg.channels.gCa_max = 0.08
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 30.0
+        cfg.stim.Iext = 26.0
         cfg.stim.t_sim = max(cfg.stim.t_sim, 500.0)
 
 
@@ -363,7 +388,7 @@ def _apply_epilepsy_disinhibition_protocol(cfg: FullModelConfig) -> None:
 
     cfg.stim_location.location = "soma"
     cfg.stim.stim_type = "const"
-    cfg.stim.Iext = 30.0
+    cfg.stim.Iext = 28.0
     cfg.stim.noise_sigma = 0.2
     cfg.dual_stimulation = DualStimulationConfig(
         enabled=True,
@@ -409,7 +434,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         # These values are SOMA-SPECIFIC from Mainen et al. 1996 calibration
         # Reference: Mainen & Sejnowski (1996) Nature 382: 363-366
         # Whole-cell recordings at 23°C on layer 5 pyramidal neurons
-        cfg.channels.gNa_max = 56.0    # SOMA density [mS/cm²] - NOT soma+AIS average
+        cfg.channels.gNa_max = 48.0    # Calibrated to restore a clean adapting train under the pump-enabled solver
         cfg.channels.gK_max = 6.0      # SOMA density [mS/cm²]
         cfg.channels.gL = 0.02         # SOMA leak density [mS/cm²]
         cfg.channels.Cm = 0.75         # Specific membrane capacitance [µF/cm²]
@@ -433,15 +458,15 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.dynamic_Ca = True  # Enable calcium dynamics
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
-        cfg.calcium.tau_Ca = 200.0
-        cfg.calcium.B_Ca = 1e-5  # v12.0: Reverted to 1e-5 (was 1e-7)
+        cfg.calcium.tau_Ca = 120.0
+        cfg.calcium.B_Ca = 3e-6
         cfg.channels.enable_ICa = True  # L-type calcium channel
-        cfg.channels.gCa_max = 0.08  # Moderate ICa for calcium dynamics
-        cfg.channels.gSK_max = 1.2  # SK channel for calcium-dependent adaptation
+        cfg.channels.gCa_max = 0.03  # Lower Ca influx avoids subthreshold ATP/SK suppression artefacts
+        cfg.channels.gSK_max = 0.18  # Keeps adaptation without shutting down the train
         
         # M-TYPE K CURRENT: Enable for spike frequency adaptation
         cfg.channels.enable_IM = True  # KCNQ2/3 channels for adaptation
-        cfg.channels.gIM_max = 0.04  # v12.0: Increased M-current for stronger SFA
+        cfg.channels.gIM_max = 0.05
         
         # Layer-5 identity should be readable under standard current clamp before
         # any neuromodulatory overlays are applied.
@@ -449,7 +474,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.event_times = []
         cfg.stim.jacobian_mode = 'native_hines'
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 24.0
+        cfg.stim.Iext = 6.0
         cfg.stim.t_sim = 500.0
 
     # Stage/mode overlays for selected presets.
@@ -540,7 +565,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
         cfg.calcium.tau_Ca = 60.0
-        cfg.calcium.B_Ca = 1e-5  # v12.0: Reverted to 1e-5 (was 1e-7)
+        cfg.calcium.B_Ca = 3e-6
         cfg.channels.enable_ICa = True  # L-type calcium channels
         cfg.channels.gCa_max = 0.08  # Physiological L-type calcium conductance
         
@@ -558,24 +583,13 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.alpha_tau = 2.0
         cfg.stim.Iext = 32.0
 
-        # DUAL STIMULATION: Add noisy dendritic inhibition (granular layer)
-        # Primary stimulus is set on cfg.stim, secondary on dual_stimulation
-        from core.dual_stimulation import DualStimulationConfig
         cfg.stim_location.location = "soma"
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 30.0  # Primary stimulus
-        cfg.dual_stimulation = DualStimulationConfig(
-            enabled=True,
-            secondary_location="dendritic_filtered",
-            secondary_stim_type="GABAA",
-            secondary_Iext=15.0,
-            secondary_train_type="poisson",
-            secondary_train_freq_hz=60.0,
-            secondary_train_duration_ms=5000.0,
-            secondary_distance_um=200.0,
-            secondary_space_constant_um=180.0,
-            secondary_tau_dendritic_ms=15.0
-        )
+        cfg.stim.Iext = 28.0  # Primary stimulus
+        # Keep tonic Purkinje firing as an intrinsic default phenotype.
+        # More elaborate climbing-fiber / inhibitory overlays belong to explicit modes,
+        # not to the base preset contract.
+        cfg.dual_stimulation = None
 
     # --- 6. ТАЛАМИЧЕСКИЙ РЕЛЕ-НЕЙРОН (Ih + IT + Ca-dynamics) ---
     elif code == "K":
@@ -604,8 +618,10 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.dynamic_Ca = True
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
-        cfg.calcium.tau_Ca = 200.0
-        cfg.calcium.B_Ca = 2e-5  # v12.0: Thalamic calcium conversion factor (was 1e-5)
+        cfg.calcium.tau_Ca = 120.0
+        # Keep thalamic rebound calcium visible without driving E_Ca into an
+        # unphysiological collapse during prolonged burst surrogates.
+        cfg.calcium.B_Ca = 2e-6
         cfg.morphology.d_soma = 25e-4
         cfg.stim.jacobian_mode = 'native_hines'
         # v12.0: k_mode overlay handles stimulus (baseline=alpha burst, activated=tonic)
@@ -632,10 +648,16 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.jacobian_mode = 'native_hines'
         # Set delay target to Terminal to show the "Wow" effect of conduction block immediately
         cfg.preset_modes.delay_target = "Terminal"
-        # Keep the same input class as control; pathology should emerge from axon-specific changes.
-        cfg.stim.stim_type = 'alpha'
-        cfg.stim.alpha_tau = 1.5
-        cfg.stim.Iext = 50.0
+        # Repeated fast excitatory drive keeps the soma visibly active while the
+        # demyelinated axon fails to propagate robustly to the distal cable.
+        cfg.stim.stim_type = 'AMPA'
+        cfg.stim.alpha_tau = 2.0
+        cfg.stim.Iext = 8.0
+        cfg.stim.synaptic_train_type = 'regular'
+        cfg.stim.synaptic_train_freq_hz = 20.0
+        cfg.stim.synaptic_train_duration_ms = 220.0
+        cfg.stim.pulse_start = 10.0
+        cfg.stim.t_sim = 220.0
 
     # --- 8. ПАТОЛОГИЯ: ЭПИЛЕПСИЯ (SCN1A GAIN-OF-FUNCTION) ---
     elif code == "M":
@@ -647,7 +669,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.gCa_max = 0.08  # Moderate ICa - PHYSIOLOGICAL range (was 1.2, too high)
         cfg.calcium.dynamic_Ca = True  # Enable calcium dynamics
         cfg.calcium.tau_Ca = 300.0  # Moderately impaired clearance
-        cfg.calcium.B_Ca = 1e-5  # Calibrated conversion for pathological accumulation without runaway Ca
+        cfg.calcium.B_Ca = 3e-6
         # Chloride Shift: depolarized GABA reversal (pathological disinhibition)
         cfg.channels.e_rev_syn_secondary = -40.0  # Depolarized from -75 to -40 mV
         _apply_epilepsy_disinhibition_protocol(cfg)
@@ -729,7 +751,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.Ca_rest = 5e-5       # 50 nM resting [Ca²⁺]ᵢ
         cfg.calcium.Ca_ext = 2.0         # 2 mM extracellular
         cfg.calcium.tau_Ca = 100.0  # v12.0: CA1 calcium decay (was disabled)
-        cfg.calcium.B_Ca = 1e-5  # v12.0: CA1 calcium conversion factor (was disabled)
+        cfg.calcium.B_Ca = 3e-6
         cfg.channels.gCa_max = 0.08  # L-type calcium for adaptation
         cfg.channels.gSK_max = 0.5  # SK for calcium-dependent adaptation (reduced to allow theta-rhythm trains)
         cfg.channels.gIM_max = 0.04  # M-type for slow adaptation
@@ -759,40 +781,36 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 10.0
 
-    # --- 16. ТАЛАМИЧЕСКОЕ РЕТИКУЛЯРНОЕ ЯДРО (TRN — СОННЫЕ ВЕРЕТЁНА) ---
+    # --- 16. Thalamic Reticular Nucleus (TRN) ---
     elif code == "P":
-        # TRN neurons: GABAergic burst-ready cells. In a single-neuron simulator
-        # this is best represented as a rebound-burst surrogate rather than a
-        # full spindle generator.
-        # Reference: Destexhe et al. 1996, J Neurosci 16:169;
-        #            Huguenard & Prince 1992, J Neurosci 12:3804
+        # TRN neurons are burst-ready GABAergic cells. In this reduced single-cell
+        # model we represent them as a rebound-burst surrogate rather than a full
+        # spindle generator.
         cfg.morphology.single_comp = True
         cfg.stim_location.location = "soma"
         cfg.dendritic_filter.enabled = False
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 95.0, 7.0, 0.05
-        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -75.0
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 88.0, 12.0, 0.08
+        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -77.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 24.0, 2.3
-        # I_T: very high density in TRN dendrites (Huguenard & Prince 1992)
-        # Somatic density ~3-5× higher than in relay neurons
         cfg.channels.enable_ITCa = True
-        cfg.channels.gTCa_max = 6.5     # Strong rebound reserve without runaway hyperpolarization
+        cfg.channels.gTCa_max = 2.8
         cfg.channels.enable_Ih = True
-        cfg.channels.gIh_max = 0.004    # Lower Ih than relay — less sag, more burst
-        cfg.channels.E_Ih = -43.0  # Standardized reversal potential
+        cfg.channels.gIh_max = 0.001
+        cfg.channels.E_Ih = -43.0
         cfg.channels.enable_ICa = False
         cfg.channels.enable_SK = False
         cfg.calcium.dynamic_Ca = True
         cfg.calcium.Ca_rest = 5e-5
         cfg.calcium.Ca_ext = 2.0
-        cfg.calcium.tau_Ca = 150.0       # Fast extrusion
+        cfg.calcium.tau_Ca = 120.0
         cfg.calcium.B_Ca = 1e-5
         cfg.morphology.d_soma = 20e-4
         cfg.stim.jacobian_mode = 'native_hines'
-        # Hyperpolarizing pulse de-inactivates I_T; release evokes the rebound burst.
         cfg.stim.stim_type = 'pulse'
-        cfg.stim.Iext = -3.0
-        cfg.stim.pulse_dur = 45.0
-        cfg.stim.t_sim = 450.0
+        cfg.stim.Iext = -2.5
+        cfg.stim.pulse_start = 10.0
+        cfg.stim.pulse_dur = 70.0
+        cfg.stim.t_sim = 260.0
 
     # --- 17. ШИПОВАТЫЙ ПРОЕКЦИОННЫЙ НЕЙРОН СТРИАТУМА (SPN) ---
     elif code == "Q":
@@ -862,23 +880,9 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.dendritic_filter.enabled = False
         # SCN1A haploinsufficiency: ~50% reduction in Nav1.1
         # FS interneurons depend heavily on Nav1.1 for sustained firing
-        cfg.channels.gNa_max = 80.0     # Impaired but still capable of a brief inhibitory train
-        cfg.channels.gK_max = 20.0
-        cfg.channels.enable_IA = False
-        cfg.channels.gA_max = 0.0
-        cfg.channels.enable_NaR = False
         cfg.stim.jacobian_mode = 'native_hines'
-        # Brief, weakened FS-like firing: reduced inhibitory output rather than total silence.
-        cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 30.0
         cfg.stim.t_sim = 300.0
-
-        # Fever mode: temperature-triggered failure
-        if cfg.preset_modes.dravet_mode == "febrile":
-            cfg.env.T_celsius = 40.0  # Fever temperature
-            cfg.channels.gNa_max = 55.0  # Further failure reserve collapses under fever
-            cfg.channels.gK_max = 20.0
-            cfg.env.Q10_Na = 3.0  # Thermal hyper-sensitivity: Na channels become more sensitive to heat
+        _apply_dravet_mode(cfg)
 
     # --- 20. PASSIVE CABLE (LINEAR DECAY) ---
     elif code == "T":
@@ -954,6 +958,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         _apply_purkinje_mode(cfg)
     if code == "G":
         _apply_anesthesia_mode(cfg)
+    if code == "S":
+        _apply_dravet_mode(cfg)
 
 
 
@@ -1013,3 +1019,5 @@ def apply_synaptic_stimulus(cfg: FullModelConfig, stimulus_type: str):
         cfg.stim.t_sim = 150.0
     else:
         raise ValueError(f"Unknown synaptic stimulus type: {stimulus_type}")
+
+

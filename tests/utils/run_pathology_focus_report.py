@@ -59,7 +59,7 @@ def _run_mode_case(
     cfg.env.T_celsius = float(t_c)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     res = NeuronSolver(cfg).run_single()
     st = _spike_times(res.v_soma, res.t)
@@ -94,7 +94,7 @@ def _run_conduction_case(
     cfg.env.T_celsius = float(t_c)
     cfg.stim.t_sim = t_sim
     cfg.stim.dt_eval = dt_eval
-    cfg.stim.jacobian_mode = "sparse_fd"
+    cfg.stim.jacobian_mode = "native_hines"
 
     res = NeuronSolver(cfg).run_single()
     st = _spike_times(res.v_soma, res.t)

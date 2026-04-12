@@ -29,7 +29,7 @@ from .kinetics import (
     ay_NaR_lut, by_NaR_lut, aj_NaR_lut, bj_NaR_lut,
     z_inf_SK,
 )
-from .rhs import nernst_ca_ion, CA_I_MIN_M_M, CA_I_MAX_M_M, CA_DAMPING_FACTOR
+from .rhs import effective_sk_calcium
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,8 +134,7 @@ def update_gates_analytic(
         # Hirschberg et al. 1998, J Gen Physiol 111:565
         if en_sk:
             zi = y[off_zsk + i]
-            ca_val = y[off_ca + i] if dyn_ca else ca_rest
-            ca_sk = ca_val if ca_val > 0 else ca_rest
+            ca_sk = effective_sk_calcium(y[off_ca + i], ca_rest) if dyn_ca else ca_rest
             z_inf = z_inf_SK(ca_sk)
             tau_eff = max(tau_sk, 1e-12) / max(phi_k[i], 1e-12) if phi_k[i] > 1e-15 else max(tau_sk, 1e-12)
             y[off_zsk + i] = z_inf + (zi - z_inf) * np.exp(-dt / tau_eff)

@@ -44,7 +44,6 @@ def test_calcium_clamping_basic():
         # Ослабленные проверки с учетом overshoot'а интегратора
         assert ca_min >= (1e-9 - SOLVER_TOLERANCE), f"Calcium below bound: {ca_min}"
         assert ca_max <= 10.0 + SOLVER_TOLERANCE, f"Calcium above bound: {ca_max}"
-        return True
     else:
         raise AssertionError("Calcium dynamics not enabled in results")
 
@@ -52,7 +51,7 @@ def test_calcium_clamping_basic():
 def test_hypoxia_preset_calcium_safety():
     """Test 2: Hypoxia preset with extended simulation (2000ms)."""
     config = FullModelConfig()
-    apply_preset(config, 'Hypoxia')
+    apply_preset(config, "O: Hypoxia (v10 ATP-pump failure)")
     config.stim.t_sim = 2000.0  # Extended simulation
     config.stim.dt_eval = 0.5   # Чуть увеличим шаг вывода для ускорения теста (не влияет на точность)
     config.stim.jacobian_mode = 'native_hines' # Убедимся что используется быстрый режим
@@ -70,7 +69,6 @@ def test_hypoxia_preset_calcium_safety():
 
         assert ca_min >= (1e-9 - SOLVER_TOLERANCE), f"Hypoxia calcium below bound: {ca_min}"
         assert ca_max <= 10.0 + SOLVER_TOLERANCE, f"Hypoxia calcium above bound: {ca_max}"
-        return True
     else:
         raise AssertionError("Hypoxia preset missing calcium dynamics")
 
@@ -78,7 +76,7 @@ def test_hypoxia_preset_calcium_safety():
 def test_alzheimer_preset_calcium_safety():
     """Test 3: Alzheimer preset with extended simulation (2000ms)."""
     config = FullModelConfig()
-    apply_preset(config, "Alzheimer's")
+    apply_preset(config, "N: Alzheimer's (v10 Calcium Toxicity)")
     config.stim.t_sim = 2000.0 
     config.stim.dt_eval = 0.5
     config.stim.jacobian_mode = 'native_hines'
@@ -96,7 +94,6 @@ def test_alzheimer_preset_calcium_safety():
 
         assert ca_min >= (1e-9 - SOLVER_TOLERANCE), f"Alzheimer calcium below bound: {ca_min}"
         assert ca_max <= 10.0 + SOLVER_TOLERANCE, f"Alzheimer calcium above bound: {ca_max}"
-        return True
     else:
         raise AssertionError("Alzheimer preset missing calcium dynamics")
 
@@ -114,6 +111,7 @@ def test_extreme_calcium_conditions():
     config.calcium.Ca_rest = 1e-3  # High resting calcium
     config.calcium.B_Ca = 0.05     # EXTREME calcium influx (was 0.01)
     config.channels.gCa_max = 5.0  # Massive calcium conductance
+    config.stim.jacobian_mode = 'native_hines'
 
     solver = NeuronSolver(config)
     result = solver.run_single()
@@ -128,7 +126,6 @@ def test_extreme_calcium_conditions():
 
         assert ca_min >= (1e-9 - SOLVER_TOLERANCE), f"Extreme calcium below bound: {ca_min}"
         assert ca_max <= 10.0 + SOLVER_TOLERANCE, f"Extreme calcium above bound: {ca_max}"
-        return True
     else:
         raise AssertionError("Calcium dynamics missing in extreme test")
 

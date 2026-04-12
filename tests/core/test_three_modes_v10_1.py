@@ -23,10 +23,12 @@ def test_three_stimulus_locations_l5_pyramidal():
     apply_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
 
     modes = ["soma", "ais", "dendritic_filtered"]
-    # Roughly follow DEVELOPER_QUICKSTART suggested amplitudes
+    # Keep amplitudes in a clearly suprathreshold range for the current
+    # v10 L5 calibration. AIS drive needs a slightly stronger current than
+    # the older quickstart notes to produce a reliable somatic spike.
     currents = {
         "soma": 35.4,
-        "ais": 5.0,
+        "ais": 8.0,
         "dendritic_filtered": 100.0,
     }
 

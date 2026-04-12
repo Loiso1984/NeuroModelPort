@@ -6,6 +6,12 @@
   },
   "keyword_rules": [
     {
+      "match": "Squid Giant Axon",
+      "firing_hz": [0.0, 250.0],
+      "v_min": [-120.0, -40.0],
+      "v_max": [-80.0, 120.0]
+    },
+    {
       "match": "FS Interneuron",
       "firing_hz": [20.0, 450.0],
       "v_min": [-120.0, -40.0],
@@ -25,9 +31,33 @@
     },
     {
       "match": "Purkinje",
-      "firing_hz": [20.0, 350.0],
+      "firing_hz": [0.0, 350.0],
       "v_min": [-120.0, -40.0],
-      "v_max": [0.0, 120.0]
+      "v_max": [-80.0, 120.0]
+    },
+    {
+      "match": "Local Anesthesia",
+      "firing_hz": [0.0, 120.0],
+      "v_min": [-120.0, -40.0],
+      "v_max": [-90.0, 120.0]
+    },
+    {
+      "match": "Hyperkalemia",
+      "firing_hz": [0.0, 200.0],
+      "v_min": [-120.0, -30.0],
+      "v_max": [-90.0, 120.0]
+    },
+    {
+      "match": "Passive Cable",
+      "firing_hz": [0.0, 20.0],
+      "v_min": [-120.0, -30.0],
+      "v_max": [-90.0, 40.0]
+    },
+    {
+      "match": "I-Clamp Threshold Explorer",
+      "firing_hz": [0.0, 250.0],
+      "v_min": [-120.0, -40.0],
+      "v_max": [-90.0, 120.0]
     }
   ]
 }

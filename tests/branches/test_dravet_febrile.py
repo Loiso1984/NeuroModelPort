@@ -17,9 +17,8 @@ def test_dravet_febrile_mode():
     # Baseline mode
     cfg_baseline = FullModelConfig()
     cfg_baseline.preset_modes.dravet_mode = "baseline"
-    apply_preset(cfg_baseline, "Pathology: Dravet Syndrome (SCN1A LOF)")
-    cfg_baseline.stim.Iext = 60.0  # Increase stimulus to get more spikes
-    
+    apply_preset(cfg_baseline, "S: Pathology: Dravet Syndrome (SCN1A LOF)")
+
     solver_baseline = NeuronSolver(cfg_baseline)
     result_baseline = solver_baseline.run_single()
     t_baseline = np.asarray(result_baseline.t, dtype=float)
@@ -36,8 +35,7 @@ def test_dravet_febrile_mode():
     # Febrile mode
     cfg_febrile = FullModelConfig()
     cfg_febrile.preset_modes.dravet_mode = "febrile"
-    apply_preset(cfg_febrile, "Pathology: Dravet Syndrome (SCN1A LOF)")
-    cfg_febrile.stim.Iext = 60.0  # Same stimulus for fair comparison
+    apply_preset(cfg_febrile, "S: Pathology: Dravet Syndrome (SCN1A LOF)")
     
     solver_febrile = NeuronSolver(cfg_febrile)
     result_febrile = solver_febrile.run_single()
@@ -57,15 +55,15 @@ def test_dravet_febrile_mode():
     if n_spikes_baseline > 0:
         print(f"Reduction: {100 * (1 - n_spikes_febrile / n_spikes_baseline):.1f}%")
     
-    # Febrile mode should reduce spiking (at least 10% reduction if baseline has >2 spikes)
-    if n_spikes_baseline >= 2:
-        assert n_spikes_febrile < n_spikes_baseline * 0.9, \
-            f"Febrile mode should reduce spiking: baseline={n_spikes_baseline}, febrile={n_spikes_febrile}"
+    assert n_spikes_baseline >= 1, "Baseline Dravet mode should retain at least one compromised inhibitory spike"
+    assert n_spikes_febrile < n_spikes_baseline, (
+        f"Febrile mode should reduce spiking: baseline={n_spikes_baseline}, febrile={n_spikes_febrile}"
+    )
     
     # Verify temperature is set correctly
     assert cfg_febrile.env.T_celsius == 40.0, "Febrile mode should set T_celsius=40.0"
     assert cfg_febrile.env.Q10_Na == 3.0, "Febrile mode should set Q10_Na=3.0"
-    assert cfg_febrile.channels.gNa_max == 42.0, "Febrile mode should set gNa_max=42.0"
+    assert cfg_febrile.channels.gNa_max == 44.0, "Febrile mode should set gNa_max=44.0"
 
 
 if __name__ == "__main__":

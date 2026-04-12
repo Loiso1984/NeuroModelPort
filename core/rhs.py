@@ -21,11 +21,7 @@ NA_I_MIN_M_M = 1.0
 NA_I_MAX_M_M = 80.0
 K_O_MIN_M_M = 1.0
 K_O_MAX_M_M = 30.0
-CA_DAMPING_FACTOR = 0.5  # Damped reflection factor for calcium bounds (prevents oscillation)
-# When calcium hits its physiological bounds, instead of zeroing the derivative (which creates
-# an artificial equilibrium), we reflect it with damping. A value of 0.5 provides sufficient
-# energy dissipation to prevent sustained oscillations at the boundary while maintaining
-# numerical stability. This is analogous to a "soft bounce" in physical systems.
+CA_MICRODOMAIN_SCALAR = 10.0
 
 # ATP metabolism constants
 ATP_MIN_M_M = 0.0
@@ -34,7 +30,7 @@ ATP_ISCHEMIC_THRESHOLD = 0.5  # mM - K_ATP opens below this threshold
 ATP_PUMP_FAILURE_THRESHOLD = 0.2  # mM - pumps fail below this threshold
 _NA_PUMP_FACTOR = 1e3 / (3.0 * 96485.0)
 _CA_PUMP_FACTOR = 1e3 / (2.0 * 96485.0)
-_PUMP_CURRENT_FRACTION = 1.0 / 3.0
+_PUMP_CURRENT_FRACTION = 0.05
 
 # Noise parameters
 OU_NOISE_AMPLITUDE = 0.1  # 10% noise amplitude
@@ -135,10 +131,33 @@ def _pump_availability_from_atp(atp_val: float64) -> float64:
 
 
 @njit(float64(float64, float64), cache=True)
+def compute_na_k_pump_drive(i_na_total: float64, atp_val: float64) -> float64:
+    """Na/K pump transport drive before conversion to electrogenic membrane current."""
+    return max(0.0, -i_na_total) * _pump_availability_from_atp(atp_val)
+
+
+@njit(float64(float64, float64), cache=True)
 def compute_na_k_pump_current(i_na_total: float64, atp_val: float64) -> float64:
     """Electrogenic Na/K pump current estimated from inward Na load and ATP availability."""
-    pump_drive = max(0.0, -i_na_total) * _pump_availability_from_atp(atp_val)
-    return _PUMP_CURRENT_FRACTION * pump_drive
+    return _PUMP_CURRENT_FRACTION * compute_na_k_pump_drive(i_na_total, atp_val)
+
+
+@njit(float64(float64, float64), cache=True)
+def effective_sk_calcium(ca_val: float64, ca_rest: float64) -> float64:
+    """Proxy SK microdomain calcium while keeping values physiologically bounded."""
+    if not np.isfinite(ca_val) or ca_val <= 0.0:
+        ca_val = ca_rest
+    delta = max(0.0, ca_val - ca_rest)
+    ca_eff = ca_rest + CA_MICRODOMAIN_SCALAR * delta
+    return min(max(ca_eff, CA_I_MIN_M_M), 1.0)
+
+
+@njit(float64(float64, float64), cache=True)
+def clamp_calcium_derivative(ca_val: float64, dca: float64) -> float64:
+    """Clamp calcium drift at physiological bounds without injecting artificial mass."""
+    if (ca_val <= CA_I_MIN_M_M and dca < 0.0) or (ca_val >= CA_I_MAX_M_M and dca > 0.0):
+        return 0.0
+    return dca
 
 @njit(cache=True)
 def _calculate_syn_tau(stype, atau_mult):
@@ -702,8 +721,7 @@ def rhs_multicompartment(
         if en_sk:
             zi = y[off_zsk + i]
             if dyn_ca:
-                # Local microdomain proxy: SK sensors see higher Ca near open Ca channels.
-                ca_sk = min(max(y[off_ca + i] * 10.0, CA_I_MIN_M_M), 1.0)
+                ca_sk = effective_sk_calcium(y[off_ca + i], ca_rest)
             else:
                 ca_sk = ca_rest
             z_inf = z_inf_SK(ca_sk)
@@ -713,24 +731,13 @@ def rhs_multicompartment(
         if dyn_ca:
             ca_i_val = y[off_ca + i]
             dca = b_ca[i] * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
-
-            # Hard clamp: keep calcium in physiologically bounded range.
-            # Only clamp the derivative, not set to zero, to avoid artificial equilibrium
-            ca_at_min = (ca_i_val <= CA_I_MIN_M_M and dca < 0.0)
-            ca_at_max = (ca_i_val >= CA_I_MAX_M_M and dca > 0.0)
-            if ca_at_min:
-                # Force derivative positive (away from lower bound)
-                dca = abs(dca) * CA_DAMPING_FACTOR
-            elif ca_at_max:
-                # Force derivative negative (away from upper bound)
-                dca = -abs(dca) * CA_DAMPING_FACTOR
-            dydt[off_ca + i] = dca
+            dydt[off_ca + i] = clamp_calcium_derivative(ca_i_val, dca)
 
         # ATP dynamics
         if dyn_atp:
             atp_i_val = y[off_atp + i]
-            pump_availability = _pump_availability_from_atp(atp_i_val)
-            pump_consumption = max(0.0, -i_na_total) * pump_availability * _NA_PUMP_FACTOR
+            pump_drive = compute_na_k_pump_drive(i_na_total, atp_i_val)
+            pump_consumption = pump_drive * _NA_PUMP_FACTOR
             if dyn_ca:
                 pump_consumption += i_ca_influx * _CA_PUMP_FACTOR
 

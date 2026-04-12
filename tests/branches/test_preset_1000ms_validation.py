@@ -26,6 +26,7 @@ def test_all_presets_1000ms_stability():
         # Set extended simulation time
         cfg.stim.t_sim = 1000.0
         cfg.stim.dt_eval = 0.5  # Coarser output for long sims
+        cfg.stim.jacobian_mode = "native_hines"
         
         solver = NeuronSolver(cfg)
         result = solver.run_single()
@@ -155,7 +156,7 @@ def test_pathology_presets_expected_behavior():
     # Verify parameters are set correctly
     assert cfg_dra_febrile.env.T_celsius == 40.0, "Dravet febrile: T_celsius should be 40.0"
     assert cfg_dra_febrile.env.Q10_Na == 3.0, "Dravet febrile: Q10_Na should be 3.0"
-    assert cfg_dra_febrile.channels.gNa_max == 42.0, "Dravet febrile: gNa_max should be 42.0"
+    assert cfg_dra_febrile.channels.gNa_max == 44.0, "Dravet febrile: gNa_max should be 44.0"
 
 
 if __name__ == "__main__":

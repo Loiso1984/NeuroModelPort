@@ -36,15 +36,50 @@ def run_euler_maruyama(config: FullModelConfig):
 #  PARAMETER SWEEP
 # -----------------------------------------------------------------------------
 
-def _set_sweep_param(cfg: FullModelConfig, param_path: str, val: float):
-    """Apply a single sweep parameter value dynamically."""
-    obj = cfg
+_SWEEP_SECTION_FALLBACKS = (
+    "stim",
+    "channels",
+    "env",
+    "morphology",
+    "calcium",
+    "analysis",
+    "metabolism",
+    "preset_modes",
+    "stim_location",
+    "dendritic_filter",
+)
+
+
+def _resolve_sweep_target(cfg: FullModelConfig, param_path: str):
+    """Resolve a sweep parameter path, supporting both dotted paths and legacy short names."""
     parts = [part for part in str(param_path).split(".") if part]
     if not parts:
         raise ValueError("Sweep parameter path cannot be empty")
+
+    if len(parts) == 1:
+        attr = parts[0]
+        if hasattr(cfg, attr):
+            return cfg, attr
+        for section_name in _SWEEP_SECTION_FALLBACKS:
+            section = getattr(cfg, section_name, None)
+            if section is not None and hasattr(section, attr):
+                return section, attr
+        raise AttributeError(f'"FullModelConfig" object has no field "{attr}"')
+
+    obj = cfg
     for part in parts[:-1]:
+        if not hasattr(obj, part):
+            raise AttributeError(f'"{type(obj).__name__}" object has no field "{part}"')
         obj = getattr(obj, part)
-    setattr(obj, parts[-1], float(val))
+    if not hasattr(obj, parts[-1]):
+        raise AttributeError(f'"{type(obj).__name__}" object has no field "{parts[-1]}"')
+    return obj, parts[-1]
+
+
+def _set_sweep_param(cfg: FullModelConfig, param_path: str, val: float):
+    """Apply a single sweep parameter value dynamically."""
+    obj, attr = _resolve_sweep_target(cfg, param_path)
+    setattr(obj, attr, float(val))
 
 
 def run_sweep(

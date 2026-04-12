@@ -4,6 +4,32 @@ from typing import List, Tuple
 # Импортируем наши кинетические функции
 from .kinetics import *
 
+_F_CONST = 96485.33
+_R_GAS = 8.314
+_TEMP_ZERO = 273.15
+
+
+def derive_dynamic_atp_rest_ions(config) -> tuple[float, float]:
+    """Infer Na_i and K_o rest values that reproduce the preset ENa/EK at the current temperature.
+
+    This keeps dynamic-ATP runs aligned with the preset's intended reversal potentials instead of
+    silently mixing a healthy-neuron default ionic composition with a custom preset ENa/EK pair.
+    """
+    t_kelvin = _TEMP_ZERO + float(config.env.T_celsius)
+    ena_target = float(config.channels.ENa)
+    ek_target = float(config.channels.EK)
+    na_ext = max(float(config.metabolism.na_ext_mM), 1e-9)
+    k_i = max(float(config.metabolism.k_i_mM), 1e-9)
+    na_i_rest = na_ext / np.exp((ena_target * _F_CONST) / (_R_GAS * t_kelvin * 1000.0))
+    k_o_rest = k_i * np.exp((ek_target * _F_CONST) / (_R_GAS * t_kelvin * 1000.0))
+    if not np.isfinite(na_i_rest):
+        na_i_rest = float(config.metabolism.na_i_rest_mM)
+    if not np.isfinite(k_o_rest):
+        k_o_rest = float(config.metabolism.k_o_rest_mM)
+    na_i_rest = min(max(na_i_rest, 1.0), 80.0)
+    k_o_rest = min(max(k_o_rest, 1.0), 30.0)
+    return float(na_i_rest), float(k_o_rest)
+
 @dataclass
 class GateInfo:
     name: str
@@ -149,8 +175,9 @@ class ChannelRegistry:
             
         # Динамика АТФ (metabolism) - LAST variable in state vector
         if config.metabolism.enable_dynamic_atp:
+            na_i_rest, k_o_rest = derive_dynamic_atp_rest_ions(config)
             y0_list.append(np.full(N, config.metabolism.atp_max_mM))
-            y0_list.append(np.full(N, config.metabolism.na_i_rest_mM))
-            y0_list.append(np.full(N, config.metabolism.k_o_rest_mM))
+            y0_list.append(np.full(N, na_i_rest))
+            y0_list.append(np.full(N, k_o_rest))
 
         return np.concatenate(y0_list)

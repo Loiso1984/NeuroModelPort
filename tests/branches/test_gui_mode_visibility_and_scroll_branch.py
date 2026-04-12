@@ -41,6 +41,18 @@ def test_mode_controls_follow_preset_code_visibility():
         win.close()
 
 
+def test_sweep_param_control_is_visible_and_editable():
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    try:
+        app.processEvents()
+        assert hasattr(win, "_sweep_param_combo")
+        assert win._sweep_param_combo.isEditable()
+        assert win._sweep_param_combo.currentText() == "stim.Iext"
+    finally:
+        win.close()
+
+
 def test_oscilloscope_plot_stack_is_scrollable():
     _ = QApplication.instance() or QApplication([])
     osc = OscilloscopeWidget()

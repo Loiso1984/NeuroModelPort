@@ -78,9 +78,11 @@ def test_secondary_inhibition_reduces_spiking():
     dual = DualStimulationConfig()
     dual.enabled = True
     dual.secondary_location = "soma"
-    # Use slow inhibitory kinetics to enforce sustained reduction of excitability.
-    dual.secondary_stim_type = "GABAB"
-    dual.secondary_Iext = 10.0
+    # Use explicit hyperpolarizing current clamp on the secondary channel.
+    # This keeps the branch focused on dual-stimulation plumbing rather than on
+    # the exact kinetics of a specific synaptic receptor model.
+    dual.secondary_stim_type = "const"
+    dual.secondary_Iext = -8.0
     dual.secondary_start = 0.0
     dual.secondary_duration = cfg_inh.stim.t_sim
     cfg_inh.dual_stimulation = dual

@@ -61,7 +61,7 @@ class PydanticFormWidget(QWidget):
         widget.setSingleStep(step)
 
     def _build_form(self):
-        for field_name, field_info in self.instance.model_fields.items():
+        for field_name, field_info in type(self.instance).model_fields.items():
             field_type = field_info.annotation
             val = getattr(self.instance, field_name)
             origin = get_origin(field_type)

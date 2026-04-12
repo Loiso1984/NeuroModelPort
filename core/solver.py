@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
-from core.channels import ChannelRegistry
+from core.channels import ChannelRegistry, derive_dynamic_atp_rest_ions
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import (
     rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS,
@@ -47,6 +47,13 @@ def _resolve_stochastic_seed(cfg, noise_sigma: float, stoch_gating: bool) -> int
         noise_sigma,
         stoch_gating,
     )
+
+
+def _resolve_dynamic_atp_rest_values(cfg) -> tuple[float, float]:
+    """Use preset-consistent Na_i/K_o rest values whenever dynamic ATP is enabled."""
+    if bool(getattr(cfg.metabolism, "enable_dynamic_atp", False)):
+        return derive_dynamic_atp_rest_ions(cfg)
+    return float(cfg.metabolism.na_i_rest_mM), float(cfg.metabolism.k_o_rest_mM)
 
 
 def _set_nested_attr(obj, path: str, val: float):
@@ -142,6 +149,7 @@ class SimulationResult:
         self.atp_level = None
         if int(offsets.off_atp) >= 0:
             self.atp_level = y[int(offsets.off_atp):int(offsets.off_atp) + n_comp, :]
+        self.atp = self.atp_level
 
         self.na_i = None
         if int(offsets.off_na_i) >= 0:
@@ -418,6 +426,7 @@ class NeuronSolver:
         from core.stochastic_rng import get_rng
         rng = get_rng()
         rng_state = rng.get_state()['state'] if (cfg.stim.stoch_gating or cfg.stim.noise_sigma > 0) else None
+        na_i_rest_mM, k_o_rest_mM = _resolve_dynamic_atp_rest_values(cfg)
 
         rhs_values = {
             "n_comp": n_comp,
@@ -476,10 +485,10 @@ class NeuronSolver:
             "katp_kd_atp_mM": cfg.metabolism.katp_kd_atp_mM,
             "atp_max_mM": cfg.metabolism.atp_max_mM,
             "atp_synthesis_rate": cfg.metabolism.atp_synthesis_rate,
-            "na_i_rest_mM": cfg.metabolism.na_i_rest_mM,
+            "na_i_rest_mM": na_i_rest_mM,
             "na_ext_mM": cfg.metabolism.na_ext_mM,
             "k_i_mM": cfg.metabolism.k_i_mM,
-            "k_o_rest_mM": cfg.metabolism.k_o_rest_mM,
+            "k_o_rest_mM": k_o_rest_mM,
             "ion_drift_gain": cfg.metabolism.ion_drift_gain,
             "k_o_clearance_tau_ms": cfg.metabolism.k_o_clearance_tau_ms,
             "stype": stype,
@@ -1078,6 +1087,8 @@ class NeuronSolver:
                 seed_hash=seed_hash_2
             )
 
+        na_i_rest_mM, k_o_rest_mM = _resolve_dynamic_atp_rest_values(cfg)
+
         physics = create_physics_params(
             n_comp              = np.int32(n_comp),
             en_ih               = bool(cc.enable_Ih),
@@ -1115,10 +1126,10 @@ class NeuronSolver:
             katp_kd_atp_mM      = float(cfg.metabolism.katp_kd_atp_mM),
             atp_max_mM          = float(cfg.metabolism.atp_max_mM),
             atp_synthesis_rate  = float(cfg.metabolism.atp_synthesis_rate),
-            na_i_rest_mM        = float(cfg.metabolism.na_i_rest_mM),
+            na_i_rest_mM        = float(na_i_rest_mM),
             na_ext_mM           = float(cfg.metabolism.na_ext_mM),
             k_i_mM              = float(cfg.metabolism.k_i_mM),
-            k_o_rest_mM         = float(cfg.metabolism.k_o_rest_mM),
+            k_o_rest_mM         = float(k_o_rest_mM),
             ion_drift_gain      = float(cfg.metabolism.ion_drift_gain),
             k_o_clearance_tau_ms = float(cfg.metabolism.k_o_clearance_tau_ms),
             stype               = np.int32(stype),

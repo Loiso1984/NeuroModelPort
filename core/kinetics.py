@@ -95,6 +95,10 @@ def _lut_interp(V, lut):
     float64
         Interpolated value
     """
+    # Guard against solver blow-ups before any float->int cast.
+    if not np.isfinite(V):
+        return lut[N_V // 2]
+
     # Clamp to LUT range
     if V <= V_MIN:
         return lut[0]

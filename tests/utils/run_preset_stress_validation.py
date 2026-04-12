@@ -119,12 +119,16 @@ def _expected_ranges_for_preset(name: str, reference: dict) -> dict[str, tuple[f
     }
 
 
-def _preset_param_sanity(cfg) -> list[str]:
+def _preset_param_sanity(cfg, preset_name: str) -> list[str]:
     ch = cfg.channels
     mc = cfg.morphology
     issues: list[str] = []
-    if not (ch.gNa_max > 0 and ch.gK_max > 0 and ch.gL > 0):
+    preset_l = preset_name.lower()
+    passive_ok = "passive cable" in preset_l
+    if not passive_ok and not (ch.gNa_max > 0 and ch.gK_max > 0 and ch.gL > 0):
         issues.append("non-positive core conductance in preset")
+    if passive_ok and not (ch.gL > 0):
+        issues.append("passive cable must retain positive leak conductance")
     if not (ch.Cm > 0):
         issues.append("non-positive membrane capacitance")
     if not (0.0 < mc.Ra < 5000.0):
@@ -154,7 +158,8 @@ def _run_case(
     cfg.stim.dt_eval = float(dt_eval_ms)
     cfg.env.T_celsius = float(temp_c)
     cfg.stim.noise_sigma = float(noise_sigma)
-    param_issues = _preset_param_sanity(cfg)
+    cfg.stim.jacobian_mode = "native_hines"
+    param_issues = _preset_param_sanity(cfg, preset)
 
     notes: list[str] = []
     if param_issues:

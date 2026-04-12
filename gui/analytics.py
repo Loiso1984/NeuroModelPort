@@ -1362,8 +1362,8 @@ class AnalyticsWidget(QTabWidget):
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(4)
         hint = QLabel(
-            "How to read: this scan tracks when a control parameter moves the cell from rest into tonic spiking, bursting, or block. "
-            "Peaks show branch structure; rate and spike-count panels help separate true oscillation from isolated responses."
+            "How to read: sweep one control parameter and watch where the cell leaves rest, enters tonic spiking, switches into burst-prone behavior, or falls into depolarization block. "
+            "Peak branches show the geometric structure, while rate and spike-count panels tell you whether the branch represents sustained firing or only isolated events."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#A6ADC8; font-size:11px;")
@@ -1395,12 +1395,15 @@ class AnalyticsWidget(QTabWidget):
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(4)
         hint = QLabel(
-            "How to read: the upper-left panel shows representative traces, while the lower panels convert the same sweep into peak voltage, firing-rate, and spike-count summaries. "
-            "For an f-I run, focus on onset current, slope, and adaptation across the sweep."
+            "How to read: the upper-left panel shows representative traces, while the lower panels turn the same sweep into peak-voltage, firing-rate, and spike-count summaries. "
+            "For an f-I run, focus on the first spiking sample (approximate rheobase), the slope of the firing-rate curve, and whether the spike count keeps growing or collapses."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#A6ADC8; font-size:11px;")
-        self._sweep_summary_label = QLabel("Run a sweep or dedicated f-I scan to populate this dashboard.")
+        self._sweep_summary_label = QLabel(
+            "Run a sweep or dedicated f-I scan to populate this dashboard. "
+            "For stim.Iext, the first active sample is your practical threshold estimate."
+        )
         self._sweep_summary_label.setWordWrap(True)
         self._sweep_summary_label.setStyleSheet("color:#BAC2DE; font-size:11px;")
         controls_layout.addWidget(hint)
@@ -3215,7 +3218,8 @@ class AnalyticsWidget(QTabWidget):
 
         ax3.set_xlabel('Time (ms)')
         ax3.set_ylabel('Power (uW/cm^2)')
-        ax3.set_title(f'Instantaneous power   ATP ~= {result.atp_estimate:.3e} nmol/cm^2')
+        atp_mode = "dynamic ATP state" if getattr(result, 'atp_level', None) is not None else "pump-cost proxy only"
+        ax3.set_title(f'Instantaneous power   ATP ~= {result.atp_estimate:.3e} nmol/cm^2   [{atp_mode}]')
         ax3.legend(fontsize=7, loc='upper left', bbox_to_anchor=(0, 1), framealpha=0.8)
         ax3.grid(alpha=0.3)
         ax3.relim()
@@ -3247,7 +3251,7 @@ class AnalyticsWidget(QTabWidget):
                 _set_line_data(self._atp_line)
             ax4.set_ylabel('[ATP]i (mM)')
             ax4.set_xlabel('Time (ms)')
-            ax4.set_title('Intracellular ATP Pool (Metabolic Breath)')
+            ax4.set_title('Intracellular ATP Pool (Dynamic Metabolic State)')
             ax4.legend(fontsize=8, loc='upper right')
             ax4.grid(alpha=0.3)
             ax4.relim()
@@ -3259,8 +3263,8 @@ class AnalyticsWidget(QTabWidget):
                 ax4,
                 self._energy_texts,
                 "atp_disabled",
-                'Enable dynamic ATP in config\nto see metabolic dynamics',
-                title='Intracellular ATP Pool (Disabled)',
+                'Enable dynamic ATP in config\nto see ATP state dynamics.\nThe row above still shows a pump-cost proxy.',
+                title='Intracellular ATP Pool (Proxy Only)',
                 xlabel='Time (ms)',
                 ylabel='[ATP]i (mM)',
             )
@@ -3807,7 +3811,11 @@ class AnalyticsWidget(QTabWidget):
                     onset_txt = f"onset ≈ {onset_val:.2f}"
                 else:
                     onset_txt = "no spike onset in range"
-                mode_txt = "Dedicated f-I readout" if str(param_name).lower() == "iext" else "General sweep"
+                mode_txt = (
+                    "Dedicated f-I readout"
+                    if str(param_name).lower() in {"iext", "stim.iext"}
+                    else "General sweep"
+                )
                 self._sweep_summary_label.setText(
                     f"{mode_txt}: {param_name} scan with {len(param_vals)} successful samples, {onset_txt}, "
                     f"peak firing rate ≈ {max_freq:.1f} Hz, max spike count {max_spikes}."

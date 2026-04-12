@@ -379,7 +379,7 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'event_times_arr_2': np.zeros(0, dtype=np.float64),
         'n_events_2': np.int32(0),
         'dyn_atp': False,
-        'g_katp_max': 5.0,
+        'g_katp_max': 0.0,
         'katp_kd_atp_mM': 0.5,
         'atp_max_mM': 2.0,
         'atp_synthesis_rate': 0.6,
@@ -387,7 +387,7 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'na_ext_mM': 145.0,
         'k_i_mM': 140.0,
         'k_o_rest_mM': 3.5,
-        'ion_drift_gain': 2.5e-5,
+        'ion_drift_gain': 0.0,
         'k_o_clearance_tau_ms': 800.0,
         'e_rev_syn_primary': 0.0,      # Default: 0 mV (excitatory)
         'e_rev_syn_secondary': -75.0,  # Default: -75 mV (inhibitory)

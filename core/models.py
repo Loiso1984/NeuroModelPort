@@ -114,13 +114,13 @@ class MetabolismParams(BaseModel):
     enable_dynamic_atp: bool = Field(default=False, description="Enable dynamic ATP metabolism")
     atp_max_mM: float = Field(default=2.0, ge=0.1, le=10.0, description="Maximum ATP concentration (mM, literature: 2-5 mM)")
     atp_synthesis_rate: float = Field(default=0.6, ge=0.0, description="ATP synthesis rate (nmol/cmÂ˛/s)")
-    g_katp_max: float = Field(default=5.0, ge=0.0, description="Max K_ATP channel conductance (mS/cmÂ˛)")
+    g_katp_max: float = Field(default=0.0, ge=0.0, description="Max K_ATP channel conductance (mS/cmÂ˛)")
     katp_kd_atp_mM: float = Field(default=0.5, ge=0.01, description="ATP concentration for half-activation of K_ATP (mM)")
     na_i_rest_mM: float = Field(default=12.0, ge=1.0, le=40.0, description="Resting intracellular sodium (mM) for ATP-linked ion-gradient mode")
     na_ext_mM: float = Field(default=145.0, ge=50.0, le=200.0, description="Extracellular sodium (mM) for ATP-linked ion-gradient mode")
     k_i_mM: float = Field(default=140.0, ge=50.0, le=200.0, description="Intracellular potassium (mM) for ATP-linked ion-gradient mode")
     k_o_rest_mM: float = Field(default=3.5, ge=1.0, le=15.0, description="Resting extracellular potassium (mM) for ATP-linked ion-gradient mode")
-    ion_drift_gain: float = Field(default=2.5e-5, ge=0.0, le=1e-2, description="Phenomenological conversion from membrane current to Na_i / K_o drift")
+    ion_drift_gain: float = Field(default=0.0, ge=0.0, le=1e-2, description="Phenomenological conversion from membrane current to Na_i / K_o drift")
     k_o_clearance_tau_ms: float = Field(default=800.0, ge=1.0, le=20000.0, description="Extracellular potassium clearance time constant (ms)")
 
 
@@ -362,14 +362,14 @@ class AnalysisParams(BaseModel):
 
     # Bifurcation
     run_bifurcation: bool  = Field(default=False)
-    bif_param:       str   = Field(default="Iext",  description="Bifurcation parameter name")
+    bif_param:       str   = Field(default="stim.Iext",  description="Bifurcation parameter path, e.g. stim.Iext or channels.gNa_max")
     bif_min:         float = Field(default=0.0)
     bif_max:         float = Field(default=25.0)
     bif_steps:       int   = Field(default=60,  ge=2)
 
     # Parameter Sweep
     run_sweep:    bool  = Field(default=False, description="Run parametric sweep")
-    sweep_param:  str   = Field(default="Iext", description="Parameter to sweep")
+    sweep_param:  str   = Field(default="stim.Iext", description="Parameter path to sweep, e.g. stim.Iext or channels.gNa_max")
     sweep_min:    float = Field(default=0.0,   description="Sweep start value")
     sweep_max:    float = Field(default=20.0,  description="Sweep end value")
     sweep_steps:  int   = Field(default=20,   ge=2, description="Number of sweep steps")

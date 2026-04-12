@@ -95,6 +95,22 @@ _LIVE_PARAM_SUGGESTIONS = [
     "calcium.B_Ca",
     "stim.pulse_dur",
 ]
+_SWEEP_PARAM_SUGGESTIONS = [
+    "stim.Iext",
+    "channels.gNa_max",
+    "channels.gK_max",
+    "channels.gL",
+    "channels.gTCa_max",
+    "channels.gIh_max",
+    "channels.gIM_max",
+    "channels.gSK_max",
+    "calcium.tau_Ca",
+    "calcium.B_Ca",
+    "metabolism.atp_synthesis_rate",
+    "metabolism.g_katp_max",
+    "env.T_celsius",
+    "morphology.Ra",
+]
 _LIVE_SLIDER_STEPS = 1000   # integer slider resolution
 
 
@@ -962,6 +978,30 @@ class MainWindow(QMainWindow):
         self.grp_ana = QGroupBox("Analysis Settings")
         ana_layout = QVBoxLayout(self.grp_ana)
         ana_layout.setSpacing(4)
+        sweep_selector = QWidget()
+        sweep_selector_layout = QVBoxLayout(sweep_selector)
+        sweep_selector_layout.setContentsMargins(0, 0, 0, 0)
+        sweep_selector_layout.setSpacing(4)
+        sweep_row = QHBoxLayout()
+        sweep_row.setContentsMargins(0, 0, 0, 0)
+        sweep_row.setSpacing(6)
+        sweep_row.addWidget(QLabel("Sweep parameter:"))
+        self._sweep_param_combo = QComboBox()
+        self._sweep_param_combo.setEditable(True)
+        self._sweep_param_combo.addItems(_SWEEP_PARAM_SUGGESTIONS)
+        self._sweep_param_combo.setCurrentText(self._canonical_sweep_param(self.config_manager.config.analysis.sweep_param))
+        self._sweep_param_combo.currentTextChanged.connect(self._on_sweep_param_changed)
+        sweep_row.addWidget(self._sweep_param_combo, 1)
+        btn_iext = QPushButton("Use Iext")
+        btn_iext.setMaximumWidth(80)
+        btn_iext.clicked.connect(lambda: self._sweep_param_combo.setCurrentText("stim.Iext"))
+        sweep_row.addWidget(btn_iext)
+        sweep_selector_layout.addLayout(sweep_row)
+        self._sweep_param_help = QLabel("")
+        self._sweep_param_help.setWordWrap(True)
+        self._sweep_param_help.setStyleSheet("color:#BAC2DE; font-size:11px;")
+        sweep_selector_layout.addWidget(self._sweep_param_help)
+        ana_layout.addWidget(sweep_selector)
         ana_layout.addWidget(self.form_ana)
         c_layout.addWidget(self.grp_ana)
 
@@ -1059,6 +1099,58 @@ class MainWindow(QMainWindow):
         if not hasattr(obj, parts[-1]):
             return None, None
         return obj, parts[-1]
+
+    def _canonical_sweep_param(self, path: str) -> str:
+        text = str(path or "").strip()
+        if not text:
+            return "stim.Iext"
+        if "." in text:
+            return text
+        if hasattr(self.config_manager.config, text):
+            return text
+        for section in (
+            "stim",
+            "channels",
+            "env",
+            "morphology",
+            "calcium",
+            "metabolism",
+            "analysis",
+            "preset_modes",
+            "stim_location",
+            "dendritic_filter",
+        ):
+            obj = getattr(self.config_manager.config, section, None)
+            if obj is not None and hasattr(obj, text):
+                return f"{section}.{text}"
+        return text
+
+    def _refresh_sweep_param_ui(self):
+        if not hasattr(self, "_sweep_param_combo"):
+            return
+        ana = self.config_manager.config.analysis
+        canonical = self._canonical_sweep_param(getattr(ana, "sweep_param", "stim.Iext"))
+        ana.sweep_param = canonical
+        self._sweep_param_combo.blockSignals(True)
+        self._sweep_param_combo.setCurrentText(canonical)
+        self._sweep_param_combo.blockSignals(False)
+        obj, attr = self._resolve_param(canonical)
+        if obj is None or attr is None:
+            self._sweep_param_help.setText(
+                "Enter a dotted path like stim.Iext or channels.gNa_max. Short names are accepted and normalized."
+            )
+            self._sweep_param_combo.setStyleSheet("color:#F38BA8;")
+        else:
+            current_value = getattr(obj, attr)
+            self._sweep_param_help.setText(
+                f"Current target: {canonical} = {float(current_value):.4g}. "
+                "This field drives both the top SWEEP button and the dedicated f-I run."
+            )
+            self._sweep_param_combo.setStyleSheet("")
+
+    def _on_sweep_param_changed(self, text: str):
+        self.config_manager.config.analysis.sweep_param = self._canonical_sweep_param(text)
+        self._refresh_sweep_param_ui()
 
     def _on_live_combo_changed(self, row_i: int):
         """Sync slider position to new parameter's current value."""
@@ -1667,25 +1759,31 @@ class MainWindow(QMainWindow):
             _apply_hypoxia_mode,
             _apply_ach_mode,
             _apply_purkinje_mode,
+            _apply_anesthesia_mode,
+            _apply_dravet_mode,
         )
 
         # Apply only mode-specific overlay without wiping user customizations.
-        preset_name = self.config_manager.current_preset_name.lower()
+        preset_code = self.config_manager.current_preset_name.split(":", 1)[0].strip().upper()
         cfg = self.config_manager.config
         
-        if "thalamic" in preset_name or "k:" in preset_name:
+        if preset_code == "K":
             _apply_k_mode(cfg)
-        elif "hippocampal" in preset_name or "l:" in preset_name:
+        elif preset_code == "B":
             _apply_l5_mode(cfg)
-        elif "cholinergic" in preset_name or "r:" in preset_name:
+        elif preset_code == "R":
             _apply_ach_mode(cfg)
-        elif "purkinje" in preset_name or "e:" in preset_name:
+        elif preset_code == "E":
             _apply_purkinje_mode(cfg)
-        elif "alzheimer" in preset_name or "n:" in preset_name:
+        elif preset_code == "N":
             _apply_alzheimer_mode(cfg)
-        elif "hypoxia" in preset_name or "o:" in preset_name:
+        elif preset_code == "O":
             _apply_hypoxia_mode(cfg)
-        
+        elif preset_code == "G":
+            _apply_anesthesia_mode(cfg)
+        elif preset_code == "S":
+            _apply_dravet_mode(cfg)
+
         self._refresh_all_forms()
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         self.topology.draw_neuron(
@@ -2005,6 +2103,8 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────
     def run_sweep(self):
         ana = self.config_manager.config.analysis
+        ana.sweep_param = self._canonical_sweep_param(getattr(ana, 'sweep_param', 'stim.Iext'))
+        self._refresh_sweep_param_ui()
         if not hasattr(ana, 'sweep_param') or not ana.sweep_param:
             QMessageBox.warning(self, "Sweep",
                                 "Set sweep_param in the Analysis section first.")
@@ -2032,7 +2132,8 @@ class MainWindow(QMainWindow):
 
     def run_fi_curve(self):
         ana = self.config_manager.config.analysis
-        ana.sweep_param = "Iext"
+        ana.sweep_param = "stim.Iext"
+        self._refresh_sweep_param_ui()
         if not np.isfinite(float(ana.sweep_min)) or float(ana.sweep_min) < 0.0:
             ana.sweep_min = 0.0
         if not np.isfinite(float(ana.sweep_max)) or float(ana.sweep_max) <= float(ana.sweep_min):
@@ -2322,6 +2423,7 @@ class MainWindow(QMainWindow):
             self.form_ana.refresh()
         if hasattr(self, 'form_preset_modes'):
             self.form_preset_modes.refresh()
+        self._refresh_sweep_param_ui()
 
 
 # ─────────────────────────────────────────────────────────────────────

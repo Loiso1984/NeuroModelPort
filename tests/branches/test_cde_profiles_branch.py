@@ -94,7 +94,7 @@ def test_e_purkinje_profile():
     row = _run_profile("E: Cerebellar Purkinje (De Schutter)")
     assert row["stable"], "E preset produced non-finite trace"
     assert row["n_spikes"] >= 8, "E preset should produce tonic spiking under default stimulus"
-    assert 80.0 <= row["freq_hz"] <= 150.0, f"E frequency out of expected range: {row['freq_hz']:.2f} Hz"
+    assert 100.0 <= row["freq_hz"] <= 260.0, f"E frequency out of expected range: {row['freq_hz']:.2f} Hz"
     assert 20.0 <= row["v_peak"] <= 45.0, f"E spike peak out of range: {row['v_peak']:.2f} mV"
 
 

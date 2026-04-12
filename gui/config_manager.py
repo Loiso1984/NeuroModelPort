@@ -119,6 +119,9 @@ class ConfigManager(QObject):
             new_cfg = FullModelConfig.load_from_file(file_path)
             
             # Helper to recursively update Pydantic models without replacing them
+            def _is_pydantic_model_instance(value) -> bool:
+                return hasattr(type(value), "model_fields")
+
             def _deep_update(target_obj, source_obj):
                 """
                 Recursively copy values from `source_obj` into `target_obj`, updating fields in-place.
@@ -129,12 +132,12 @@ class ConfigManager(QObject):
                     target_obj: A Pydantic model instance to be updated in-place.
                     source_obj: A Pydantic model instance supplying values to copy.
                 """
-                for field_name in target_obj.model_fields:
+                for field_name in type(target_obj).model_fields:
                     target_val = getattr(target_obj, field_name)
                     source_val = getattr(source_obj, field_name)
                     
                     # If it's a nested Pydantic model, recurse
-                    if hasattr(target_val, 'model_fields') and hasattr(source_val, 'model_fields'):
+                    if _is_pydantic_model_instance(target_val) and _is_pydantic_model_instance(source_val):
                         _deep_update(target_val, source_val)
                     else:
                         # Otherwise, just set the value (preserves the parent object identity)

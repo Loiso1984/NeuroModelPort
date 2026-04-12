@@ -28,10 +28,10 @@ from .physics_params import PhysicsParams, unpack_conductances, unpack_env_param
 from .rhs import (
     get_stim_current, get_event_driven_conductance,
     _get_syn_reversal, nernst_ca_ion, nernst_na_ion, nernst_k_ion, nmda_mg_block,
-    CA_I_MIN_M_M, CA_I_MAX_M_M, CA_DAMPING_FACTOR,
+    CA_I_MIN_M_M, CA_I_MAX_M_M, effective_sk_calcium, clamp_calcium_derivative,
     NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
     ATP_MIN_M_M, ATP_MAX_M_M, ATP_PUMP_FAILURE_THRESHOLD,
-    compute_na_k_pump_current, _pump_availability_from_atp,
+    compute_na_k_pump_current, compute_na_k_pump_drive,
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
 from .hines import hines_solve, update_gates_analytic
@@ -590,13 +590,13 @@ def run_native_loop(
                 ca_val = y[off_ca + i]
                 tau_ca_safe = max(tau_ca, 1e-12)
                 dca = b_ca[i] * i_ca_influx_v[i] - (ca_val - ca_rest) / tau_ca_safe
-                ca_at_min = (ca_val <= CA_I_MIN_M_M and dca < 0.0)
-                ca_at_max = (ca_val >= CA_I_MAX_M_M and dca > 0.0)
-                if ca_at_min:
-                    dca = abs(dca) * CA_DAMPING_FACTOR
-                elif ca_at_max:
-                    dca = -abs(dca) * CA_DAMPING_FACTOR
-                y[off_ca + i] = ca_val + dt * dca
+                dca = clamp_calcium_derivative(ca_val, dca)
+                y_new = ca_val + dt * dca
+                if y_new < CA_I_MIN_M_M:
+                    y_new = CA_I_MIN_M_M
+                elif y_new > CA_I_MAX_M_M:
+                    y_new = CA_I_MAX_M_M
+                y[off_ca + i] = y_new
 
         # ATP dynamics (simple Euler integration)
         if dyn_atp:
@@ -629,9 +629,9 @@ def run_native_loop(
                 i_k_total += g_katp * (vi - ek_i)
 
                 i_pump = compute_na_k_pump_current(i_na, atp_val)
-                pump_consumption = max(0.0, i_pump) * _NA_PUMP_FACTOR
+                pump_consumption = compute_na_k_pump_drive(i_na, atp_val) * _NA_PUMP_FACTOR
                 if dyn_ca:
-                    pump_consumption += abs(i_ca_influx_v[i]) * _CA_PUMP_FACTOR
+                    pump_consumption += max(0.0, i_ca_influx_v[i]) * _CA_PUMP_FACTOR
 
                 datp = atp_synthesis_rate * 0.001 - pump_consumption
                 if atp_val < ATP_PUMP_FAILURE_THRESHOLD:

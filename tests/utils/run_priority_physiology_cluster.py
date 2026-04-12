@@ -30,7 +30,13 @@ TASKS = [
     },
     {
         "id": "f_conduction_extended",
-        "cmd": ["tests/utils/run_f_conduction_extended.py", "--temps", "37", "--i-scales", "1.0", "--ra-scales", "1.0"],
+        "cmd": [
+            "tests/utils/run_f_conduction_extended.py",
+            "--temps", "37",
+            "--i-mults", "1.0",
+            "--f-ra-mults", "1.0",
+            "--f-gl-mults", "1.0",
+        ],
         "priority": "critical",
     },
 ]
