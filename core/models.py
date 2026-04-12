@@ -426,6 +426,10 @@ class PresetModeParams(BaseModel):
         default='normal',
         description="Dravet syndrome mode: normal or febrile (temperature-triggered failure)"
     )
+    anesthesia_mode: Literal['partial_block', 'full_block'] = Field(
+        default='full_block',
+        description="Local anesthesia mode: partial Na block or full conduction block"
+    )
     delay_target: Literal['Soma', 'AIS', 'Terminal', 'Custom'] = Field(
         default='Terminal',
         description="Default delay target for conduction visualizations"

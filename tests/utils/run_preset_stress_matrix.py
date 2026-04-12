@@ -12,7 +12,9 @@ and records stability/guard metrics for quick physiology-first screening.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -24,6 +26,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.models import FullModelConfig
 from core.presets import apply_preset, get_preset_names
 from core.solver import NeuronSolver
+
+
+def _warm_native_hines() -> dict:
+    """Compile the hot native path once before matrix execution."""
+    t0 = time.time()
+    try:
+        cfg = FullModelConfig()
+        apply_preset(cfg, "A: Squid Giant Axon (HH 1952)")
+        cfg.stim.t_sim = 20.0
+        cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "native_hines"
+        NeuronSolver(cfg).run_single()
+        return {"status": "pass", "elapsed_sec": time.time() - t0}
+    except Exception as exc:
+        return {"status": "warn", "elapsed_sec": time.time() - t0, "message": f"{type(exc).__name__}: {exc}"}
 
 
 def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.ndarray:
@@ -117,6 +134,8 @@ def main() -> int:
     parser.add_argument("--t-sim", type=float, default=140.0)
     parser.add_argument("--dt-eval", type=float, default=0.3)
     parser.add_argument("--multicomp", action="store_true", help="Run full multi-comp matrix (much slower).")
+    parser.add_argument("--workers", type=int, default=max(1, min(4, (os.cpu_count() or 2))), help="Parallel worker count for independent matrix cases.")
+    parser.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True, help="Warm the native solver once before matrix execution.")
     parser.add_argument("--output", type=str, default="_test_results/preset_stress_matrix.json")
     args = parser.parse_args()
 
@@ -124,28 +143,35 @@ def main() -> int:
     temps = _parse_csv_floats(args.temps)
     presets = get_preset_names()
 
-    rows = []
+    warmup = _warm_native_hines() if args.warmup else {"status": "skipped", "elapsed_sec": 0.0}
+    cases = []
     t0 = time.time()
     total = len(presets) * len(i_scales) * len(temps)
-    done = 0
     for preset in presets:
         for i_scale in i_scales:
             for t_c in temps:
-                row = _evaluate_case(
-                    preset,
-                    i_scale,
-                    t_c,
-                    t_sim=args.t_sim,
-                    dt_eval=args.dt_eval,
-                    single_comp_proxy=not args.multicomp,
-                )
-                rows.append(row)
-                done += 1
-                print(
-                    f"{done:03d}/{total} {preset[:28]:28} "
-                    f"Ix={i_scale:.2f} T={t_c:.1f}C guard={row['guard_ok']} spikes={row['n_spikes']}",
-                    flush=True,
-                )
+                cases.append((preset, i_scale, t_c))
+
+    def _run_matrix_case(case):
+        preset, i_scale, t_c = case
+        return _evaluate_case(
+            preset,
+            i_scale,
+            t_c,
+            t_sim=args.t_sim,
+            dt_eval=args.dt_eval,
+            single_comp_proxy=not args.multicomp,
+        )
+
+    rows = []
+    with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as pool:
+        for done, row in enumerate(pool.map(_run_matrix_case, cases), start=1):
+            rows.append(row)
+            print(
+                f"{done:03d}/{total} {row['preset'][:28]:28} "
+                f"Ix={row['i_scale']:.2f} T={row['t_celsius']:.1f}C guard={row['guard_ok']} spikes={row['n_spikes']}",
+                flush=True,
+            )
 
     n_ok = int(sum(1 for r in rows if r["guard_ok"]))
     by_preset = {}
@@ -165,6 +191,8 @@ def main() -> int:
             "t_sim": float(args.t_sim),
             "dt_eval": float(args.dt_eval),
             "multicomp": bool(args.multicomp),
+            "workers": int(args.workers),
+            "warmup": warmup,
         },
         "summary": {
             "total_cases": len(rows),

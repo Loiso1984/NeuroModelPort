@@ -25,11 +25,11 @@ def _make_im_config(jacobian_mode: str = "sparse_fd") -> FullModelConfig:
     cfg.channels.EL = -54.387
     # Enable M-current
     cfg.channels.enable_IM = True
-    cfg.channels.gIM_max = 0.5  # Strong enough to see adaptation effect
+    cfg.channels.gIM_max = 0.5  # Keep conductance modest; adaptation is exposed by stronger drive below.
     # Long pulse to observe adaptation
     cfg.stim.t_sim = 200.0
     cfg.stim.stim_type = "pulse"
-    cfg.stim.Iext = 15.0
+    cfg.stim.Iext = 35.0
     cfg.stim.pulse_start = 10.0
     cfg.stim.pulse_dur = 180.0
     cfg.stim.jacobian_mode = jacobian_mode

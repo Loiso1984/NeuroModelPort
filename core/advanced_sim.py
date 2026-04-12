@@ -4,6 +4,7 @@ core/advanced_sim.py - Advanced Simulation Modes v10.0
 Ports Scilab SWEEP, ANA_SD_CURVE, ANA_EXCMAP modes.
 """
 import copy
+from dataclasses import dataclass, field
 import numpy as np
 
 from core.analysis import detect_spikes
@@ -11,12 +12,22 @@ from core.models import FullModelConfig
 from core.solver import NeuronSolver
 
 
+@dataclass
 class LightweightResult:
     """Minimal sweep payload to avoid retaining full SimulationResult objects."""
 
-    t: np.ndarray
-    v_soma: np.ndarray
-    config: FullModelConfig
+    t: np.ndarray = field(default_factory=lambda: np.array([]))
+    v_soma: np.ndarray = field(default_factory=lambda: np.array([]))
+    config: FullModelConfig | None = None
+
+
+def run_euler_maruyama(config: FullModelConfig):
+    """Compatibility shim for legacy stochastic tests.
+
+    The project now routes stochastic dynamics through the primary solver path,
+    so this helper simply delegates to `NeuronSolver.run_single()`.
+    """
+    return NeuronSolver(config).run_single()
 
 
 # -----------------------------------------------------------------------------

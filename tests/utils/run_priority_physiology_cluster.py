@@ -7,7 +7,9 @@ produces a single JSON artifact summarizing pass/warn/fail outcomes.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -32,6 +34,30 @@ TASKS = [
         "priority": "critical",
     },
 ]
+
+
+def _warm_native_hines() -> dict:
+    """Compile the hot native-solver path once before heavy validation utilities."""
+    t0 = time.perf_counter()
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+        from core.models import FullModelConfig
+        from core.presets import apply_preset
+        from core.solver import NeuronSolver
+
+        cfg = FullModelConfig()
+        apply_preset(cfg, "A: Squid Giant Axon (HH 1952)")
+        cfg.stim.t_sim = 20.0
+        cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "native_hines"
+        NeuronSolver(cfg).run_single()
+        return {"status": "pass", "elapsed_sec": time.perf_counter() - t0}
+    except Exception as exc:
+        return {
+            "status": "warn",
+            "elapsed_sec": time.perf_counter() - t0,
+            "message": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def _run_task(task: dict) -> dict:
@@ -60,9 +86,13 @@ def main() -> int:
     parser.add_argument("--fail-on-warn", action="store_true", help="Treat warning outcomes as failure")
     parser.add_argument("--strict-critical", action="store_true", help="Require critical-priority tasks to pass")
     parser.add_argument("--output", type=str, default=str(ARTIFACT), help="Output JSON artifact path")
+    parser.add_argument("--workers", type=int, default=max(1, min(3, (os.cpu_count() or 2))), help="Parallel worker count for independent utility tasks")
+    parser.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True, help="Warm the native solver once before spawning utility tasks")
     args = parser.parse_args()
 
-    rows = [_run_task(task) for task in TASKS]
+    warmup = _warm_native_hines() if args.warmup else {"status": "skipped", "elapsed_sec": 0.0}
+    with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as pool:
+        rows = list(pool.map(_run_task, TASKS))
     fail_count = int(sum(1 for r in rows if r["status"] == "fail"))
     warn_count = int(sum(1 for r in rows if r["status"] == "warn"))
     pass_count = int(sum(1 for r in rows if r["status"] == "pass"))
@@ -87,8 +117,10 @@ def main() -> int:
         "pass_count": pass_count,
         "warn_count": warn_count,
         "fail_count": fail_count,
+        "warmup": warmup,
         "critical_ok": critical_ok,
         "strict_critical": bool(args.strict_critical),
+        "workers": int(args.workers),
         "next_actions": next_actions,
         "all_ok": all_ok,
         "fail_on_warn": bool(args.fail_on_warn),

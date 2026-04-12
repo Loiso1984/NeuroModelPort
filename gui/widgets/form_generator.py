@@ -24,15 +24,29 @@ class PydanticFormWidget(QWidget):
         layout.addWidget(self.group_box)
         self._build_form()
 
+    def _is_read_only_field(self, field_info, field_name: str) -> bool:
+        if field_name in self.hidden_fields:
+            return True
+        if bool(getattr(field_info, 'frozen', False)):
+            return True
+        extra = getattr(field_info, 'json_schema_extra', None) or {}
+        if isinstance(extra, dict):
+            if bool(extra.get('readOnly')) or bool(extra.get('readonly')) or bool(extra.get('read_only')):
+                return True
+        return False
+
     def _build_form(self):
         for field_name, field_info in self.instance.model_fields.items():
-            if field_name in self.hidden_fields:
-                continue
             field_type = field_info.annotation
             val = getattr(self.instance, field_name)
             origin = get_origin(field_type)
+            is_read_only = self._is_read_only_field(field_info, field_name)
 
-            if field_type is bool:
+            if is_read_only:
+                w = QLabel(str(val))
+                w.setWordWrap(True)
+                w.setStyleSheet("color:#BAC2DE; background:#11111B; border:1px solid #45475A; padding:4px; border-radius:4px;")
+            elif field_type is bool:
                 w = QCheckBox()
                 w.setChecked(val)
                 w.toggled.connect(lambda v, n=field_name: self._set_field(n, v))
@@ -111,7 +125,12 @@ class PydanticFormWidget(QWidget):
                 val = getattr(self.instance, name)
                 widget.blockSignals(True)
                 try:
-                    if isinstance(widget, QCheckBox):
+                    if isinstance(widget, QLabel):
+                        if isinstance(val, list):
+                            widget.setText(", ".join(str(x) for x in val) if val else "[]")
+                        else:
+                            widget.setText(str(val))
+                    elif isinstance(widget, QCheckBox):
                         widget.setChecked(val)
                     elif isinstance(widget, QComboBox):
                         widget.setCurrentText(str(val))

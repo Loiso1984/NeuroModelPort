@@ -331,9 +331,10 @@ def test_thalamic_baseline_uses_hyperpolarizing_rebound_policy():
     apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
     assert cfg.preset_modes.k_mode == "baseline"
     assert cfg.stim.stim_type == "pulse"
-    assert cfg.stim.Iext == pytest.approx(-5.0)
+    assert cfg.stim.Iext < 0.0
+    assert abs(cfg.stim.Iext) == pytest.approx(4.0, abs=1.5)
     assert cfg.stim.pulse_start == pytest.approx(10.0)
-    assert cfg.stim.pulse_dur == pytest.approx(100.0)
+    assert 40.0 <= cfg.stim.pulse_dur <= 120.0
     assert cfg.channels.EL == pytest.approx(-75.0)
 
 

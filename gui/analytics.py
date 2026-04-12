@@ -56,7 +56,7 @@ except ImportError:
 CHAN_COLORS = {
     'Na':   '#DC3232', 'K':   '#3264DC', 'Leak': '#32A050',
     'Ih':   '#9632C8', 'ICa': '#FA9600', 'IA':   '#00C8C8',
-    'SK':   '#C83296', 'KATP': '#F9E2AF',
+    'SK':   '#C83296', 'KATP': '#F9E2AF', 'PumpNaK': '#E5C890',
 }
 GATE_COLORS = {
     'm': '#FF4040', 'h': '#4080FF', 'n': '#40C040',
@@ -108,6 +108,73 @@ def _ensure_shape_compatible(arr, t, name="array"):
         logging.warning(f"{name} shape {arr.shape} doesn't match t {t.shape}, skipping")
         return None
     return arr
+
+
+def _set_line_data(line, x=None, y=None, *, name: str = "line") -> bool:
+    """Safely update a matplotlib Line2D with shape-matched finite arrays."""
+    if line is None:
+        return False
+    if x is None or y is None:
+        line.set_data([], [])
+        return False
+    x_arr = np.asarray(x, dtype=float).reshape(-1)
+    y_arr = np.asarray(y, dtype=float).reshape(-1)
+    if x_arr.size == 0 or y_arr.size == 0:
+        line.set_data([], [])
+        return False
+    if x_arr.size != y_arr.size:
+        n = min(x_arr.size, y_arr.size)
+        logging.warning("%s received mismatched data shapes x=%s y=%s; truncating to %d", name, x_arr.shape, y_arr.shape, n)
+        x_arr = x_arr[:n]
+        y_arr = y_arr[:n]
+    finite = np.isfinite(x_arr) & np.isfinite(y_arr)
+    if not np.any(finite):
+        line.set_data([], [])
+        return False
+    line.set_data(x_arr[finite], y_arr[finite])
+    return True
+
+
+def _set_constant_line(line, value: float, axis: str = "y") -> bool:
+    """Safely update an axhline/axvline artist."""
+    if line is None or not np.isfinite(value):
+        if line is not None:
+            line.set_visible(False)
+        return False
+    if axis == "x":
+        line.set_data([value, value], [0.0, 1.0])
+    else:
+        line.set_data([0.0, 1.0], [value, value])
+    line.set_visible(True)
+    return True
+
+
+def _axis_message(ax, cache: dict, key: str, message: str, *, title: str = "", xlabel: str = "", ylabel: str = ""):
+    """Persistent empty-state message without clearing the whole axis object."""
+    text = cache.get(key)
+    if text is None:
+        text = ax.text(
+            0.5, 0.5, message,
+            ha='center', va='center', transform=ax.transAxes,
+            fontsize=11, color='#89B4FA',
+            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.88, edgecolor='#45475A'),
+        )
+        cache[key] = text
+    else:
+        text.set_text(message)
+        text.set_visible(True)
+    _configure_ax_interactive(ax, title=title, xlabel=xlabel, ylabel=ylabel, show_legend=False)
+
+
+def _hide_axis_message(cache: dict, key: str):
+    text = cache.get(key)
+    if text is not None:
+        text.set_visible(False)
+
+
+def _set_canvas_margins(fig, *, left=0.08, right=0.97, top=0.95, bottom=0.08, hspace=0.38, wspace=0.24):
+    """Prefer manual subplot spacing over repeated tight_layout calls on complex figures."""
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, hspace=hspace, wspace=wspace)
 
 
 def _tab_with_toolbar(
@@ -309,6 +376,8 @@ class FullscreenPlotViewer(QMainWindow):
             # Create crosshair lines
             v_line = ax.axvline(color='#A6ADC8', linestyle='--', linewidth=1, alpha=0.7)
             h_line = ax.axhline(color='#A6ADC8', linestyle='--', linewidth=1, alpha=0.7)
+            v_line.set_visible(False)
+            h_line.set_visible(False)
             self.crosshair_lines.append((ax, v_line, h_line))
         
         # Connect mouse events
@@ -318,6 +387,10 @@ class FullscreenPlotViewer(QMainWindow):
     def _on_mouse_move(self, event):
         """Handle mouse movement for crosshair display."""
         if event.inaxes is None:
+            for _, v_line, h_line in self.crosshair_lines:
+                v_line.set_visible(False)
+                h_line.set_visible(False)
+            self.canvas.draw_idle()
             return
         
         ax = event.inaxes
@@ -326,12 +399,11 @@ class FullscreenPlotViewer(QMainWindow):
         # Update crosshair lines for this axis
         for axis, v_line, h_line in self.crosshair_lines:
             if axis == ax:
-                v_line.set_xdata([x, x])
-                h_line.set_ydata([y, y])
+                _set_constant_line(v_line, x, axis="x")
+                _set_constant_line(h_line, y, axis="y")
             else:
-                # Hide crosshair on other axes
-                v_line.set_xdata([])
-                h_line.set_ydata([])
+                v_line.set_visible(False)
+                h_line.set_visible(False)
         
         # Update title with coordinates
         xlabel = ax.get_xlabel()
@@ -548,16 +620,17 @@ class AnalyticsWidget(QTabWidget):
         if fig_name and fig_name in self._tab_figures:
             fig = self._tab_figures[fig_name]
             if fig:
-                # Add text annotation to the figure
-                for ax in fig.axes:
-                    ax.clear()
-                    ax.text(0.5, 0.5, f"Warning: {missing_data} required", 
-                            transform=ax.transAxes, ha='center', va='center',
-                            fontsize=14, fontweight='bold', color='#dc3545',
-                            bbox=dict(boxstyle='round', facecolor='#f8d7da', alpha=0.8))
-                    ax.set_xlim(0, 1)
-                    ax.set_ylim(0, 1)
-                    ax.axis('off')
+                if not hasattr(self, '_tab_error_texts'):
+                    self._tab_error_texts = {}
+                for idx, ax in enumerate(fig.axes):
+                    key = f"{fig_name}_{idx}_missing"
+                    _axis_message(
+                        ax,
+                        self._tab_error_texts,
+                        key,
+                        f"Warning: {missing_data} required",
+                        title="Data unavailable",
+                    )
                 fig.canvas.draw_idle()
     
     def _show_updater_error_message(self, tab_title: str, error: str):
@@ -570,16 +643,17 @@ class AnalyticsWidget(QTabWidget):
         if fig_name and fig_name in self._tab_figures:
             fig = self._tab_figures[fig_name]
             if fig:
-                # Add text annotation to the figure
-                for ax in fig.axes:
-                    ax.clear()
-                    ax.text(0.5, 0.5, f"Warning: update failed\n{error}", 
-                            transform=ax.transAxes, ha='center', va='center',
-                            fontsize=12, fontweight='bold', color='#dc3545',
-                            bbox=dict(boxstyle='round', facecolor='#f8d7da', alpha=0.8))
-                    ax.set_xlim(0, 1)
-                    ax.set_ylim(0, 1)
-                    ax.axis('off')
+                if not hasattr(self, '_tab_error_texts'):
+                    self._tab_error_texts = {}
+                for idx, ax in enumerate(fig.axes):
+                    key = f"{fig_name}_{idx}_update_error"
+                    _axis_message(
+                        ax,
+                        self._tab_error_texts,
+                        key,
+                        f"Warning: update failed\n{error}",
+                        title="Updater error",
+                    )
                 fig.canvas.draw_idle()
     
     def _on_tab_changed(self, index: int):
@@ -767,7 +841,7 @@ class AnalyticsWidget(QTabWidget):
     #  PER-TAB BUILDER METHODS  (called once on first visit)
     # ─────────────────────────────────────────────────────────────────
     def _build_tab_gates(self) -> QWidget:
-        # Refactored: Single large plot with checkboxes for toggling individual gates
+        # Scrollable dashboard with persistent plot + toggle controls.
         self.fig_gates, cvs = _mpl_fig(1, 1)
         self.ax_gates = self.fig_gates.add_subplot(1, 1, 1)
         _set_tight_layout_engine(self.fig_gates, pad=2.5)
@@ -797,14 +871,15 @@ class AnalyticsWidget(QTabWidget):
         scroll_area.setMaximumHeight(200)  # Increased from 150 to reduce clutter
         scroll_area.setStyleSheet("QScrollArea { border: none; }")
 
-        # Main layout: plot on top, checkboxes below
-        from PySide6.QtWidgets import QVBoxLayout
-        main_layout = QVBoxLayout()
-        main_layout.addWidget(cvs, 1)
-        main_layout.addWidget(scroll_area, 0)
-
-        main_widget = QWidget()
-        main_widget.setLayout(main_layout)
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(4)
+        hint = QLabel("How to read: compare gate opening/closure against V_soma. Fast gates shape the upstroke; slow gates shape adaptation and rebound.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#A6ADC8; font-size:11px;")
+        controls_layout.addWidget(hint)
+        controls_layout.addWidget(scroll_area)
 
         # Store references
         self._gates_checkbox_container = checkbox_widget
@@ -813,16 +888,18 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Gate Dynamics'),
-            extra_widget=scroll_area,
-            min_canvas_height=620,
+            extra_widget=controls,
+            extra_widget_position="above",
+            scroll_canvas=True,
+            min_canvas_height=980,
         )
 
     def _build_tab_spike_mech(self) -> QWidget:
-        self.fig_spike_mech, cvs = _mpl_fig(5, 1, figsize=(15, 24))
+        self.fig_spike_mech, cvs = _mpl_fig(5, 1, figsize=(11, 24), tight=False)
         self.ax_spike_mech = [self.fig_spike_mech.add_subplot(5, 1, k) for k in range(1, 6)]
         for ax in self.ax_spike_mech:
             ax.set_navigate(True)
-        _set_tight_layout_engine(self.fig_spike_mech, pad=3.5, h_pad=1.1, w_pad=0.8)
+        _set_canvas_margins(self.fig_spike_mech, left=0.08, right=0.97, top=0.97, bottom=0.05, hspace=0.55, wspace=0.28)
         self.cvs_spike_mech = cvs
         self._tab_figures['Spike Mechanism'] = self.fig_spike_mech
         self._spike_mech_selected = 0
@@ -869,7 +946,7 @@ class AnalyticsWidget(QTabWidget):
         )
 
     def _build_tab_currents(self) -> QWidget:
-        # Refactored: Single large plot with checkboxes for toggling individual currents
+        # Scrollable dashboard with persistent plot + toggle controls.
         self.fig_currents, cvs = _mpl_fig(1, 1)
         self.ax_currents = self.fig_currents.add_subplot(1, 1, 1)
         _set_tight_layout_engine(self.fig_currents, pad=2.5)
@@ -899,14 +976,15 @@ class AnalyticsWidget(QTabWidget):
         scroll_area.setMaximumHeight(200)  # Increased from 150 to reduce clutter
         scroll_area.setStyleSheet("QScrollArea { border: none; }")
 
-        # Main layout: plot on top, checkboxes below
-        from PySide6.QtWidgets import QVBoxLayout
-        main_layout = QVBoxLayout()
-        main_layout.addWidget(cvs, 1)
-        main_layout.addWidget(scroll_area, 0)
-
-        main_widget = QWidget()
-        main_widget.setLayout(main_layout)
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(4)
+        hint = QLabel("How to read: inward and outward channel currents compete to shape threshold, repolarization, burst support, and energetic cost.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#A6ADC8; font-size:11px;")
+        controls_layout.addWidget(hint)
+        controls_layout.addWidget(scroll_area)
 
         # Store references
         self._currents_checkbox_container = checkbox_widget
@@ -915,8 +993,10 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Currents'),
-            extra_widget=scroll_area,
-            min_canvas_height=620,
+            extra_widget=controls,
+            extra_widget_position="above",
+            scroll_canvas=True,
+            min_canvas_height=980,
         )
 
     def _build_tab_phase(self) -> QWidget:
@@ -954,28 +1034,34 @@ class AnalyticsWidget(QTabWidget):
         slider_layout.insertWidget(1, self._phase_y_combo)
         slider_layout.insertSpacing(2, 15)
 
-        slider_label = QLabel("Time Window (ms):")
+        slider_label = QLabel("Window:")
         slider_label.setStyleSheet("color:#CDD6F4; font-size:11px;")
         slider_layout.addWidget(slider_label)
 
-        self._phase_time_slider = QSlider(Qt.Orientation.Horizontal)
-        self._phase_time_slider.setRange(0, 100)
-        self._phase_time_slider.setValue(100)
-        self._phase_time_slider.setStyleSheet("""
-            QSlider {
-                background:#313244; border:1px solid #45475A;
-                padding:2px; height:20px;
-            }
-            QSlider::handle:horizontal {
-                background:#89B4FA; width:16px; margin:-4px 0; border-radius:8px;
-            }
-        """)
-        self._phase_time_slider.valueChanged.connect(self._on_phase_time_slider_changed)
-        slider_layout.addWidget(self._phase_time_slider, 1)
+        self._phase_time_start = QSlider(Qt.Orientation.Horizontal)
+        self._phase_time_end = QSlider(Qt.Orientation.Horizontal)
+        for slider, accent in ((self._phase_time_start, "#F9E2AF"), (self._phase_time_end, "#89B4FA")):
+            slider.setRange(0, 100)
+            slider.setValue(0 if slider is self._phase_time_start else 100)
+            slider.setStyleSheet(f"""
+                QSlider {{
+                    background:#313244; border:1px solid #45475A;
+                    padding:2px; height:20px;
+                }}
+                QSlider::handle:horizontal {{
+                    background:{accent}; width:16px; margin:-4px 0; border-radius:8px;
+                }}
+            """)
+            slider.valueChanged.connect(self._on_phase_time_slider_changed)
+
+        slider_layout.addWidget(QLabel("Start"))
+        slider_layout.addWidget(self._phase_time_start, 1)
+        slider_layout.addWidget(QLabel("End"))
+        slider_layout.addWidget(self._phase_time_end, 1)
 
         self._phase_time_label = QLabel("All")
         self._phase_time_label.setStyleSheet("color:#CBA6F7; font-size:11px;")
-        self._phase_time_label.setFixedWidth(50)
+        self._phase_time_label.setMinimumWidth(120)
         slider_layout.addWidget(self._phase_time_label)
 
         # Store slider widget reference
@@ -987,11 +1073,15 @@ class AnalyticsWidget(QTabWidget):
         def _cleanup_slider():
             try:
                 obj = self_ref()
-                if obj is not None and hasattr(obj, '_phase_time_slider'):
+                if obj is not None and hasattr(obj, '_phase_time_start') and hasattr(obj, '_phase_time_end'):
                     try:
-                        obj._phase_time_slider.valueChanged.disconnect(obj._on_phase_time_slider_changed)
+                        obj._phase_time_start.valueChanged.disconnect(obj._on_phase_time_slider_changed)
                     except (RuntimeError, TypeError, SystemError):
                         pass  # Widget already destroyed or signal not connected
+                    try:
+                        obj._phase_time_end.valueChanged.disconnect(obj._on_phase_time_slider_changed)
+                    except (RuntimeError, TypeError, SystemError):
+                        pass
             except Exception:
                 pass  # Ignore any errors during cleanup
         slider_widget.destroyed.connect(_cleanup_slider)
@@ -1051,6 +1141,7 @@ class AnalyticsWidget(QTabWidget):
         self._atp_line = None
         self._atp_threshold_line = None
         self._pie_chart = None
+        self._pie_no_data_text = None
         return _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Energy & Balance'),
@@ -1066,6 +1157,12 @@ class AnalyticsWidget(QTabWidget):
         self._tab_figures['Spike Shape'] = self.fig_spike_shape
         self._spike_shape_init_done = False
         self._spike_shape_lines: dict[str, object] = {}
+        self._spike_shape_dynamic_artists: list[object] = []
+        self._spike_shape_empty_text = self.ax_spike_shape.text(
+            0.5, 0.5, '', ha='center', va='center', transform=self.ax_spike_shape.transAxes,
+            fontsize=12, color='#89B4FA', visible=False,
+            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.85, edgecolor='#45475A')
+        )
 
         # Add spike selection controls for handling hundreds of spikes
         from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpinBox, QComboBox, QCheckBox
@@ -1154,7 +1251,7 @@ class AnalyticsWidget(QTabWidget):
             fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Shape'),
             extra_widget=selection_widget,
             scroll_canvas=True,
-            min_canvas_height=680,
+            min_canvas_height=920,
         )
 
     def _on_spike_shape_quick_changed(self, text: str):
@@ -1213,6 +1310,13 @@ class AnalyticsWidget(QTabWidget):
         self._tab_figures['Poincare (ISI)'] = self.fig_poincare
         self._poincare_init_done = False
         self._poincare_lines: dict[str, object] = {}
+        self._poincare_lines["diag"] = self.ax_poincare.plot([], [], 'r--', lw=1.5, alpha=0.5, label='ISI[n+1] = ISI[n]')[0]
+        self._poincare_lines["scatter"] = self.ax_poincare.scatter([], [], c=[], cmap='viridis', s=30, alpha=0.7, edgecolors='k', linewidth=0.5)
+        self._poincare_lines["msg"] = self.ax_poincare.text(
+            0.5, 0.5, '', ha='center', va='center', transform=self.ax_poincare.transAxes,
+            fontsize=12, color='#89B4FA', visible=False,
+            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.85, edgecolor='#45475A')
+        )
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Poincare (ISI)'))
 
     def _build_tab_bif(self) -> QWidget:
@@ -1277,9 +1381,9 @@ class AnalyticsWidget(QTabWidget):
         return self.tab_excmap
 
     def _build_tab_spectro(self) -> QWidget:
-        self.fig_spectro, cvs = _mpl_fig(2, 1)
+        self.fig_spectro, cvs = _mpl_fig(2, 1, tight=False)
         self.ax_spectro = [self.fig_spectro.add_subplot(2, 1, k) for k in range(1, 3)]
-        _set_tight_layout_engine(self.fig_spectro, pad=2.5)
+        _set_canvas_margins(self.fig_spectro, left=0.08, right=0.94, top=0.95, bottom=0.08, hspace=0.34, wspace=0.20)
         self.cvs_spectro = cvs
         self._tab_figures['Spectrogram'] = self.fig_spectro
         self._spectro_cbar = None
@@ -1294,9 +1398,9 @@ class AnalyticsWidget(QTabWidget):
         )
 
     def _build_tab_impedance(self) -> QWidget:
-        self.fig_impedance, cvs = _mpl_fig(2, 1)
+        self.fig_impedance, cvs = _mpl_fig(2, 1, tight=False)
         self.ax_impedance = [self.fig_impedance.add_subplot(2, 1, k) for k in range(1, 3)]
-        _set_tight_layout_engine(self.fig_impedance, pad=2.5)
+        _set_canvas_margins(self.fig_impedance, left=0.08, right=0.96, top=0.95, bottom=0.08, hspace=0.36, wspace=0.20)
         self.cvs_impedance = cvs
         self._tab_figures['Impedance'] = self.fig_impedance
         self._impedance_lines: dict[str, object] = {}
@@ -1304,15 +1408,17 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Impedance'))
 
     def _build_tab_chaos(self) -> QWidget:
-        self.fig_chaos, cvs = _mpl_fig(3, 1, figsize=(14, 18))
+        self.fig_chaos, cvs = _mpl_fig(3, 1, figsize=(11, 18), tight=False)
         self.ax_chaos = [self.fig_chaos.add_subplot(3, 1, k) for k in range(1, 4)]
-        _set_tight_layout_engine(self.fig_chaos, pad=3.0, h_pad=1.0, w_pad=0.8)
+        _set_canvas_margins(self.fig_chaos, left=0.08, right=0.97, top=0.96, bottom=0.06, hspace=0.42, wspace=0.24)
         self.cvs_chaos = cvs
         self._tab_figures['Chaos & LLE'] = self.fig_chaos
         self._chaos_force_enabled = getattr(self, '_chaos_force_enabled', False)
         self._chaos_selected_k = 0
         self._chaos_selected_pair = 0
         self._chaos_analysis = None
+        self._chaos_texts: dict[str, object] = {}
+        self._chaos_dynamic_artists: list[object] = []
         self._chaos_click_cid = self.cvs_chaos.mpl_connect('button_press_event', self._on_chaos_plot_clicked)
 
         from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpinBox, QDoubleSpinBox, QComboBox
@@ -1968,9 +2074,9 @@ class AnalyticsWidget(QTabWidget):
         v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
         if v_soma_safe is not None:
             t_v, v_v = _downsample_xy(np.asarray(t, dtype=float), np.asarray(v_soma_safe, dtype=float), max_points=3000)
-            self._gates_line_v.set_data(t_v, v_v)
+            _set_line_data(self._gates_line_v, t_v, v_v, name="gates_v_soma")
         else:
-            self._gates_line_v.set_data([], [])
+            _set_line_data(self._gates_line_v)
         self._gates_line_v.set_visible(True)
 
         # Plot gates on secondary axis
@@ -1989,9 +2095,9 @@ class AnalyticsWidget(QTabWidget):
             trace_safe = _ensure_shape_compatible(trace, t, f"gate_{name}")
             if trace_safe is not None:
                 tg, yg = _downsample_xy(np.asarray(t, dtype=float), np.asarray(trace_safe, dtype=float), max_points=3000)
-                line.set_data(tg, yg)
+                _set_line_data(line, tg, yg, name=f"gate_{name}")
             else:
-                line.set_data([], [])
+                _set_line_data(line)
             line.set_visible(is_visible)
             if is_visible:
                 visible_names.add(name)
@@ -2009,7 +2115,7 @@ class AnalyticsWidget(QTabWidget):
 
         _configure_ax_interactive(
             ax,
-            title="Gate Dynamics (toggle with checkboxes below)",
+            title="Gate Dynamics",
             xlabel="Time (ms)",
             ylabel="V (mV)",
             show_legend=True,
@@ -2081,9 +2187,9 @@ class AnalyticsWidget(QTabWidget):
         v_soma_safe = _ensure_shape_compatible(result.v_soma, t, "v_soma")
         if v_soma_safe is not None:
             t_v, v_v = _downsample_xy(np.asarray(t, dtype=float), np.asarray(v_soma_safe, dtype=float), max_points=3000)
-            self._currents_line_v.set_data(t_v, v_v)
+            _set_line_data(self._currents_line_v, t_v, v_v, name="currents_v_soma")
         else:
-            self._currents_line_v.set_data([], [])
+            _set_line_data(self._currents_line_v)
         self._currents_line_v.set_visible(True)
 
         # Plot currents on secondary axis
@@ -2102,9 +2208,9 @@ class AnalyticsWidget(QTabWidget):
             curr_safe = _ensure_shape_compatible(curr, t, f"current_{name}")
             if curr_safe is not None:
                 tc, yc = _downsample_xy(np.asarray(t, dtype=float), np.asarray(curr_safe, dtype=float), max_points=3000)
-                line.set_data(tc, yc)
+                _set_line_data(line, tc, yc, name=f"current_{name}")
             else:
-                line.set_data([], [])
+                _set_line_data(line)
             line.set_visible(is_visible)
             if is_visible:
                 visible_names.add(name)
@@ -2121,7 +2227,7 @@ class AnalyticsWidget(QTabWidget):
 
         _configure_ax_interactive(
             ax,
-            title="Channel Currents (toggle with checkboxes below)",
+            title="Channel Currents",
             xlabel="Time (ms)",
             ylabel="V (mV)",
             show_legend=True,
@@ -2180,10 +2286,14 @@ class AnalyticsWidget(QTabWidget):
         if not hasattr(self, 'ax_chaos'):
             return
         titles = ['Trajectory divergence', 'Delay-embedded attractor', 'Source trace']
+        for artist in getattr(self, '_chaos_dynamic_artists', []):
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self._chaos_dynamic_artists = []
         for ax, title in zip(self.ax_chaos, titles):
-            ax.clear()
-            ax.text(0.5, 0.5, message, ha='center', va='center', transform=ax.transAxes, fontsize=11, color='#89B4FA')
-            _configure_ax_interactive(ax, title=title, xlabel='', ylabel='', show_legend=False)
+            _axis_message(ax, self._chaos_texts, f"msg_{title}", message, title=title)
         self.cvs_chaos.draw_idle()
 
     def _update_chaos(self, result, stats: dict):
@@ -2209,7 +2319,14 @@ class AnalyticsWidget(QTabWidget):
             return
 
         ax_div, ax_attr, ax_trace = self.ax_chaos
-        ax_div.clear(); ax_attr.clear(); ax_trace.clear()
+        for artist in getattr(self, '_chaos_dynamic_artists', []):
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self._chaos_dynamic_artists = []
+        for key in ('msg_Trajectory divergence', 'msg_Delay-embedded attractor', 'msg_Source trace'):
+            _hide_axis_message(self._chaos_texts, key)
 
         self._chaos_selected_k = max(0, min(len(t_div) - 1, int(getattr(self, '_chaos_selected_k', 0))))
         selected_pair = self._chaos_pair_index(analysis)
@@ -2217,51 +2334,53 @@ class AnalyticsWidget(QTabWidget):
         k = self._chaos_selected_k
         pair_span = min(k + 1, max(1, emb.shape[0] - max(pair_i[selected_pair], pair_j[selected_pair])))
 
-        ax_div.plot(t_div, div, color='#89B4FA', lw=2.0, label='Trajectory divergence')
-        ax_div.scatter([t_div[k]], [div[k]], color='#F9E2AF', s=60, zorder=5, label='Selected horizon')
+        self._chaos_dynamic_artists.append(ax_div.plot(t_div, div, color='#89B4FA', lw=2.0, label='Trajectory divergence')[0])
+        self._chaos_dynamic_artists.append(ax_div.scatter([t_div[k]], [div[k]], color='#F9E2AF', s=60, zorder=5, label='Selected horizon'))
         fit_start = params['fit_start_ms']; fit_end = params['fit_end_ms']
-        ax_div.axvspan(fit_start, fit_end, color='#A6E3A1', alpha=0.12, label='Fit window')
+        self._chaos_dynamic_artists.append(ax_div.axvspan(fit_start, fit_end, color='#A6E3A1', alpha=0.12, label='Fit window'))
         fit_mask = (t_div >= fit_start) & (t_div <= fit_end)
         if np.sum(fit_mask) >= 2 and np.isfinite(analysis.get('lle_per_ms', np.nan)):
             coeffs = np.polyfit(t_div[fit_mask], div[fit_mask], 1)
-            ax_div.plot(t_div[fit_mask], np.polyval(coeffs, t_div[fit_mask]), '--', color='#F38BA8', lw=2.0, label='Linear trend')
+            self._chaos_dynamic_artists.append(ax_div.plot(t_div[fit_mask], np.polyval(coeffs, t_div[fit_mask]), '--', color='#F38BA8', lw=2.0, label='Linear trend')[0])
         summary = (
             f"class = {stats.get('lyapunov_class', 'n/a')}\n"
             f"LLE = {analysis.get('lle_per_s', np.nan):+.3f} 1/s\n"
             f"pairs = {int(analysis.get('valid_pairs', 0))}\n"
             f"selected k = {k}"
         )
-        ax_div.text(0.02, 0.96, summary, transform=ax_div.transAxes, ha='left', va='top', fontsize=10,
-                    bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4')
+        self._chaos_dynamic_artists.append(
+            ax_div.text(0.02, 0.96, summary, transform=ax_div.transAxes, ha='left', va='top', fontsize=10,
+                        bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4')
+        )
         _configure_ax_interactive(ax_div, title='Lyapunov Exponent (Trajectory Separation)', xlabel='Time (ms)', ylabel='Log divergence ln(d)', show_legend=True)
 
         dims = emb.shape[1]
         x_idx = 0
         y_idx = 1 if dims > 1 else 0
-        ax_attr.plot(emb[:, x_idx], emb[:, y_idx], color='#6C7086', alpha=0.4, lw=1.0, label='Embedded attractor')
+        self._chaos_dynamic_artists.append(ax_attr.plot(emb[:, x_idx], emb[:, y_idx], color='#6C7086', alpha=0.4, lw=1.0, label='Embedded attractor')[0])
         i0 = int(pair_i[selected_pair])
         j0 = int(pair_j[selected_pair])
         seg_i = emb[i0:i0 + pair_span]
         seg_j = emb[j0:j0 + pair_span]
         if len(seg_i) > 0:
-            ax_attr.plot(seg_i[:, x_idx], seg_i[:, y_idx], color='#89B4FA', lw=2.5, label='Reference segment')
-            ax_attr.scatter([seg_i[0, x_idx]], [seg_i[0, y_idx]], color='#89B4FA', s=50)
+            self._chaos_dynamic_artists.append(ax_attr.plot(seg_i[:, x_idx], seg_i[:, y_idx], color='#89B4FA', lw=2.5, label='Reference segment')[0])
+            self._chaos_dynamic_artists.append(ax_attr.scatter([seg_i[0, x_idx]], [seg_i[0, y_idx]], color='#89B4FA', s=50))
         if len(seg_j) > 0:
-            ax_attr.plot(seg_j[:, x_idx], seg_j[:, y_idx], color='#F38BA8', lw=2.5, label='Neighbor segment')
-            ax_attr.scatter([seg_j[0, x_idx]], [seg_j[0, y_idx]], color='#F38BA8', s=50)
+            self._chaos_dynamic_artists.append(ax_attr.plot(seg_j[:, x_idx], seg_j[:, y_idx], color='#F38BA8', lw=2.5, label='Neighbor segment')[0])
+            self._chaos_dynamic_artists.append(ax_attr.scatter([seg_j[0, x_idx]], [seg_j[0, y_idx]], color='#F38BA8', s=50))
         _configure_ax_interactive(ax_attr, title='Delay-embedded attractor and selected pair', xlabel='x(t)', ylabel='x(t + lag)', show_legend=True)
 
         t_full = np.asarray(result.t, dtype=float)
         v_full = np.asarray(result.v_soma, dtype=float)
-        ax_trace.plot(t_full, v_full, color='#89B4FA', lw=1.4, label='V_soma')
+        self._chaos_dynamic_artists.append(ax_trace.plot(t_full, v_full, color='#89B4FA', lw=1.4, label='V_soma')[0])
         dt_ms = float(analysis.get('dt_ms', np.median(np.diff(t_full)) if len(t_full) > 1 else 0.1))
         span_ms = pair_span * dt_ms
         start_i_ms = t_full[min(i0, len(t_full) - 1)]
         start_j_ms = t_full[min(j0, len(t_full) - 1)]
-        ax_trace.axvspan(start_i_ms, start_i_ms + span_ms, color='#89B4FA', alpha=0.18, label='Reference source')
-        ax_trace.axvspan(start_j_ms, start_j_ms + span_ms, color='#F38BA8', alpha=0.18, label='Neighbor source')
-        ax_trace.axvline(start_i_ms + k * dt_ms, color='#89B4FA', ls='--', lw=1.3)
-        ax_trace.axvline(start_j_ms + k * dt_ms, color='#F38BA8', ls='--', lw=1.3)
+        self._chaos_dynamic_artists.append(ax_trace.axvspan(start_i_ms, start_i_ms + span_ms, color='#89B4FA', alpha=0.18, label='Reference source'))
+        self._chaos_dynamic_artists.append(ax_trace.axvspan(start_j_ms, start_j_ms + span_ms, color='#F38BA8', alpha=0.18, label='Neighbor source'))
+        self._chaos_dynamic_artists.append(ax_trace.axvline(start_i_ms + k * dt_ms, color='#89B4FA', ls='--', lw=1.3))
+        self._chaos_dynamic_artists.append(ax_trace.axvline(start_j_ms + k * dt_ms, color='#F38BA8', ls='--', lw=1.3))
         _configure_ax_interactive(ax_trace, title='Time-domain trace with selected divergence segment', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)
 
         self.cvs_chaos.draw_idle()
@@ -2293,6 +2412,36 @@ class AnalyticsWidget(QTabWidget):
         if self._spike_mech_last_result is not None:
             self._update_spike_mechanism(self._spike_mech_last_result, self._spike_mech_last_stats)
 
+    def _reset_spike_mech_axes(self):
+        """Remove dynamic spike-mechanism artists without clearing or recreating axes."""
+        twin_ax = getattr(self, '_spike_mech_twin_ax', None)
+        if twin_ax is not None:
+            try:
+                twin_ax.remove()
+            except Exception:
+                pass
+            self._spike_mech_twin_ax = None
+        for ax in getattr(self, 'ax_spike_mech', []):
+            if ax.get_legend() is not None:
+                ax.get_legend().remove()
+            for artist in list(ax.lines) + list(ax.collections) + list(ax.texts):
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            for patch in list(ax.patches):
+                if patch is ax.patch:
+                    continue
+                try:
+                    patch.remove()
+                except Exception:
+                    pass
+            ax.set_title("")
+            ax.set_xlabel("")
+            ax.set_ylabel("")
+            ax.grid(False)
+            ax.set_axis_on()
+
     def _update_spike_mechanism(self, result, stats: dict):
         if not hasattr(self, 'fig_spike_mech'):
             return
@@ -2303,8 +2452,7 @@ class AnalyticsWidget(QTabWidget):
         t = np.asarray(result.t, dtype=float)
         v = np.asarray(result.v_soma, dtype=float)
         ax1, ax2, ax3, ax4, ax5 = self.ax_spike_mech
-        for ax in self.ax_spike_mech:
-            ax.clear()
+        self._reset_spike_mech_axes()
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
@@ -2344,6 +2492,7 @@ class AnalyticsWidget(QTabWidget):
         dvdt_win = np.gradient(v_win, t_win) if len(t_win) > 1 else np.zeros_like(v_win)
         ax2.plot(t_win, v_win, color='#89B4FA', lw=2.0, label='V aligned to peak')
         ax2b = ax2.twinx()
+        self._spike_mech_twin_ax = ax2b
         ax2b.plot(t_win, dvdt_win, color='#F38BA8', lw=1.5, alpha=0.85, label='dV/dt')
         thr = spike_threshold(v[lo:hi], t[lo:hi]) if len(t[lo:hi]) > 3 else np.nan
         hw = spike_halfwidth(v[lo:hi], t[lo:hi], detect_algorithm='threshold_crossing') if len(t[lo:hi]) > 3 else np.nan
@@ -2596,28 +2745,39 @@ class AnalyticsWidget(QTabWidget):
         gate_t = np.asarray(gates[gate_key])
         self._phase_full_data = (t, V, gate_t, cfg, I_stm, stats, gate_key)
 
-        time_window = None
-        if hasattr(self, '_phase_time_slider') and len(t) > 0:
+        window_start = None
+        window_end = None
+        if hasattr(self, '_phase_time_start') and hasattr(self, '_phase_time_end') and len(t) > 0:
             max_time = int(t[-1])
-            old_max = int(self._phase_time_slider.maximum())
-            cur_val = int(self._phase_time_slider.value())
-            self._phase_time_slider.blockSignals(True)
-            self._phase_time_slider.setRange(0, max_time)
-            if cur_val >= old_max or cur_val > max_time:
-                self._phase_time_slider.setValue(max_time)
-            self._phase_time_slider.blockSignals(False)
-            cur_val = int(self._phase_time_slider.value())
-            if cur_val < max_time:
-                time_window = cur_val
-                self._phase_time_label.setText(f'{cur_val} ms')
+            for slider, default in ((self._phase_time_start, 0), (self._phase_time_end, max_time)):
+                old_max = int(slider.maximum())
+                cur_val = int(slider.value())
+                slider.blockSignals(True)
+                slider.setRange(0, max_time)
+                if cur_val > max_time or (old_max <= 100 and cur_val == old_max):
+                    slider.setValue(default)
+                slider.blockSignals(False)
+            start_val = int(self._phase_time_start.value())
+            end_val = int(self._phase_time_end.value())
+            if end_val < start_val:
+                end_val = start_val
+                self._phase_time_end.blockSignals(True)
+                self._phase_time_end.setValue(end_val)
+                self._phase_time_end.blockSignals(False)
+            if start_val <= 0 and end_val >= max_time:
+                self._phase_time_label.setText("All")
             else:
-                self._phase_time_label.setText('All')
+                self._phase_time_label.setText(f"{start_val}-{end_val} ms")
+                window_start = start_val
+                window_end = end_val
 
-        if time_window is not None and time_window > 0:
-            idx_end = np.searchsorted(t, time_window, side='right')
-            V = V[:idx_end]
-            gate_t = gate_t[:idx_end]
-            t = t[:idx_end]
+        if window_start is not None or window_end is not None:
+            idx_start = 0 if window_start is None else int(np.searchsorted(t, window_start, side='left'))
+            idx_end = len(t) if window_end is None else int(np.searchsorted(t, window_end, side='right'))
+            idx_end = max(idx_start + 1, idx_end)
+            V = V[idx_start:idx_end]
+            gate_t = gate_t[idx_start:idx_end]
+            t = t[idx_start:idx_end]
 
         ax = self.ax_phase
         if not self._phase_lines:
@@ -2696,7 +2856,7 @@ class AnalyticsWidget(QTabWidget):
         ax.set_xlabel('V (mV)', fontsize=11)
         ax.set_ylabel(f'Gate: {gate_key}', fontsize=11)
 
-        title_suffix = f' (0-{time_window} ms)' if time_window is not None else ''
+        title_suffix = f' ({self._phase_time_label.text()})' if hasattr(self, '_phase_time_label') and self._phase_time_label.text() != 'All' else ''
         ax.set_title(f'Phase Plane Trajectory{title_suffix}', fontsize=12, fontweight='bold')
         ax.set_xlim(-100, 60)
         ax.set_ylim(-0.05, 1.05)
@@ -2791,7 +2951,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.set_ylabel('Compartment (soma -> B2 tip)')
         ax2.set_title('Kymograph — Path to Branch 2')
 
-        self.fig_kymo.tight_layout(pad=2.5)
+        _set_canvas_margins(self.fig_kymo, left=0.08, right=0.96, top=0.95, bottom=0.08, hspace=0.32, wspace=0.20)
         self.cvs_kymo.draw_idle()
 
     def _update_energy_balance(self, result):
@@ -2827,9 +2987,9 @@ class AnalyticsWidget(QTabWidget):
         # Final shape check before set_data
         if I_bal.shape != t.shape:
             logging.warning(f"I_bal shape {I_bal.shape} doesn't match t {t.shape}, skipping energy balance error plot")
-            self._balance_lines["abs_err"].set_data([], [])
+            _set_line_data(self._balance_lines["abs_err"])
         else:
-            self._balance_lines["abs_err"].set_data(t, np.abs(I_bal) + 1e-12)
+            _set_line_data(self._balance_lines["abs_err"], t, np.abs(I_bal) + 1e-12, name="energy_balance_error")
         ax1.set_ylabel('|Error| (µA/cmÂ˛)')
         ax1.set_title(f'Current Balance Error (log) — max|error| = {err:.5f} µA/cmÂ˛  '
                       f'{"✓ Good" if err < 0.05 else "⚠ Check solver"}')
@@ -2887,9 +3047,9 @@ class AnalyticsWidget(QTabWidget):
                 self._energy_lines[p_key] = ax3.plot([], [], color=color, lw=1, alpha=0.8, label=f'P_{name}')[0]
             Q_cum_safe = _ensure_shape_compatible(Q_cum, t, f"Q_cum_{name}")
             if Q_cum_safe is not None:
-                self._energy_lines[q_key].set_data(t, Q_cum_safe)
+                _set_line_data(self._energy_lines[q_key], t, Q_cum_safe, name=q_key)
             else:
-                self._energy_lines[q_key].set_data([], [])
+                _set_line_data(self._energy_lines[q_key])
             # Ensure v_soma is 1D array compatible with curr_arr
             v_soma = np.asarray(result.v_soma, dtype=float)
             if v_soma.ndim != 1:
@@ -2907,16 +3067,16 @@ class AnalyticsWidget(QTabWidget):
             P = np.abs(curr_arr * (v_soma - E_rev))
             P_safe = _ensure_shape_compatible(P, t, f"P_{name}")
             if P_safe is not None:
-                self._energy_lines[p_key].set_data(t, P_safe)
+                _set_line_data(self._energy_lines[p_key], t, P_safe, name=p_key)
                 P_total += P_safe
             else:
-                self._energy_lines[p_key].set_data([], [])
+                _set_line_data(self._energy_lines[p_key])
 
         for key, line in self._energy_lines.items():
             if key.startswith("Q_") and key not in active_q:
-                line.set_data([], [])
+                _set_line_data(line)
             if key.startswith("P_") and key not in active_p and key != "P_total":
-                line.set_data([], [])
+                _set_line_data(line)
 
         ax2.set_ylabel('Cumulative charge (nC/cm^2)')
         ax2.set_title('Energy - Cumulative ionic charge transfer')
@@ -2931,9 +3091,9 @@ class AnalyticsWidget(QTabWidget):
             self._energy_lines["P_total"] = ax3.plot([], [], 'k-', lw=2, label='Total', zorder=5)[0]
         P_total_safe = _ensure_shape_compatible(P_total, t, "P_total")
         if P_total_safe is not None:
-            self._energy_lines["P_total"].set_data(t, P_total_safe)
+            _set_line_data(self._energy_lines["P_total"], t, P_total_safe, name="P_total")
         else:
-            self._energy_lines["P_total"].set_data([], [])
+            _set_line_data(self._energy_lines["P_total"])
 
         ax3.set_xlabel('Time (ms)')
         ax3.set_ylabel('Power (uW/cm^2)')
@@ -2962,10 +3122,10 @@ class AnalyticsWidget(QTabWidget):
 
             atp_data_safe = _ensure_shape_compatible(atp_data, t, "atp_data")
             if atp_data_safe is not None:
-                self._atp_line.set_data(t, atp_data_safe)
+                _set_line_data(self._atp_line, t, atp_data_safe, name="atp_level")
                 ax4.set_ylim(0, max(3.0, np.max(atp_data_safe) * 1.1))
             else:
-                self._atp_line.set_data([], [])
+                _set_line_data(self._atp_line)
             ax4.set_ylabel('[ATP]i (mM)')
             ax4.set_xlabel('Time (ms)')
             ax4.set_title('Intracellular ATP Pool (Metabolic Breath)')
@@ -2978,7 +3138,7 @@ class AnalyticsWidget(QTabWidget):
             ax4.set_ylabel('[ATP]i (mM)')
             ax4.set_title('Intracellular ATP Pool (Disabled)')
         
-        self.fig_energy.subplots_adjust(left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
+        _set_canvas_margins(self.fig_energy, left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
 
         # Add crosshair and zoom to time-series axes only (not pie chart)
         for i, ax in enumerate(self.ax_energy[:4]):  # First 4 axes (time-series plots)
@@ -3025,8 +3185,8 @@ class AnalyticsWidget(QTabWidget):
                     except Exception:
                         pass
             self._pie_chart = None
-
-        ax5.cla()
+        if self._pie_no_data_text is not None:
+            self._pie_no_data_text.set_visible(False)
 
         # Create new pie chart in top-right corner
         if total > 0:
@@ -3040,11 +3200,18 @@ class AnalyticsWidget(QTabWidget):
                 textprops={'fontsize': 9},
             )
         else:
-            ax5.text(0.5, 0.5, 'No ATP data', ha='center', va='center', transform=ax5.transAxes)
+            if self._pie_no_data_text is None:
+                self._pie_no_data_text = ax5.text(
+                    0.5, 0.5, 'No ATP data', ha='center', va='center',
+                    transform=ax5.transAxes, fontsize=10, color='#BAC2DE'
+                )
+            else:
+                self._pie_no_data_text.set_visible(True)
+                self._pie_no_data_text.set_text('No ATP data')
 
         ax5.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cm^2){title_suffix}', fontsize=10)
         ax5.axis('equal')
-        self.fig_energy.subplots_adjust(left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
+        _set_canvas_margins(self.fig_energy, left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
         self.cvs_energy.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
@@ -3081,10 +3248,24 @@ class AnalyticsWidget(QTabWidget):
         self._spike_shape_start.blockSignals(False)
         self._spike_shape_end.blockSignals(False)
 
+        for artist in getattr(self, '_spike_shape_dynamic_artists', []):
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self._spike_shape_dynamic_artists = []
+        self._spike_shape_empty_text.set_visible(False)
+
         if n_sp == 0:
-            ax.clear()
-            ax.text(0.5, 0.5, 'No spikes detected', ha='center', va='center',
-                   transform=ax.transAxes, fontsize=12)
+            self._spike_shape_empty_text.set_text('No spikes detected')
+            self._spike_shape_empty_text.set_visible(True)
+            _configure_ax_interactive(
+                ax,
+                title='Spike Shape Overlay',
+                xlabel='Time relative to peak (ms)',
+                ylabel='V (mV)',
+                show_legend=False,
+            )
             self.cvs_spike_shape.draw_idle()
             return
 
@@ -3126,18 +3307,19 @@ class AnalyticsWidget(QTabWidget):
         n_selected = len(spikes)
         color_by_index = self._spike_shape_color_by_index.isChecked()
 
-        ax.clear()
         if color_by_index:
             # Color by absolute spike index (shows evolution)
             colors = plt.cm.viridis(np.linspace(0, 1, n_sp))
             for i, (spike_t, spike_v) in enumerate(spikes):
                 abs_idx = spike_indices[i] - 1
-                ax.plot(spike_t, spike_v, color=colors[abs_idx], lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')
+                line = ax.plot(spike_t, spike_v, color=colors[abs_idx], lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')[0]
+                self._spike_shape_dynamic_artists.append(line)
         else:
             # Single color for all selected spikes
             soma_color = PLOT_THEMES.get("Default", PLOT_THEMES["Default"]).get("soma", "#4080FF")
             for i, (spike_t, spike_v) in enumerate(spikes):
-                ax.plot(spike_t, spike_v, color=soma_color, lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')
+                line = ax.plot(spike_t, spike_v, color=soma_color, lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')[0]
+                self._spike_shape_dynamic_artists.append(line)
 
         _configure_ax_interactive(
             ax,
@@ -3166,11 +3348,21 @@ class AnalyticsWidget(QTabWidget):
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
         n_sp = len(spike_times)
+        self._poincare_lines["msg"].set_visible(False)
 
         if n_sp < 3:
-            ax.clear()
-            ax.text(0.5, 0.5, 'Need >=3 spikes for Poincare plot', ha='center', va='center',
-                   transform=ax.transAxes, fontsize=12)
+            self._poincare_lines["scatter"].set_offsets(np.empty((0, 2)))
+            self._poincare_lines["scatter"].set_array(np.array([]))
+            _set_line_data(self._poincare_lines["diag"])
+            self._poincare_lines["msg"].set_text('Need >=3 spikes for Poincare plot')
+            self._poincare_lines["msg"].set_visible(True)
+            _configure_ax_interactive(
+                ax,
+                title='Poincare Plot (ISI Dynamics)',
+                xlabel='ISI[n] (ms)',
+                ylabel='ISI[n+1] (ms)',
+                show_legend=False,
+            )
             self.cvs_poincare.draw_idle()
             return
 
@@ -3181,13 +3373,14 @@ class AnalyticsWidget(QTabWidget):
         isi_n = isi[:-1]
         isi_n_plus_1 = isi[1:]
 
-        ax.clear()
-        ax.scatter(isi_n, isi_n_plus_1, c=range(len(isi_n)), cmap='viridis', s=30, alpha=0.7, edgecolors='k', linewidth=0.5)
+        offsets = np.column_stack([isi_n, isi_n_plus_1])
+        self._poincare_lines["scatter"].set_offsets(offsets)
+        self._poincare_lines["scatter"].set_array(np.arange(len(isi_n), dtype=float))
 
         # Diagonal line (ISI[n+1] = ISI[n])
         isi_min = min(isi_n.min(), isi_n_plus_1.min())
         isi_max = max(isi_n.max(), isi_n_plus_1.max())
-        ax.plot([isi_min, isi_max], [isi_min, isi_max], 'r--', lw=1.5, alpha=0.5, label='ISI[n+1] = ISI[n]')
+        _set_line_data(self._poincare_lines["diag"], [isi_min, isi_max], [isi_min, isi_max], name="poincare_diag")
 
         _configure_ax_interactive(
             ax,
@@ -3291,7 +3484,7 @@ class AnalyticsWidget(QTabWidget):
         ax_sp.set_title('STFT spectrogram (V_soma)', fontsize=10)
         ax_sp.set_xlim(t[0], t[-1])
 
-        self.fig_spectro.tight_layout(pad=2.5)
+        _set_canvas_margins(self.fig_spectro, left=0.08, right=0.96, top=0.94, bottom=0.08, hspace=0.28, wspace=0.20)
         self.cvs_spectro.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
@@ -3361,7 +3554,7 @@ class AnalyticsWidget(QTabWidget):
         ax4.set_title('Spike count');  ax4.grid(alpha=0.3)
         ax4.relim(); ax4.autoscale_view()
 
-        self.fig_bif.tight_layout()
+        _set_canvas_margins(self.fig_bif, left=0.08, right=0.96, top=0.94, bottom=0.07, hspace=0.42, wspace=0.26)
         self.cvs_bif.draw_idle()
         self.setCurrentWidget(self.tab_bif)
 
@@ -3439,7 +3632,7 @@ class AnalyticsWidget(QTabWidget):
         ax4.set_title('Spike count');  ax4.grid(alpha=0.3)
         ax4.relim(); ax4.autoscale_view()
 
-        self.fig_sweep.tight_layout()
+        _set_canvas_margins(self.fig_sweep, left=0.08, right=0.96, top=0.94, bottom=0.07, hspace=0.42, wspace=0.26)
         self.cvs_sweep.draw_idle()
         self.setCurrentWidget(self.tab_sweep)
 
@@ -3491,7 +3684,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.legend();  ax2.grid(alpha=0.3)
         ax2.relim(); ax2.autoscale_view()
 
-        self.fig_sd.tight_layout()
+        _set_canvas_margins(self.fig_sd, left=0.08, right=0.96, top=0.94, bottom=0.08, hspace=0.36, wspace=0.24)
         self.cvs_sd.draw_idle()
         self.setCurrentWidget(self.tab_sd)
 
@@ -3534,7 +3727,7 @@ class AnalyticsWidget(QTabWidget):
         ax2.set_xlabel('Duration (ms)');  ax2.set_ylabel('I_ext (µA/cmÂ˛)')
         ax2.set_title('Mean frequency map')
 
-        self.fig_excmap.tight_layout()
+        _set_canvas_margins(self.fig_excmap, left=0.08, right=0.96, top=0.94, bottom=0.08, hspace=0.32, wspace=0.24)
         self.cvs_excmap.draw_idle()
         self.setCurrentWidget(self.tab_excmap)
 
@@ -3578,6 +3771,6 @@ def _get_E_rev(name: str, ch) -> float:
         'ITCa': ch.E_Ca,
         'NaP':  ch.ENa,  'NaR': ch.ENa,
         'IA':   ch.EK,   'IM':  ch.EK,
-        'SK':   ch.EK,   'KATP': ch.EK,
+        'SK':   ch.EK,   'KATP': ch.EK, 'PumpNaK': 0.0,
     }
     return mapping.get(name, 0.0)

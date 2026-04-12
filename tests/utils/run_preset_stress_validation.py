@@ -10,7 +10,9 @@ This utility is intentionally lightweight and report-oriented:
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -44,6 +46,29 @@ class StressCase:
     has_nan_inf: bool
     status: str
     note: str
+
+
+def _warm_native_hines() -> dict:
+    """Compile the fast native path once before running many validation cases."""
+    if _IMPORT_ERROR is not None:
+        return {"status": "skipped", "elapsed_sec": 0.0}
+    import time
+
+    t0 = time.perf_counter()
+    try:
+        cfg = FullModelConfig()
+        apply_preset(cfg, "A: Squid Giant Axon (HH 1952)")
+        cfg.stim.t_sim = 20.0
+        cfg.stim.dt_eval = 0.2
+        cfg.stim.jacobian_mode = "native_hines"
+        NeuronSolver(cfg).run_single()
+        return {"status": "pass", "elapsed_sec": time.perf_counter() - t0}
+    except Exception as exc:
+        return {
+            "status": "warn",
+            "elapsed_sec": time.perf_counter() - t0,
+            "message": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def _exit_code_for_summary(
@@ -202,6 +227,8 @@ def main() -> int:
     ap.add_argument("--reference", default="tests/utils/preset_reference_ranges.json")
     ap.add_argument("--limit-presets", type=int, default=0, help="Optional cap for quick local runs.")
     ap.add_argument("--dt-eval", type=float, default=0.2, help="Sampling step (ms) used in stress sweeps.")
+    ap.add_argument("--workers", type=int, default=max(1, min(4, (os.cpu_count() or 2))), help="Parallel worker count for independent preset cases.")
+    ap.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True, help="Warm the native solver once before launching the stress matrix.")
     ap.add_argument(
         "--fail-on-fail",
         action=argparse.BooleanOptionalAction,
@@ -262,13 +289,22 @@ def main() -> int:
     temps = (22.0, 30.0, 37.0)
     noises = (0.0, 0.5)
 
-    rows: list[StressCase] = []
+    warmup = _warm_native_hines() if args.warmup else {"status": "skipped", "elapsed_sec": 0.0}
+
+    cases: list[tuple[str, float, float, float, float]] = []
     for p in presets:
         for s in iext_scales:
             for t_sim in t_sims:
                 for tc in temps:
                     for ns in noises:
-                        rows.append(_run_case(p, s, t_sim, args.dt_eval, tc, ns, reference))
+                        cases.append((p, s, t_sim, tc, ns))
+
+    def _run_case_tuple(case):
+        p, s, t_sim, tc, ns = case
+        return _run_case(p, s, t_sim, args.dt_eval, tc, ns, reference)
+
+    with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as pool:
+        rows = list(pool.map(_run_case_tuple, cases))
 
     summary = {
         "status": _overall_status(
@@ -281,6 +317,8 @@ def main() -> int:
         "fail": sum(r.status == "FAIL" for r in rows),
         "reference_path": args.reference,
         "dt_eval_ms": float(args.dt_eval),
+        "workers": int(args.workers),
+        "warmup": warmup,
         "gate": {
             "fail_on_fail": bool(args.fail_on_fail),
             "fail_on_warn": bool(args.fail_on_warn),

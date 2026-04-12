@@ -28,6 +28,7 @@ CHAN_COLORS = {
     'Ih':   (160, 50,  200, 180),
     'ICa':  (250, 150, 0,   200),
     'KATP': (249, 226, 175, 200),
+    'PumpNaK': (229, 200, 144, 200),
     'IA':   (0,   200, 200, 180),
     'SK':   (200, 50,  160, 180),
 }
@@ -205,7 +206,7 @@ class OscilloscopeWidget(QWidget):
         if hasattr(self, "_plot_container"):
             self._plot_container.setMinimumHeight(target_height)
         if hasattr(self, "_plot_scroll"):
-            self._plot_scroll.setMinimumHeight(min(target_height + 16, 720))
+            self._plot_scroll.setMinimumHeight(min(target_height + 16, 1200))
 
     # ─────────────────────────────────────────────────────────────────
     def _mouse_moved(self, evt):

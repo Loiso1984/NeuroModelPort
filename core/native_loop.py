@@ -30,6 +30,7 @@ from .rhs import (
     _get_syn_reversal, nernst_ca_ion, nmda_mg_block,
     CA_I_MIN_M_M, CA_I_MAX_M_M, CA_DAMPING_FACTOR,
     ATP_MIN_M_M, ATP_MAX_M_M, ATP_PUMP_FAILURE_THRESHOLD,
+    compute_na_k_pump_current, _pump_availability_from_atp,
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
 from .hines import hines_solve, update_gates_analytic
@@ -37,6 +38,12 @@ from .kinetics import am_lut, bm_lut, ah_lut, bh_lut, an_lut, bn_lut
 
 _NA_PUMP_FACTOR = 1e3 / (3.0 * 96485.0)
 _CA_PUMP_FACTOR = 1e3 / (2.0 * 96485.0)
+
+
+@njit(cache=True)
+def set_numba_random_seed(seed: int) -> None:
+    """Seed Numba's internal NumPy RNG state for reproducible stochastic runs."""
+    np.random.seed(seed)
 
 
 @njit(fastmath=True, cache=True)
@@ -541,7 +548,15 @@ def run_native_loop(
                 else:
                     i_stim_eff += i_stim_s
 
-            rhs[i] = cm_over_dt * vi + e_eff_arr[i] + i_stim_eff
+            i_na_total = gna_v[i] * (y[off_m + i] ** 3) * y[off_h + i] * (vi - ena)
+            if physics.en_nap:
+                i_na_total += gnap_v[i] * y[off_x + i] * (vi - ena)
+            if physics.en_nar:
+                i_na_total += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena)
+            pump_atp_val = y[off_atp + i] if dyn_atp else atp_max_mM
+            i_pump = compute_na_k_pump_current(i_na_total, pump_atp_val)
+
+            rhs[i] = cm_over_dt * vi + e_eff_arr[i] + i_stim_eff - i_pump
 
             # ── Additive membrane noise if enabled ──
             if physics.noise_sigma > 0.0:
@@ -613,7 +628,8 @@ def run_native_loop(
                 if physics.en_nar:
                     i_na += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena)
                 
-                pump_consumption = max(0.0, -i_na) * _NA_PUMP_FACTOR
+                pump_availability = _pump_availability_from_atp(atp_val)
+                pump_consumption = max(0.0, -i_na) * pump_availability * _NA_PUMP_FACTOR
 
                 # Add calcium pump consumption if dynamic Ca is enabled
                 # Ca pump moves 1 Ca2+ per ATP, z=2 for divalent ion

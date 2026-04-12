@@ -10,7 +10,10 @@ from core.models import FullModelConfig
 from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
-from core.rhs import rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS
+from core.rhs import (
+    rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS,
+    ATP_ISCHEMIC_THRESHOLD,
+)
 from core.physics_params import create_physics_params
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
@@ -24,6 +27,26 @@ def _stable_seed_from_values(*values) -> int:
     payload = "|".join(str(v) for v in values).encode("utf-8")
     digest = hashlib.blake2s(payload, digest_size=4).digest()
     return int.from_bytes(digest, byteorder="little", signed=False)
+
+
+def _resolve_stochastic_seed(cfg, noise_sigma: float, stoch_gating: bool) -> int:
+    """Prefer explicit global RNG seeds; fall back to deterministic config hashing."""
+    try:
+        from core.stochastic_rng import get_rng
+        seeded_rng = get_rng()
+        if getattr(seeded_rng, "seed", None) is not None:
+            return int(seeded_rng.seed)
+    except Exception:
+        pass
+    return _stable_seed_from_values(
+        cfg.stim.t_sim,
+        cfg.stim.Iext,
+        cfg.stim.pulse_start,
+        cfg.stim.pulse_dur,
+        cfg.stim.stim_type,
+        noise_sigma,
+        stoch_gating,
+    )
 
 
 def _set_nested_attr(obj, path: str, val: float):
@@ -756,6 +779,19 @@ class NeuronSolver:
             g_katp = cfg.metabolism.g_katp_max / (1.0 + atp_ratio ** 2)
             res.currents['KATP'] = g_katp * (v - cfg.channels.EK)
 
+        # Electrogenic Na/K pump current: outward-positive, ATP-limited, driven by inward Na load
+        i_na_drive = np.asarray(res.currents['Na'], dtype=float)
+        if 'NaP' in res.currents:
+            i_na_drive = i_na_drive + np.asarray(res.currents['NaP'], dtype=float)
+        if 'NaR' in res.currents:
+            i_na_drive = i_na_drive + np.asarray(res.currents['NaR'], dtype=float)
+        if cfg.metabolism.enable_dynamic_atp and res.atp_level is not None:
+            pump_availability = np.clip(np.asarray(res.atp_level, dtype=float) / max(ATP_ISCHEMIC_THRESHOLD, 1e-12), 0.0, 1.0)
+        else:
+            pump_availability = 1.0
+        pump_drive = np.maximum(0.0, -i_na_drive) * pump_availability
+        res.currents['PumpNaK'] = pump_drive / 3.0
+
         res._finalize_current_shapes()
 
         # ── ATP consumption estimate ──────────────────────────────────
@@ -767,15 +803,11 @@ class NeuronSolver:
 
         # 1. Na+ pump cost: |Q_Na| / (3·F)  [µC/cm²·ms → mol → nmol ATP/cm²]
         t_arr = np.asarray(res.t, dtype=float)
-        i_na_total = np.abs(res.currents['Na'])
-        if 'NaP' in res.currents:
-            i_na_total += np.abs(res.currents['NaP'])
-        if 'NaR' in res.currents:
-            i_na_total += np.abs(res.currents['NaR'])
-        if i_na_total.ndim == 2:
-            i_na_spatial_sum = np.sum(i_na_total, axis=0)
+        i_na_pump = pump_drive
+        if np.ndim(i_na_pump) == 2:
+            i_na_spatial_sum = np.sum(i_na_pump, axis=0)
         else:
-            i_na_spatial_sum = i_na_total
+            i_na_spatial_sum = i_na_pump
         q_na = float(trapezoid(i_na_spatial_sum, x=t_arr))
         atp_na = (q_na * 1e-9) / (3.0 * F) * 1e9  # nmol/cm²
 
@@ -817,7 +849,7 @@ class NeuronSolver:
             detects numerical divergence the returned result contains the partial output
             and has `res.diverged = True`.
         """
-        from core.native_loop import run_native_loop
+        from core.native_loop import run_native_loop, set_numba_random_seed
 
         cfg = custom_config or self.config
 
@@ -1102,16 +1134,9 @@ class NeuronSolver:
         )
 
         if stoch_gating or noise_sigma > 0:
-            seed = _stable_seed_from_values(
-                cfg.stim.t_sim,
-                cfg.stim.Iext,
-                cfg.stim.pulse_start,
-                cfg.stim.pulse_dur,
-                cfg.stim.stim_type,
-                noise_sigma,
-                stoch_gating,
-            )
+            seed = _resolve_stochastic_seed(cfg, noise_sigma, stoch_gating)
             np.random.seed(seed)
+            set_numba_random_seed(seed)
 
         t_out, y_out, diverged = run_native_loop(
             y0.astype(np.float64),

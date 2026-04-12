@@ -54,6 +54,48 @@ def get_preset_names():
         "U: I-Clamp Threshold Explorer",
     ]
 
+
+def _preset_code(name: str) -> str:
+    """Return the stable single-letter preset code prefix (e.g. 'K')."""
+    if not isinstance(name, str):
+        return ""
+    head, _, _ = name.partition(":")
+    return head.strip()
+
+
+def _restore_owned_modes(cfg: FullModelConfig, name: str, saved_modes: dict) -> None:
+    """Restore only the mode fields that actually belong to the selected preset."""
+    code = _preset_code(name)
+    owners = {
+        "B": ("l5_mode",),
+        "E": ("purkinje_mode",),
+        "F": ("delay_target",),
+        "G": ("anesthesia_mode",),
+        "K": ("k_mode",),
+        "N": ("alzheimer_mode",),
+        "O": ("hypoxia_mode",),
+        "R": ("ach_mode",),
+        "S": ("dravet_mode",),
+    }
+    for field in owners.get(code, ()):
+        if field in saved_modes:
+            setattr(cfg.preset_modes, field, saved_modes[field])
+
+
+def _apply_base_preset(cfg: FullModelConfig, base_name: str, *, preserve_mode_fields: tuple[str, ...] = ()) -> None:
+    """Apply another preset as an internal base while preserving selected outer mode fields."""
+    preserved = {field: getattr(cfg.preset_modes, field) for field in preserve_mode_fields}
+    apply_preset(cfg, base_name)
+    cfg.stim.event_times = []
+    cfg.stim.event_times_2 = []
+    cfg.stim.synaptic_train_type = "none"
+    cfg.stim.synaptic_train_freq_hz = 40.0
+    cfg.stim.synaptic_train_duration_ms = 200.0
+    cfg.stim.noise_sigma = 0.0
+    cfg.dual_stimulation = None
+    for field, value in preserved.items():
+        setattr(cfg.preset_modes, field, value)
+
 def _reset_cfg_to_defaults(cfg: FullModelConfig) -> None:
     """
     Reset every sub-model field to its Pydantic default value.
@@ -142,12 +184,12 @@ def _apply_ach_mode(cfg: FullModelConfig) -> None:
     if mode == "arousal":
         cfg.channels.gIM_max = 0.05
         cfg.channels.im_speed_multiplier = 1.0
-        cfg.stim.Iext = 10.0
+        cfg.stim.Iext = 12.0
         cfg.stim.noise_sigma = 0.35
     else:
         cfg.channels.gIM_max = 0.5
         cfg.channels.im_speed_multiplier = 0.15
-        cfg.stim.Iext = 4.0
+        cfg.stim.Iext = 5.0
         cfg.stim.noise_sigma = 0.10
 
 
@@ -158,6 +200,18 @@ def _apply_purkinje_mode(cfg: FullModelConfig) -> None:
         cfg.stim.stim_type = "pulse"
         cfg.stim.Iext = 150.0
         cfg.stim.pulse_dur = 2.0
+
+
+def _apply_anesthesia_mode(cfg: FullModelConfig) -> None:
+    """Apply partial vs. full sodium-channel block for local anesthesia."""
+    mode = getattr(cfg.preset_modes, "anesthesia_mode", "full_block")
+    cfg.stim.stim_type = "const"
+    if mode == "partial_block":
+        cfg.channels.gNa_max = 48.0
+        cfg.stim.Iext = 24.0
+    else:
+        cfg.channels.gNa_max = 12.0
+        cfg.stim.Iext = 20.0
 
 
 def _apply_k_mode(cfg: FullModelConfig) -> None:
@@ -171,11 +225,11 @@ def _apply_k_mode(cfg: FullModelConfig) -> None:
     if cfg.preset_modes.k_mode == "baseline":
         # Sleep/drowsy: hyperpolarizing pulse de-inactivates I_T → Post-Inhibitory Rebound burst
         cfg.stim.stim_type = "pulse"
-        cfg.stim.Iext = -5.0  # Hyperpolarizing pulse
+        cfg.stim.Iext = -4.0  # Gentler hyperpolarization preserves low-throughput rebound output
         cfg.stim.pulse_start = 10.0
-        cfg.stim.pulse_dur = 100.0
+        cfg.stim.pulse_dur = 60.0
         cfg.channels.gIh_max = 0.02
-        cfg.channels.gTCa_max = 2.0
+        cfg.channels.gTCa_max = 1.2
         cfg.channels.EL = -75.0  # Rest Vm = -75mV (sleep)
     elif cfg.preset_modes.k_mode == "delta_oscillator":
         # Self-sustained delta oscillations: constant hyperpolarization + strong Ih + I_T
@@ -208,13 +262,15 @@ def _apply_alzheimer_mode(cfg: FullModelConfig) -> None:
         cfg.stim.stim_type = "alpha"
         cfg.stim.alpha_tau = 2.0
         cfg.stim.Iext = 15.0
+        cfg.stim.t_sim = 500.0
     else:
         # Progressive stage: initial spiking followed by adaptation/decline.
         cfg.calcium.tau_Ca = 800.0
-        cfg.channels.gSK_max = 1.5
+        cfg.channels.gSK_max = 1.0
         cfg.channels.gCa_max = 0.08
         cfg.stim.stim_type = "const"
-        cfg.stim.Iext = 18.0
+        cfg.stim.Iext = 30.0
+        cfg.stim.t_sim = 500.0
 
 
 def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
@@ -316,25 +372,13 @@ def _apply_epilepsy_disinhibition_protocol(cfg: FullModelConfig) -> None:
 
 def apply_preset(cfg: FullModelConfig, name: str):
     saved_modes = cfg.preset_modes.model_dump()
+    code = _preset_code(name)
     # Reset all fields to Pydantic defaults
     _reset_cfg_to_defaults(cfg)
-    if "Pyramidal L5" in name:
-        cfg.preset_modes.l5_mode = saved_modes.get("l5_mode", cfg.preset_modes.l5_mode)
-    if "Thalamic" in name:
-        cfg.preset_modes.k_mode = saved_modes.get("k_mode", cfg.preset_modes.k_mode)
-    if "Hypoxia" in name:
-        cfg.preset_modes.hypoxia_mode = saved_modes.get("hypoxia_mode", cfg.preset_modes.hypoxia_mode)
-    if "Alzheimer" in name:
-        cfg.preset_modes.alzheimer_mode = saved_modes.get("alzheimer_mode", cfg.preset_modes.alzheimer_mode)
-    if "Cholinergic" in name or "ACh" in name:
-        cfg.preset_modes.ach_mode = saved_modes.get("ach_mode", cfg.preset_modes.ach_mode)
-    if "Purkinje" in name:
-        cfg.preset_modes.purkinje_mode = saved_modes.get("purkinje_mode", cfg.preset_modes.purkinje_mode)
-    if "Dravet" in name:
-        cfg.preset_modes.dravet_mode = saved_modes.get("dravet_mode", cfg.preset_modes.dravet_mode)
+    _restore_owned_modes(cfg, name, saved_modes)
 
     # --- 1. CLASSIC: SQUID GIANT AXON (HH 1952) ---
-    if "Squid" in name:
+    if code == "A":
         cfg.dendritic_filter.enabled = False  # Squid axon has no dendrites
         cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 120.0, 36.0, 0.3
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -77.0, -54.387
@@ -347,7 +391,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.jacobian_mode = 'native_hines'  # Use native Hines for Squid Axon
 
     # --- 2. БАЗОВЫЙ ПРЕСЕТ: ПИРАМИДАЛЬНЫЙ L5 (Млекопитающие) ---
-    elif "Pyramidal L5" in name:
+    elif code == "B":
         cfg.morphology.single_comp = False
         cfg.stim_location.location = "dendritic_filtered"  # v12.0: Use dendritic filtering
         cfg.dendritic_filter.enabled = True
@@ -404,11 +448,11 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 60.0  # v12.0: Further increased for SFA with multiple spikes
 
     # Stage/mode overlays for selected presets.
-    if "Pyramidal L5" in name:
+    if code == "B":
         _apply_l5_mode(cfg)
 
     # --- 3. БЫСТРЫЙ ИНТЕРНЕЙРОН (FS) ---
-    elif "FS Interneuron" in name:
+    elif code == "C":
         cfg.stim_location.location = "dendritic_filtered"
         cfg.dendritic_filter.enabled = True
         cfg.dendritic_filter.distance_um = 75.0
@@ -433,7 +477,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 40.0
 
     # --- 4. МОТОНЕЙРОН СПИННОГО МОЗГА ---
-    elif "alpha-Motoneuron" in name:
+    elif code == "D":
         cfg.morphology.single_comp = False
         cfg.stim_location.location = "dendritic_filtered"
         cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 100.0, 30.0, 0.1
@@ -471,7 +515,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 50.0
 
     # --- 5. КЛЕТКА ПУРКИНЬЕ (МОЗЖЕЧОК) ---
-    elif "Purkinje" in name:
+    elif code == "E":
         cfg.morphology.single_comp = False
         cfg.stim_location.location = "dendritic_filtered"
         cfg.dendritic_filter.enabled = True
@@ -531,7 +575,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         )
 
     # --- 6. ТАЛАМИЧЕСКИЙ РЕЛЕ-НЕЙРОН (Ih + IT + Ca-dynamics) ---
-    elif "Thalamic" in name:
+    elif code == "K":
         # Thalamocortical relay neuron: T-type Ca²⁺ (I_T) drives low-threshold
         # spikes (LTS) and post-inhibitory rebound bursts.
         # Reference: Destexhe et al. 1998, J Neurosci 18:3574;
@@ -567,19 +611,21 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 0.0  # v12.0: No default Iext, k_mode overlay sets it
 
     # --- 7. ПАТОЛОГИЯ: РАССЕЯННЫЙ СКЛЕРОЗ (Демиелинизация) ---
-    elif "Multiple Sclerosis" in name:
-        apply_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
+    elif code == "F":
+        _apply_base_preset(cfg, "B: Pyramidal L5 (Mainen 1996)", preserve_mode_fields=("delay_target",))
         # Authentic demyelination model: axon-specific scaling
         # Soma remains healthy (gL=0.02, Cm=0.75), but axon trunk/branches have increased leak
         # This creates "Conduction Delay/Block" where soma spikes but axon conduction is impaired
         cfg.channels.gL = 0.02  # Soma remains healthy
         cfg.channels.Cm = 0.75  # Soma remains healthy
-        cfg.morphology.gL_trunk_mult = 15.0  # Moderate leak in demyelinated segments (was 80.0)
+        cfg.channels.gK_max = 6.0
+        cfg.channels.gSK_max = 0.8
+        cfg.morphology.gL_trunk_mult = 10.0  # Strong but not fully blocking leak in demyelinated segments
         cfg.morphology.Cm_trunk_mult = 3.0  # Moderately increased capacitance (was 10.0)
-        cfg.morphology.gNa_trunk_mult = 0.5  # Reduced sodium in internodes (was 0.2)
+        cfg.morphology.gNa_trunk_mult = 0.8  # Partial Nav redistribution preserves weak terminal conduction
         cfg.morphology.N_ais = 10
         cfg.morphology.gNa_ais_mult = 50.0
-        cfg.morphology.Ra = 400.0  # Elevated axial resistance (was 900.0)
+        cfg.morphology.Ra = 500.0  # Elevated axial resistance slows conduction without complete block
         cfg.stim.jacobian_mode = 'native_hines'
         # Set delay target to Terminal to show the "Wow" effect of conduction block immediately
         cfg.preset_modes.delay_target = "Terminal"
@@ -589,8 +635,8 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 50.0
 
     # --- 8. ПАТОЛОГИЯ: ЭПИЛЕПСИЯ (SCN1A GAIN-OF-FUNCTION) ---
-    elif "Epilepsy" in name:
-        apply_preset(cfg, "FS Interneuron (Wang-Buzsaki)")
+    elif code == "M":
+        _apply_base_preset(cfg, "C: FS Interneuron (Wang-Buzsaki)")
         cfg.channels.gNa_max = 180.0  # Gain-of-function: 120 → 180 (SCN1A mutation)
         cfg.channels.enable_IA = False
         # Enable calcium channels for pathological calcium dynamics
@@ -603,19 +649,17 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.channels.e_rev_syn_secondary = -40.0  # Depolarized from -75 to -40 mV
         _apply_epilepsy_disinhibition_protocol(cfg)
 # --- 9. ПАТОЛОГИЯ: АЛЬЦГЕЙМЕР (CALCIUM TOXICITY - SLOW EXTRUSION) ---
-    elif "Alzheimer's" in name:
-        apply_preset(cfg, "Pyramidal L5 (Mainen 1996)")
+    elif code == "N":
+        _apply_base_preset(cfg, "B: Pyramidal L5 (Mainen 1996)", preserve_mode_fields=("alzheimer_mode",))
         # Apply Alzheimer mode overlay immediately
         _apply_alzheimer_mode(cfg)
         cfg.stim.jacobian_mode = 'native_hines'
-        # Alpha stim: Shows reduced firing due to SK activation by calcium
-        cfg.stim.stim_type = 'alpha'
-        cfg.stim.alpha_tau = 2.0
-        cfg.stim.Iext = 25.0  # Increased to compensate for SK hyperpolarization
+        # Mode overlay owns the effective stimulus profile; keep this branch from
+        # re-imposing a generic alpha pulse that would erase stage differences.
 
     # --- 10. ПАТОЛОГИЯ: ГИПОКСИЯ (ATP-PUMP FAILURE - ION IMBALANCE + Ca overload) ---
-    elif "Hypoxia" in name:
-        apply_preset(cfg, "FS Interneuron (Wang-Buzsaki)")
+    elif code == "O":
+        _apply_base_preset(cfg, "C: FS Interneuron (Wang-Buzsaki)", preserve_mode_fields=("hypoxia_mode",))
         cfg.morphology.single_comp = False
         cfg.morphology.N_trunk = 10
         cfg.morphology.N_ais = 5
@@ -637,7 +681,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.metabolism.atp_synthesis_rate = 0.1  # Reduced synthesis causes gradual depletion
 
     # --- 11. С-ВОЛОКНО (БОЛЬ / БЕЗМИЕЛИНОВОЕ) ---
-    elif "C-Fiber" in name:
+    elif code == "J":
         cfg.morphology.single_comp = False
         cfg.stim_location.location = "dendritic_filtered"
         # gNa=80 needed for proper spike amplitude in small unmyelinated fibers
@@ -655,7 +699,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 300.0
 
     # --- 12. ГИППОКАМП CA1 (АДАПТИВНЫЙ ПИРАМИДНЫЙ) ---
-    elif "Hippocampal CA1" in name:
+    elif code == "L":
         # CA1 pyramidal neuron: regular-spiking adapting type.
         # v12.0: Theta rhythm (7Hz) driven by dual-drive stimulation
         # Reference: Magee 1998, J Neurosci 18:7613; Storm 1990, J Physiol 421:529
@@ -688,24 +732,21 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.d_soma = 20e-4
         _apply_ca1_theta_protocol(cfg)
 # --- 13. АНЕСТЕЗИЯ (ЛИДОКАИН) ---
-    elif "Anesthesia" in name:
-        apply_preset(cfg, "Squid Giant Axon (HH 1952)")
-        cfg.channels.gNa_max = 12.0  # 90% blockade: 120 → 12
-        # Pathology: conduction block expected — high current, no/minimal spikes
-        cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 20.0  # Strong stimulus, but 90% Na block prevents spiking
+    elif code == "G":
+        _apply_base_preset(cfg, "A: Squid Giant Axon (HH 1952)", preserve_mode_fields=("anesthesia_mode",))
+        _apply_anesthesia_mode(cfg)
 
     # --- 14. ГИПЕРКАЛИЕМИЯ (HIGH K+ REDUCES DRIVING FORCE) ---
-    elif "Hyperkalemia" in name:
-        apply_preset(cfg, "Squid Giant Axon (HH 1952)")
+    elif code == "H":
+        _apply_base_preset(cfg, "A: Squid Giant Axon (HH 1952)")
         cfg.channels.EK = -55.0  # Elevated external K+: -77 → -55 (Nernst shift)
         # Pathology: depolarization block — elevated K+ reduces repolarization reserve
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 15.0
 
     # --- 15. IN VITRO (SLICE AT 23C - SLOW KINETICS) ---
-    elif "In Vitro" in name:
-        apply_preset(cfg, "Pyramidal L5 (Mainen 1996)")
+    elif code == "I":
+        _apply_base_preset(cfg, "B: Pyramidal L5 (Mainen 1996)")
         cfg.morphology.single_comp = True  # Slice: isolated soma (cut dendrites)
         cfg.stim_location.location = "soma"  # Direct patch-clamp
         cfg.dendritic_filter.enabled = False  # No dendritic filtering in slice
@@ -715,22 +756,24 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 10.0
 
     # --- 16. ТАЛАМИЧЕСКОЕ РЕТИКУЛЯРНОЕ ЯДРО (TRN — СОННЫЕ ВЕРЕТЁНА) ---
-    elif "Reticular" in name or "TRN" in name:
-        # TRN neurons: GABAergic, high I_T density, generate sleep spindles.
+    elif code == "P":
+        # TRN neurons: GABAergic burst-ready cells. In a single-neuron simulator
+        # this is best represented as a rebound-burst surrogate rather than a
+        # full spindle generator.
         # Reference: Destexhe et al. 1996, J Neurosci 16:169;
         #            Huguenard & Prince 1992, J Neurosci 12:3804
         cfg.morphology.single_comp = True
         cfg.stim_location.location = "soma"
         cfg.dendritic_filter.enabled = False
         cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 60.0, 10.0, 0.05
-        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -72.0
+        cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -76.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 24.0, 2.3
         # I_T: very high density in TRN dendrites (Huguenard & Prince 1992)
         # Somatic density ~3-5× higher than in relay neurons
         cfg.channels.enable_ITCa = True
-        cfg.channels.gTCa_max = 5.0     # High T-type: drives robust spindle-like bursts
+        cfg.channels.gTCa_max = 7.0     # Larger T-current reserve for rebound bursts
         cfg.channels.enable_Ih = True
-        cfg.channels.gIh_max = 0.01     # Lower Ih than relay — less sag, more burst
+        cfg.channels.gIh_max = 0.005    # Lower Ih than relay — less sag, more burst
         cfg.channels.E_Ih = -43.0  # Standardized reversal potential
         cfg.channels.enable_ICa = False
         cfg.channels.enable_SK = False
@@ -741,12 +784,13 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.B_Ca = 1e-5
         cfg.morphology.d_soma = 20e-4
         cfg.stim.jacobian_mode = 'native_hines'
-        # Low tonic drive: TRN bursts from I_T de-inactivation at hyperpolarized Vm
-        cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 2.0
+        # Hyperpolarizing pulse de-inactivates I_T; release evokes the rebound burst.
+        cfg.stim.stim_type = 'pulse'
+        cfg.stim.Iext = -4.0
+        cfg.stim.pulse_dur = 40.0
 
     # --- 17. ШИПОВАТЫЙ ПРОЕКЦИОННЫЙ НЕЙРОН СТРИАТУМА (SPN) ---
-    elif "Striatal" in name or "SPN" in name:
+    elif code == "Q":
         # Medium spiny neuron (MSN/SPN): characteristic long latency to first
         # spike due to strong I_A and hyperpolarized resting potential.
         # Reference: Nisenbaum & Wilson 1995, J Neurophysiol 74:1163;
@@ -755,14 +799,14 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.N_trunk = 15
         cfg.stim_location.location = "dendritic_filtered"
         cfg.dendritic_filter.enabled = True
-        cfg.dendritic_filter.distance_um = 220.0
-        cfg.dendritic_filter.tau_dendritic_ms = 15.0
+        cfg.dendritic_filter.distance_um = 180.0
+        cfg.dendritic_filter.tau_dendritic_ms = 10.0
         cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 80.0, 8.0, 0.04
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -80.0  # Very hyperpolarized rest
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
         # Strong I_A: key feature — delays spike onset by hundreds of ms
         cfg.channels.enable_IA = True
-        cfg.channels.gA_max = 3.0       # High I_A density to guarantee late-spiking phenotype
+        cfg.channels.gA_max = 0.8       # High but not silencing: preserves long-latency firing
         # Ih: inward rectification contributes to ramp-like depolarization
         cfg.channels.enable_Ih = True
         cfg.channels.gIh_max = 0.01
@@ -772,19 +816,18 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.calcium.dynamic_Ca = False
         cfg.morphology.d_soma = 15e-4   # Small soma (12-20 µm)
         cfg.stim.jacobian_mode = 'native_hines'
-        # Alpha stimulus with slow tau to showcase characteristic delayed firing onset
-        cfg.stim.stim_type = 'alpha'
-        cfg.stim.alpha_tau = 20.0
-        cfg.stim.Iext = 15.0  # Increased slightly to overcome IA and slow tau
+        # Tonic depolarization acts as an up-state proxy while I_A delays recruitment.
+        cfg.stim.stim_type = 'const'
+        cfg.stim.Iext = 22.0
 
     # --- 18. ХОЛИНЕРГИЧЕСКАЯ НЕЙРОМОДУЛЯЦИЯ (ACh: Бодрствование vs Сон) ---
-    elif "Cholinergic" in name or "ACh" in name:
+    elif code == "R":
         # L5 pyramidal base + I_M. ACh blocks I_M → shift from adapting to tonic.
         # With I_M enabled: adapting/bursting (sleep-like, M-current dampens excitability).
         # With I_M blocked (gIM_max→0 via GUI): tonic high-frequency (awake/attentive).
         # Reference: Brown & Adams 1980, Nature 283:673;
         #            McCormick & Prince 1986, J Physiol 375:169
-        apply_preset(cfg, "Pyramidal L5 (Mainen 1996)")
+        _apply_base_preset(cfg, "B: Pyramidal L5 (Mainen 1996)", preserve_mode_fields=("ach_mode",))
         cfg.morphology.single_comp = True
         cfg.stim_location.location = "soma"
         cfg.dendritic_filter.enabled = False
@@ -802,13 +845,13 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 5.0
 
     # --- 19. ПАТОЛОГИЯ: СИНДРОМ ДРАВЕ (SCN1A LOSS-OF-FUNCTION) ---
-    elif "Dravet" in name:
+    elif code == "S":
         # FS interneuron with reduced gNa (SCN1A haploinsufficiency).
         # Paradox: Na-channel loss-of-function in inhibitory neurons causes
         # network hyperexcitability (disinhibition) → epileptic seizures.
         # Reference: Yu et al. 2006, Nat Neurosci 9:1142;
         #            Ogiwara et al. 2007, J Neurosci 27:5903
-        apply_preset(cfg, "FS Interneuron (Wang-Buzsaki)")
+        _apply_base_preset(cfg, "C: FS Interneuron (Wang-Buzsaki)", preserve_mode_fields=("dravet_mode",))
         cfg.morphology.single_comp = True
         cfg.stim_location.location = "soma"
         cfg.dendritic_filter.enabled = False
@@ -830,7 +873,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
             cfg.env.Q10_Na = 3.0  # Thermal hyper-sensitivity: Na channels become more sensitive to heat
 
     # --- 20. PASSIVE CABLE (LINEAR DECAY) ---
-    elif "Passive Cable" in name:
+    elif code == "T":
         # Pure passive membrane: no active channels, only leak conductance.
         # Shows exponential voltage decay V = V_0 * exp(-x/lambda) without spikes.
         # Reference: Rall 1959, Cable theory for dendrites
@@ -873,7 +916,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 10.0
 
     # --- 21. I-CLAMP THRESHOLD EXPLORER ---
-    elif "I-Clamp Threshold" in name:
+    elif code == "U":
         # Standard HH model with high-resolution sampling for threshold exploration.
         # Uses simulation (220ms) with standard dt (0.05ms) to capture exact rheobase.
         cfg.morphology.single_comp = True
@@ -891,16 +934,18 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.jacobian_mode = 'native_hines'
 
     # Stage/mode overlays for selected presets.
-    if "Thalamic" in name:
+    if code == "K":
         _apply_k_mode(cfg)
-    if "Hypoxia" in name:
+    if code == "O":
         _apply_hypoxia_mode(cfg)
-    if "Alzheimer" in name:
+    if code == "N":
         _apply_alzheimer_mode(cfg)
-    if "Cholinergic" in name or "ACh" in name:
+    if code == "R":
         _apply_ach_mode(cfg)
-    if "Purkinje" in name:
+    if code == "E":
         _apply_purkinje_mode(cfg)
+    if code == "G":
+        _apply_anesthesia_mode(cfg)
 
 
 

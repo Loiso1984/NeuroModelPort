@@ -192,8 +192,10 @@ def test_im_causes_spike_frequency_adaptation():
     cfg_base = FullModelConfig()
     cfg_base.morphology.single_comp = True
     cfg_base.stim.t_sim = 200.0
-    cfg_base.stim.stim_type = "const"
-    cfg_base.stim.Iext = 10.0
+    cfg_base.stim.stim_type = "pulse"
+    cfg_base.stim.Iext = 35.0
+    cfg_base.stim.pulse_start = 10.0
+    cfg_base.stim.pulse_dur = 180.0
     cfg_base.stim.jacobian_mode = "sparse_fd"
     res_base = NeuronSolver(cfg_base).run_single()
 
@@ -201,8 +203,10 @@ def test_im_causes_spike_frequency_adaptation():
     cfg_im = FullModelConfig()
     cfg_im.morphology.single_comp = True
     cfg_im.stim.t_sim = 200.0
-    cfg_im.stim.stim_type = "const"
-    cfg_im.stim.Iext = 10.0
+    cfg_im.stim.stim_type = "pulse"
+    cfg_im.stim.Iext = 35.0
+    cfg_im.stim.pulse_start = 10.0
+    cfg_im.stim.pulse_dur = 180.0
     cfg_im.stim.jacobian_mode = "sparse_fd"
     cfg_im.channels.enable_IM = True
     cfg_im.channels.gIM_max = 1.0  # Strong IM for clear effect

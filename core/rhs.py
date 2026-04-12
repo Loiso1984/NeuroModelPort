@@ -25,6 +25,7 @@ ATP_ISCHEMIC_THRESHOLD = 0.5  # mM - K_ATP opens below this threshold
 ATP_PUMP_FAILURE_THRESHOLD = 0.2  # mM - pumps fail below this threshold
 _NA_PUMP_FACTOR = 1e3 / (3.0 * 96485.0)
 _CA_PUMP_FACTOR = 1e3 / (2.0 * 96485.0)
+_PUMP_CURRENT_FRACTION = 1.0 / 3.0
 
 # Noise parameters
 OU_NOISE_AMPLITUDE = 0.1  # 10% noise amplitude
@@ -93,6 +94,23 @@ def _validate_conductance(g: float64) -> float64:
         return 0.0
     return g
 
+
+@njit(float64(float64), cache=True)
+def _pump_availability_from_atp(atp_val: float64) -> float64:
+    """ATP-dependent availability factor for Na/K pump current and ATP usage."""
+    if not np.isfinite(atp_val):
+        return 1.0
+    if atp_val <= ATP_MIN_M_M:
+        return 0.0
+    return min(1.0, max(0.0, atp_val / max(ATP_ISCHEMIC_THRESHOLD, 1e-12)))
+
+
+@njit(float64(float64, float64), cache=True)
+def compute_na_k_pump_current(i_na_total: float64, atp_val: float64) -> float64:
+    """Electrogenic Na/K pump current estimated from inward Na load and ATP availability."""
+    pump_drive = max(0.0, -i_na_total) * _pump_availability_from_atp(atp_val)
+    return _PUMP_CURRENT_FRACTION * pump_drive
+
 @njit(cache=True)
 def _calculate_syn_tau(stype, atau_mult):
     """
@@ -141,7 +159,9 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     if atau <= 0.0:
         return 0.0
 
-    if stype == 1:  # pulse
+    if stype == 0:  # const / tonic current clamp
+        return iext if t >= t0 else 0.0
+    elif stype == 1:  # pulse
         return iext if t0 <= t <= t0 + td else 0.0
     elif stype == 2:  # alpha (EPSC) — current-based
         if t < t0:
@@ -577,6 +597,15 @@ def rhs_multicompartment(
             i_katp = g_katp * (vi - ek)
             i_ion += i_katp
 
+        # Electrogenic Na/K pump current: outward-positive, scales with inward Na load
+        i_na_total = gna_v[i] * (mi ** 3) * hi * (vi - ena)
+        if en_nap:
+            i_na_total += gnap_v[i] * xi * (vi - ena)
+        if en_nar:
+            i_na_total += gnar_v[i] * yi * ji * (vi - ena)
+        pump_atp_val = atp_i_val if dyn_atp else atp_max_mM
+        i_pump = compute_na_k_pump_current(i_na_total, pump_atp_val)
+
         # Axial coupling (sparse Laplacian row i)
         i_ax = 0.0
         for j_idx in range(l_indptr[i], l_indptr[i + 1]):
@@ -611,7 +640,7 @@ def rhs_multicompartment(
                 i_stim_eff += i_stim_secondary
 
         # dV/dt
-        dydt[off_v + i] = (i_stim_eff - i_ion + i_ax) / max(cm_v[i], 1e-12)
+        dydt[off_v + i] = (i_stim_eff - i_ion - i_pump + i_ax) / max(cm_v[i], 1e-12)
 
         # Gate derivatives (HH core) — per-compartment Q10 (Stage 6.2: thermal gradient)
         dydt[off_m + i] = phi_na[i] * (am(vi) * (1.0 - mi) - bm(vi) * mi)
@@ -696,7 +725,12 @@ def rhs_multicompartment(
             # Pump consumption: proportional to Na+ and Ca2+ influx
             # Simplified model: consumption ~ |I_Na| + 3*|I_Ca| (Na/K pump uses 3 Na per ATP)
             i_na = gna_v[i] * (mi * mi * mi) * hi * (vi - ena)
-            pump_consumption = max(0.0, -i_na) * _NA_PUMP_FACTOR
+            if en_nap:
+                i_na += gnap_v[i] * xi * (vi - ena)
+            if en_nar:
+                i_na += gnar_v[i] * yi * ji * (vi - ena)
+            pump_availability = _pump_availability_from_atp(atp_i_val)
+            pump_consumption = max(0.0, -i_na) * pump_availability * _NA_PUMP_FACTOR
             if dyn_ca:
                 pump_consumption += i_ca_influx * _CA_PUMP_FACTOR
 

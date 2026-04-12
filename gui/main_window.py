@@ -894,6 +894,7 @@ class MainWindow(QMainWindow):
             on_change=self._on_channel_field_changed,
         )
         self.form_calcium = PydanticFormWidget(self.config_manager.config.calcium, "Calcium Dynamics")
+        self.form_metabolism = PydanticFormWidget(self.config_manager.config.metabolism, "ATP / Metabolism")
         self.form_morph = PydanticFormWidget(
             self.config_manager.config.morphology,
             "Morphology",
@@ -919,7 +920,7 @@ class MainWindow(QMainWindow):
         morph_layout.addWidget(self.form_morph)
         c_layout.addWidget(self.grp_morph)
 
-        # Group 2: Biophysics Context (Environment + Calcium)
+        # Group 2: Biophysics Context (Environment + Calcium + ATP)
         grp_context = QGroupBox("Biophysics Context")
         context_layout = QHBoxLayout(grp_context)
         context_layout.setSpacing(8)
@@ -929,6 +930,7 @@ class MainWindow(QMainWindow):
         context_right.setSpacing(4)
         context_left.addWidget(self.form_env)
         context_right.addWidget(self.form_calcium)
+        context_right.addWidget(self.form_metabolism)
         context_layout.addLayout(context_left)
         context_layout.addLayout(context_right)
         c_layout.addWidget(grp_context)
@@ -1146,7 +1148,7 @@ class MainWindow(QMainWindow):
         quick_set_params = {
             "Channel Densities": ["channels.gNa_max", "channels.gK_max", "channels.gCa_max"],
             "Dendritic Cable": ["morphology.Ra", "dendritic_filter.distance_um", "dendritic_filter.space_constant_um"],
-            "Metabolism": ["calcium.tau_Ca", "calcium.B_Ca", "env.T_celsius"],
+            "Metabolism": ["metabolism.atp_synthesis_rate", "metabolism.g_katp_max", "calcium.tau_Ca"],
         }
 
         if selection not in quick_set_params:
@@ -1438,7 +1440,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_all_forms(self):
         for form in (self.form_morph, self.form_env, self.form_chan,
-                     self.form_calcium, self.form_stim, self.form_stim_loc,
+                     self.form_calcium, self.form_metabolism, self.form_stim, self.form_stim_loc,
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
@@ -1869,6 +1871,7 @@ class MainWindow(QMainWindow):
             result (dict): Simulation outcome payload containing one or more of the keys described above.
         """
         try:
+            result = self._normalize_worker_payload(result)
             if 'mc_results' in result:
                 self.oscilloscope.update_plots_mc(result['mc_results'])
                 self._status(f"MC done - {len(result['mc_results'])} trials.")
@@ -1911,6 +1914,14 @@ class MainWindow(QMainWindow):
             self._status("Error — check parameters.")
         finally:
             self._lock_ui(False)
+
+    def _normalize_worker_payload(self, payload):
+        """Normalize legacy worker callbacks to the dict payload contract."""
+        if isinstance(payload, dict):
+            return payload
+        if payload is None:
+            return {}
+        return {'single': payload}
 
     def _on_notes_changed(self):
         """
@@ -1956,23 +1967,8 @@ class MainWindow(QMainWindow):
             on_error=self._on_sim_error
         )
 
-    def _on_stoch_done(self, res):
-        self._last_result = res
-        self.oscilloscope.update_plots(res)
-        self.analytics.update_analytics(res)
-        dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
-        self.topology.draw_neuron(
-            self.config_manager.config,
-            dual_config=dual_cfg,
-            delay_target_name=self._delay_target_name,
-            delay_custom_index=self._delay_custom_index,
-            result=res,
-        )
-        self.axon_biophysics.plot_axon_data(res, self.config_manager.config)
-        self._update_sparkline(res)
-        self.btn_export_plot.setEnabled(True)
-        self.btn_export.setEnabled(True)
-        self._lock_ui(False)
+    def _on_stoch_done(self, payload):
+        self._on_simulation_done(self._normalize_worker_payload(payload))
         self._status("Stochastic run complete.")
         self.tabs.setCurrentWidget(self.oscilloscope)
 
@@ -2276,6 +2272,8 @@ class MainWindow(QMainWindow):
             self.form_morph.refresh()
         if hasattr(self, 'form_calcium'):
             self.form_calcium.refresh()
+        if hasattr(self, 'form_metabolism'):
+            self.form_metabolism.refresh()
         if hasattr(self, 'form_env'):
             self.form_env.refresh()
         if hasattr(self, 'form_ana'):

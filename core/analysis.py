@@ -213,6 +213,19 @@ def detect_spikes(V: np.ndarray, t: np.ndarray,
             )
         return np.array([], dtype=int), np.array([]), np.array([])
 
+    if algorithm == "peak_repolarization":
+        crossing_idx, _, _ = detect_spikes(
+            V, t,
+            threshold=threshold,
+            prominence=prominence,
+            baseline_threshold=baseline_threshold,
+            repolarization_window_ms=repolarization_window_ms,
+            refractory_ms=refractory_ms,
+            algorithm="threshold_crossing",
+        )
+        if len(crossing_idx) > 0 and len(valid) < max(1, int(0.5 * len(crossing_idx))):
+            return crossing_idx, t[crossing_idx], V[crossing_idx]
+
     valid_idx = np.array(valid, dtype=int)
     return valid_idx, t[valid_idx], V[valid_idx]
 
