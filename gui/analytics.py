@@ -2975,7 +2975,6 @@ class AnalyticsWidget(QTabWidget):
             if cfg.metabolism.enable_dynamic_atp:
                 from core.rhs import nernst_na_ion, nernst_k_ion
                 
-                # Get the same time window indices as used for V and gate_t
                 if window_start is not None or window_end is not None:
                     idx_start = 0 if window_start is None else int(np.searchsorted(t, window_start, side='left'))
                     idx_end = len(t) if window_end is None else int(np.searchsorted(t, window_end, side='right'))
@@ -2984,22 +2983,20 @@ class AnalyticsWidget(QTabWidget):
                     idx_start = 0
                     idx_end = len(t)
                 
-                # Extract concentration slices for the time window
-                if hasattr(result, 'na_i') and hasattr(result, 'k_o'):
-                    na_i_slice = result.na_i[idx_start:idx_end]
-                    k_o_slice = result.k_o[idx_start:idx_end]
+                # SAFE EXTRACTION: Check for None and use 2D array slicing
+                if getattr(result, 'na_i', None) is not None and getattr(result, 'k_o', None) is not None:
+                    na_i_slice = result.na_i[0, idx_start:idx_end]
+                    k_o_slice = result.k_o[0, idx_start:idx_end]
                     
-                    # Use mean concentrations in the time window
                     na_i_mean = np.mean(na_i_slice) if len(na_i_slice) > 0 else None
                     k_o_mean = np.mean(k_o_slice) if len(k_o_slice) > 0 else None
                     
-                    # Calculate effective reversal potentials using Nernst formulas
                     if na_i_mean is not None:
                         ENa_eff = nernst_na_ion(na_i_mean, cfg.env.T_celsius)
                     if k_o_mean is not None:
                         EK_eff = nernst_k_ion(k_o_mean, cfg.env.T_celsius)
             
-            n_V_null, n_n_null = compute_nullclines(V_rng, cfg, I_stm, ENa_eff=ENa_eff, EK_eff=EK_eff)
+            n_V_null, n_n_null = compute_nullclines(V_range=V_rng, config=cfg, I_stim=I_stm, ENa_eff=ENa_eff, EK_eff=EK_eff)
             self._phase_lines['n_null'].set_visible(True)
             self._phase_lines['v_null'].set_visible(True)
             self._phase_lines['n_null'].set_data(V_rng, n_n_null)

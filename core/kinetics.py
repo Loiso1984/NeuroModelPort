@@ -554,3 +554,56 @@ def bj_NaR(V):
 
 # Initialize LUTs at module load (after all gate functions are defined)
 _init_luts()
+
+
+# =====================================================================
+# Na+/K+ ATPase Pump Electrogenic Current
+# Michaelis-Menten kinetics with Hill coefficients (Na:3, K:2)
+# =====================================================================
+
+@njit(float64(float64, float64, float64), fastmath=True, cache=True)
+def pump_current(na_i_mM, k_o_mM, atp_mM):
+    """
+    Electrogenic Na+/K+ pump current density (µA/cm²).
+    
+    Michaelis-Menten kinetics: I_pump = I_max * [Na]_i³/(K_m,Na³ + [Na]_i³) 
+                                        * [K]_o²/(K_m,K² + [K]_o²) * f(ATP)
+    Simplified Hill form: (1 + K_m/[S])^(-n)
+    
+    Parameters
+    ----------
+    na_i_mM : float
+        Intracellular sodium concentration [mM]
+    k_o_mM : float
+        Extracellular potassium concentration [mM]
+    atp_mM : float
+        ATP concentration [mM] (2.0 mM = healthy/fully active)
+    
+    Returns
+    -------
+    float
+        Pump current density [µA/cm²], positive = outward (hyperpolarizing)
+    """
+    # Physiological parameters (standard literature values)
+    I_MAX = 0.25               # Max pump current density [µA/cm²]
+    KM_NA = 15.0             # Intracellular Na+ half-saturation [mM]
+    KM_K = 2.0               # Extracellular K+ half-saturation [mM]
+    ATP_HALF = 2.0           # ATP concentration for half-max activity [mM]
+    
+    # Guard against non-positive concentrations
+    na_safe = na_i_mM if na_i_mM > 1e-9 else 1e-9
+    k_safe = k_o_mM if k_o_mM > 1e-9 else 1e-9
+    
+    # ATP availability factor (linear scaling, saturates at 1.0)
+    atp_factor = atp_mM / ATP_HALF if atp_mM < ATP_HALF else 1.0
+    if atp_factor < 0.0:
+        atp_factor = 0.0
+    
+    # Hill kinetics: (1 + Km/[S])^(-n)
+    na_factor = 1.0 / (1.0 + KM_NA / na_safe)
+    na_factor = na_factor * na_factor * na_factor  # Hill coeff = 3
+    
+    k_factor = 1.0 / (1.0 + KM_K / k_safe)
+    k_factor = k_factor * k_factor                   # Hill coeff = 2
+    
+    return I_MAX * na_factor * k_factor * atp_factor

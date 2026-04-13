@@ -70,10 +70,17 @@ class StimFormWithUnits(QWidget):
         """Find the Iext spinbox in the form and hook its valueChanged signal."""
         if 'Iext' in self.form_stim.widgets_map:
             self._iext_widget = self.form_stim.widgets_map['Iext']
-            # Disconnect the original handler and connect our custom handler
+            # Replace the form's default handler with our custom unit-aware handler
             try:
-                self._iext_widget.disconnect()
+                # Block signals, disconnect form's handler, connect ours
+                self._iext_widget.blockSignals(True)
+                try:
+                    self._iext_widget.valueChanged.disconnect()
+                except (TypeError, RuntimeError):
+                    # No connections to disconnect or already disconnected
+                    pass
                 self._iext_widget.valueChanged.connect(self._on_iext_value_changed)
+                self._iext_widget.blockSignals(False)
             except Exception as e:
                 logging.warning(f"Could not hook Iext widget signal: {e}")
             # Initialize display value based on current unit (density by default)

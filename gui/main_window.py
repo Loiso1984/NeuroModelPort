@@ -37,6 +37,7 @@ from gui.topology import TopologyWidget
 from gui.axon_biophysics import AxonBiophysicsWidget
 from gui.dual_stimulation_widget import DualStimulationWidget
 from gui.text_sanitize import repair_text, repair_widget_tree
+from core.dendritic_filter import get_ac_attenuation
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -632,9 +633,15 @@ class MainWindow(QMainWindow):
             on_change=self._on_dfilter_field_changed,
         )
         
+        # Dynamic attenuation hint label (v10.3)
+        self.lbl_attenuation_hint = QLabel("")
+        self.lbl_attenuation_hint.setStyleSheet("color: #6C7086; font-size: 11px; padding: 4px;")
+        self.lbl_attenuation_hint.setWordWrap(True)
+        
         left_layout.addWidget(self.form_stim)
         left_layout.addWidget(self.form_stim_loc)
         left_layout.addWidget(self.form_dfilter)
+        left_layout.addWidget(self.lbl_attenuation_hint)
         left_layout.addStretch()
         
         # Right column: Secondary stimulus (dual stimulation widget)
@@ -1441,6 +1448,35 @@ class MainWindow(QMainWindow):
     def _on_dfilter_field_changed(self, _field_name: str, _value):
         self._refresh_topology_preview()
         self._update_stim_preview()
+        self._update_attenuation_hint()
+
+    def _update_attenuation_hint(self):
+        """Update dynamic attenuation hint for dendritic filter (v10.3)."""
+        if not hasattr(self, "lbl_attenuation_hint"):
+            return
+        dfilter = self.config_manager.config.dendritic_filter
+        if not dfilter.enabled:
+            self.lbl_attenuation_hint.setText("")
+            return
+        
+        distance = dfilter.distance_um
+        space_const = dfilter.space_constant_um
+        tau_m = 10.0  # Default membrane time constant (ms)
+        
+        if dfilter.filter_mode == "Physiological (AC)":
+            freq = dfilter.input_frequency
+            attn = get_ac_attenuation(distance, space_const, tau_m, freq)
+            mode_str = f"at {freq:.0f}Hz"
+        else:
+            attn = np.exp(-distance / space_const)
+            mode_str = "DC"
+        
+        # Bilingual hint
+        if T.lang == 'RU':
+            text = f"Затухание: {attn:.2f} ({mode_str}) — доля сигнала до сомы"
+        else:
+            text = f"Attenuation: {attn:.2f} ({mode_str}) — signal fraction reaching soma"
+        self.lbl_attenuation_hint.setText(text)
 
     def _on_channel_field_changed(self, _field_name: str, _value):
         self._refresh_topology_preview()
@@ -1540,8 +1576,14 @@ class MainWindow(QMainWindow):
         self._sync_hines_button_state()
         self._refresh_all_forms()
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
-        # Reset dual stim when loading new preset
-        self.dual_stim_widget.load_default_preset()
+        
+        # --- ФИКС: Синхронизируем виджет с пресетом, а не сбрасываем его ---
+        if self.config_manager.config.dual_stimulation is not None:
+            self.dual_stim_widget.config = self.config_manager.config.dual_stimulation
+            self.dual_stim_widget.update_ui_from_config()
+        else:
+            self.dual_stim_widget.load_default_preset()
+            
         self._sync_preset_mode_controls()
         self.topology.draw_neuron(
             self.config_manager.config,
@@ -2435,6 +2477,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'form_preset_modes'):
             self.form_preset_modes.refresh()
         self._refresh_sweep_param_ui()
+        self._update_attenuation_hint()
 
 
 # ─────────────────────────────────────────────────────────────────────

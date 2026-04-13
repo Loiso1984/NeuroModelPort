@@ -62,6 +62,14 @@ class PydanticFormWidget(QWidget):
         widget.setRange(lower, upper)
         widget.setDecimals(6)
         widget.setSingleStep(step)
+        # Add suffixes for specific fields (v10.3 biophysics)
+        suffix_map = {
+            "pump_max_capacity": " µA/cm²",
+            "km_na": " mM",
+            "input_frequency": " Hz",
+        }
+        if field_name in suffix_map:
+            widget.setSuffix(suffix_map[field_name])
 
     def _build_form(self):
         for field_name, field_info in type(self.instance).model_fields.items():
@@ -137,9 +145,22 @@ class PydanticFormWidget(QWidget):
             self.form_layout.addRow(label, w)
             self.labels_map[field_name] = label
             self.widgets_map[field_name] = w
+        
+        # Initialize conditional field states (v10.3 AC filter)
+        if "filter_mode" in self.widgets_map and "input_frequency" in self.widgets_map:
+            current_mode = getattr(self.instance, "filter_mode", "Classic (DC)")
+            is_dc = current_mode == "Classic (DC)"
+            self.widgets_map["input_frequency"].setEnabled(not is_dc)
+            self.widgets_map["input_frequency"].setStyleSheet("color: #888;" if is_dc else "")
 
     def _set_field(self, field_name, value):
         setattr(self.instance, field_name, value)
+        # Handle field interdependencies (v10.3 AC filter)
+        if field_name == "filter_mode" and "input_frequency" in self.widgets_map:
+            freq_widget = self.widgets_map["input_frequency"]
+            is_dc = value == "Classic (DC)"
+            freq_widget.setEnabled(not is_dc)
+            freq_widget.setStyleSheet("color: #888;" if is_dc else "")
         if self.on_change is not None:
             self.on_change(field_name, value)
 

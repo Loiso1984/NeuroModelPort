@@ -629,14 +629,12 @@ def run_native_loop(
                     i_ca_influx_v[i],
                 )
 
-                # ATP: Forward Euler (soft bounds enforced inside compute_metabolism_and_pump)
+                # ATP: Forward Euler
                 y[off_atp + i] = atp_val + datp * dt
-                # Na_i: Forward Euler (soft bounds enforced inside compute_metabolism_and_pump)
+                # Na_i: Forward Euler
                 y[off_na_i + i] = na_i_val + dnai * dt
-                # K_o: Semi-implicit for clearance decay term
-                #   dko = flux_term - (k_o - k_o_rest)/tau  =>  k_o_new = k_o + dt*dko/(1 + dt/tau)
-                k_o_clearance_tau_safe = max(k_o_clearance_tau_ms, 1e-12)
-                y[off_k_o + i] = k_o_val + dt * dko / (1.0 + dt / k_o_clearance_tau_safe)
+                # K_o: Forward Euler (затухание уже учтено внутри dko)
+                y[off_k_o + i] = k_o_val + dko * dt
 
         t += dt
 

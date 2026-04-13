@@ -10,6 +10,7 @@ Physics:
 2. Temporal low-pass filter: dI_fil/dt = (I_in - I_fil) / tau_dendritic
 """
 
+import math
 import numpy as np
 from numba import njit, float64
 
@@ -137,3 +138,32 @@ def validate_dendritic_filter(distance_um: float, space_constant_um: float) -> b
         print(f"⚠️  Warning: attenuation = {attenuation:.4f} (very large, minimal filtering)")
     
     return True
+
+
+@njit(float64(float64, float64, float64, float64), fastmath=True, cache=True)
+def get_ac_attenuation(distance_um, lambda_dc_um, tau_m_ms, freq_hz):
+    """
+    AC signal attenuation for dendritic propagation (Numba-jitted).
+    
+    High-frequency signals attenuate faster than DC space constant predicts.
+    AC space constant: λ_AC = λ_DC / sqrt(1 + j·ω·τ_m)
+    Attenuation magnitude: |A| = exp(-x · Re(1/λ_AC))
+    
+    Algebraic simplification: Re(1/λ_AC) = sqrt((sqrt(1+(ωτ)²) + 1) / 2) / λ_DC
+    """
+    # Guard against invalid space constant
+    if lambda_dc_um <= 0.0:
+        return 0.0
+    
+    # Angular frequency × time constant [dimensionless]
+    # tau_m in ms, freq in Hz -> ωτ = 2π·f·τ·0.001
+    omega_tau = 6.283185307179586 * freq_hz * tau_m_ms * 0.001
+    
+    # Magnitude of (1 + jωτ): r = sqrt(1 + (ωτ)²)
+    r = math.sqrt(1.0 + omega_tau * omega_tau)
+    
+    # Re(1/λ_AC) = sqrt((r + 1)/2) / λ_DC
+    re_inv_lambda = math.sqrt((r + 1.0) * 0.5) / lambda_dc_um
+    
+    # Attenuation magnitude: exp(-x · Re(1/λ_AC))
+    return math.exp(-distance_um * re_inv_lambda)

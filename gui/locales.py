@@ -98,6 +98,11 @@ class Translator:
             'katp_kd_atp_mM': 'ATP concentration for half-activation of K_ATP (mM).',
             'atp_max_mM': 'Baseline intracellular ATP concentration (mM). Healthy neurons: 2-5 mM.',
             'atp_synthesis_rate': 'ATP synthesis rate via oxidative phosphorylation (mM/s). Healthy ~0.5; hypoxia 0.005–0.05.',
+            'pump_max_capacity': 'Max Na+/K+ pump current density (µA/cm²). Literature: 0.1-0.5 µA/cm².',
+            'km_na': 'Na+ half-saturation constant for pump (mM). Literature: 10-20 mM.',
+            'enable_atp_limiting': 'Enable ATP-dependent pump limitation (pump slows when ATP < 2 mM).',
+            'filter_mode': 'Attenuation mode: Classic (DC) for steady-state, Physiological (AC) for synaptic inputs.',
+            'input_frequency': 'Input signal frequency for AC attenuation (Hz). Typical synaptic: 100-200 Hz.',
 
             # ── Environment descriptions ─────────────────────────────
             'T_celsius':     'Experiment temperature (°C). Scales all kinetics via Q10.',
@@ -253,6 +258,11 @@ class Translator:
             'katp_kd_atp_mM': 'Концентрация АТФ для полуактивации K_ATP (мМ).',
             'atp_max_mM': 'Базовая внутриклеточная концентрация АТФ (мМ). Здоровые нейроны: 2-5 мМ.',
             'atp_synthesis_rate': 'Скорость синтеза АТФ через окислительное фосфорилирование (мМ/с). Норма ~0.5; гипоксия 0.005–0.05.',
+            'pump_max_capacity': 'Макс. плотность тока насоса Na+/K+ (мкА/см²). Литература: 0.1-0.5 мкА/см².',
+            'km_na': 'Полунасыщение Na+ для насоса (мМ). Литература: 10-20 мМ.',
+            'enable_atp_limiting': 'Включить АТФ-зависимое ограничение насоса (замедляется при АТФ < 2 мМ).',
+            'filter_mode': 'Режим затухания: Классика (DC) для стационарного, Физиологический (AC) для синаптических входов.',
+            'input_frequency': 'Частота входного сигнала для AC затухания (Гц). Типичная синаптическая: 100-200 Гц.',
 
             # ── Среда ────────────────────────────────────────────────
             'T_celsius':     'Đ˘ĐµĐĽĐżĐµŃ€Đ°Ń‚ŃŃ€Đ° ŃŤĐşŃĐżĐµŃ€Đ¸ĐĽĐµĐ˝Ń‚Đ° (°C). ĐśĐ°ŃŃŃ‚Đ°Đ±Đ¸Ń€ŃĐµŃ‚ ĐşĐ¸Đ˝ĐµŃ‚Đ¸ĐşŃ Ń‡ĐµŃ€ĐµĐ· Q10.',

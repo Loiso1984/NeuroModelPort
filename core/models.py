@@ -122,6 +122,10 @@ class MetabolismParams(BaseModel):
     k_o_rest_mM: float = Field(default=3.5, ge=1.0, le=15.0, description="Resting extracellular potassium (mM) for ATP-linked ion-gradient mode")
     ion_drift_gain: float = Field(default=0.0, ge=0.0, le=1e-2, description="Phenomenological conversion from membrane current to Na_i / K_o drift")
     k_o_clearance_tau_ms: float = Field(default=800.0, ge=1.0, le=20000.0, description="Extracellular potassium clearance time constant (ms)")
+    # Na+/K+ ATPase pump parameters (v10.3)
+    pump_max_capacity: float = Field(default=0.5, ge=0.0, le=5.0, description="Max Na+/K+ pump current density (µA/cm²). Literature: 0.1-0.5")
+    km_na: float = Field(default=15.0, ge=1.0, le=50.0, description="Na+ half-saturation for pump (mM). Literature: 10-20 mM")
+    enable_atp_limiting: bool = Field(default=True, description="Enable ATP-dependent pump limitation (pump slows when ATP < 2 mM)")
 
 
 class EnvironmentParams(BaseModel):
@@ -221,6 +225,15 @@ class DendriticFilterParams(BaseModel):
     tau_dendritic_ms: float = Field(
         default=10.0, gt=0,
         description="Dendritic low-pass filter time constant Ď„ (ms). Typical: 5-20 ms"
+    )
+    # AC attenuation parameters (v10.3)
+    filter_mode: Literal["Classic (DC)", "Physiological (AC)"] = Field(
+        default="Classic (DC)",
+        description="Attenuation mode: DC (steady-state) or AC (frequency-dependent, for synaptic inputs)"
+    )
+    input_frequency: float = Field(
+        default=100.0, ge=1.0, le=1000.0,
+        description="Input signal frequency for AC attenuation (Hz). Typical synaptic: 100-200 Hz"
     )
 
 
