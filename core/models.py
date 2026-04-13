@@ -113,8 +113,8 @@ class MetabolismParams(BaseModel):
     """Dynamic intracellular ATP pool and metabolic feedback."""
     enable_dynamic_atp: bool = Field(default=False, description="Enable dynamic ATP metabolism")
     atp_max_mM: float = Field(default=2.0, ge=0.1, le=10.0, description="Maximum ATP concentration (mM, literature: 2-5 mM)")
-    atp_synthesis_rate: float = Field(default=0.6, ge=0.0, description="ATP synthesis rate (nmol/cmÂ˛/s)")
-    g_katp_max: float = Field(default=0.0, ge=0.0, description="Max K_ATP channel conductance (mS/cmÂ˛)")
+    atp_synthesis_rate: float = Field(default=0.6, ge=0.0, description="ATP synthesis rate (mM/s). Healthy neuron ~0.6; hypoxia 0.005\u20130.05.")
+    g_katp_max: float = Field(default=0.1, ge=0.0, description="Max K_ATP channel conductance (mS/cm\u00b2). Effective g at rest \u2248 g_max/17 due to Hill equation.")
     katp_kd_atp_mM: float = Field(default=0.5, ge=0.01, description="ATP concentration for half-activation of K_ATP (mM)")
     na_i_rest_mM: float = Field(default=12.0, ge=1.0, le=40.0, description="Resting intracellular sodium (mM) for ATP-linked ion-gradient mode")
     na_ext_mM: float = Field(default=145.0, ge=50.0, le=200.0, description="Extracellular sodium (mM) for ATP-linked ion-gradient mode")
@@ -151,6 +151,10 @@ class EnvironmentParams(BaseModel):
     Q10_NaR:   float = Field(default=2.2,              description="Q10 for resurgent Na channel (y,j gates)")
     # NMDA MgÂ˛âş block: Jahr & Stevens 1990, J Neurosci 10:1830
     Mg_ext:    float = Field(default=1.0,              description="Extracellular [MgÂ˛âş] (mM, for NMDA block)")
+    # NMDA Mg block affinity: Jahr & Stevens 1990, J Neurosci 10:1830
+    # 3.57 mM is the standard value; lower = stronger block at same [Mg]
+    nmda_mg_block_mM: float = Field(default=3.57, gt=0.0, le=50.0,
+                                     description="NMDA Mg block affinity (mM). Lower = stronger block. Jahr & Stevens 1990: 3.57.")
     # Thermal gradient: somaâ€“dendrite temperature offset (Â°C).
     # Positive = dendrites warmer than soma (rare), negative = cooler (typical for in vitro slices).
     # Bhattacharyya et al. 2008 (J Neurophysiol 100:927) measured ~0.5â€“1.5Â°C axial gradients.

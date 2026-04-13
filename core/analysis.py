@@ -988,6 +988,7 @@ def _compute_stim_array(
     e_rev_primary: float,
     e_rev_secondary: float,
     mg_ext: float,
+    nmda_mg_block_mM: float = 3.57,
 ) -> np.ndarray:
     """
     Compute a time-series stimulus current proxy for a single stimulus source.
@@ -1039,7 +1040,7 @@ def _compute_stim_array(
                 base = 0.0
             e_rev = _get_syn_reversal(stype, e_rev_primary, e_rev_secondary)
             if stype == 5:
-                base *= nmda_mg_block(el, mg_ext)
+                base *= nmda_mg_block(el, mg_ext, nmda_mg_block_mM)
             current_val = abs(base) * (e_rev - el)
 
             # Apply dendritic filtering
@@ -1152,6 +1153,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             e_rev_primary=float(cfg.channels.e_rev_syn_primary),
             e_rev_secondary=float(cfg.channels.e_rev_syn_secondary),
             mg_ext=float(cfg.env.Mg_ext),
+            nmda_mg_block_mM=float(getattr(cfg.env, 'nmda_mg_block_mM', 3.57)),
         )
 
     dual_cfg = getattr(cfg, "dual_stimulation", None)
@@ -1213,6 +1215,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             e_rev_primary=float(cfg.channels.e_rev_syn_primary),
             e_rev_secondary=float(cfg.channels.e_rev_syn_secondary),
             mg_ext=float(cfg.env.Mg_ext),
+            nmda_mg_block_mM=float(getattr(cfg.env, 'nmda_mg_block_mM', 3.57)),
         )
 
     return stim

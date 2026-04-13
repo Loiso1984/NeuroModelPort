@@ -323,7 +323,7 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         # Terminal stage: severe energy failure; weak initial response and rapid collapse.
         cfg.morphology.gNa_trunk_mult = 0.35
         cfg.morphology.gL_trunk_mult = 8.0
-        cfg.metabolism.atp_synthesis_rate = 0.04
+        cfg.metabolism.atp_synthesis_rate = 0.005
         cfg.metabolism.g_katp_max = 2.5
         cfg.calcium.tau_Ca = 1200.0
         cfg.channels.gCa_max = 0.10
@@ -334,7 +334,7 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         # Progressive stage: a small initial firing epoch followed by ATP-linked failure.
         cfg.morphology.gNa_trunk_mult = 0.65
         cfg.morphology.gL_trunk_mult = 3.0
-        cfg.metabolism.atp_synthesis_rate = 0.18
+        cfg.metabolism.atp_synthesis_rate = 0.05
         cfg.metabolism.g_katp_max = 0.6
         cfg.calcium.tau_Ca = 900.0
         cfg.channels.gCa_max = 0.08
@@ -704,7 +704,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.Iext = 35.0
         cfg.stim.t_sim = 500.0
         cfg.metabolism.enable_dynamic_atp = True
-        cfg.metabolism.atp_synthesis_rate = 0.20
+        cfg.metabolism.atp_synthesis_rate = 0.05
 
     # --- 11. С-ВОЛОКНО (БОЛЬ / БЕЗМИЕЛИНОВОЕ) ---
     elif code == "J":

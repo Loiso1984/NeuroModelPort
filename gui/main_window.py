@@ -1973,6 +1973,11 @@ class MainWindow(QMainWindow):
         self._status(f"Stimulation compartment set to idx {comp_idx}")
         # Refresh stimulation form to show new value
         self._refresh_all_forms()
+        # Sync oscilloscope delay target to clicked compartment
+        self.oscilloscope._combo_delay_target.setCurrentText("Custom Compartment")
+        self.oscilloscope._spin_delay_comp.setValue(comp_idx)
+        self._delay_target_name = "Custom Compartment"
+        self._delay_custom_index = comp_idx
         # Redraw topology to move PRI marker
         dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
         self.topology.draw_neuron(

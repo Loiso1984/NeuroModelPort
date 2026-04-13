@@ -478,6 +478,7 @@ class NeuronSolver:
             "ca_rest": cfg.calcium.Ca_rest,
             "tau_ca": cfg.calcium.tau_Ca,
             "mg_ext": cfg.env.Mg_ext,
+            "nmda_mg_block_mM": cfg.env.nmda_mg_block_mM,
             "tau_sk": cfg.channels.tau_SK,
             "im_speed_multiplier": cfg.channels.im_speed_multiplier,
             "b_ca": self._build_b_ca_vector(cfg, morph),
@@ -823,7 +824,8 @@ class NeuronSolver:
         else:
             pump_availability = 1.0
         pump_drive = np.maximum(0.0, -i_na_drive) * pump_availability
-        res.currents['PumpNaK'] = pump_drive / 3.0
+        # Must match compute_na_k_pump_current: _PUMP_CURRENT_FRACTION (0.05) * pump_drive
+        res.currents['PumpNaK'] = 0.05 * pump_drive
 
         res._finalize_current_shapes()
 
@@ -1120,6 +1122,7 @@ class NeuronSolver:
             tau_ca              = float(cfg.calcium.tau_Ca),
             b_ca                = b_ca_v,
             mg_ext              = float(getattr(cfg.env, "Mg_ext", 1.0)),
+            nmda_mg_block_mM    = float(getattr(cfg.env, "nmda_mg_block_mM", 3.57)),
             tau_sk              = float(getattr(cc, "tau_SK", 15.0)),
             im_speed_multiplier = float(getattr(cc, "im_speed_multiplier", 1.0)),
             g_katp_max          = float(cfg.metabolism.g_katp_max),

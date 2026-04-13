@@ -790,18 +790,19 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 _set(j_row, v_col, phi_nar[i] * (dajr_v[i] * (1.0 - j_nr[i]) - dbjr_v[i] * j_nr[i]))
                 _set(j_row, j_row, -phi_nar[i] * (ajr_v[i] + bjr_v[i]))
 
-                if en_sk and idx["z_sk"] is not None:
-                    zsk_row = idx["z_sk"].start + i
-                    _set(zsk_row, zsk_row, -1.0 / max(tau_sk, 1e-12))
-                    if dyn_ca and idx["ca"] is not None:
-                        # dz_inf/dCa * (1/tau_SK)
-                        ca_safe = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
-                        ca_sk = min(max(ca_safe * 10.0, CA_I_MIN_M_M), 1.0)
-                        ca_safe = max(ca_sk, 1e-12)  # Guard against zero
-                        kd = 0.0004
-                        q = (kd / ca_safe) ** 4
-                        dz_inf_dca = (4.0 * (kd ** 4) / (ca_safe ** 5)) / ((1.0 + q) ** 2)
-                        _set(zsk_row, idx["ca"].start + i, 10.0 * dz_inf_dca / max(tau_sk, 1e-12))
+            # SK gate: dz/dt = (z_inf - z) / tau_eff, tau_eff = tau_sk / phi_k
+            if en_sk and idx["z_sk"] is not None:
+                zsk_row = idx["z_sk"].start + i
+                tau_eff_sk = max(tau_sk, 1e-12) / max(phi_k[i], 1e-12)
+                _set(zsk_row, zsk_row, -1.0 / tau_eff_sk)
+                if dyn_ca and idx["ca"] is not None:
+                    ca_safe = min(max(ca_i[i], CA_I_MIN_M_M), CA_I_MAX_M_M)
+                    ca_sk = min(max(ca_safe * 10.0, CA_I_MIN_M_M), 1.0)
+                    ca_safe = max(ca_sk, 1e-12)
+                    kd = 0.0004
+                    q = (kd / ca_safe) ** 4
+                    dz_inf_dca = (4.0 * (kd ** 4) / (ca_safe ** 5)) / ((1.0 + q) ** 2)
+                    _set(zsk_row, idx["ca"].start + i, 10.0 * dz_inf_dca / tau_eff_sk)
 
             if dyn_ca and idx["ca"] is not None:
                 ca_row = idx["ca"].start + i

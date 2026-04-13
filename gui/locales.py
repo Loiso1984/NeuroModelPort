@@ -97,7 +97,7 @@ class Translator:
             'g_katp_max': 'Maximum ATP-sensitive K⁺ conductance (mS/cm²). Opens when ATP < 0.5 mM.',
             'katp_kd_atp_mM': 'ATP concentration for half-activation of K_ATP (mM).',
             'atp_max_mM': 'Baseline intracellular ATP concentration (mM). Healthy neurons: 2-5 mM.',
-            'atp_synthesis_rate': 'ATP synthesis rate via oxidative phosphorylation (nmol/cm²/s).',
+            'atp_synthesis_rate': 'ATP synthesis rate via oxidative phosphorylation (mM/s). Healthy ~0.5; hypoxia 0.005–0.05.',
 
             # ── Environment descriptions ─────────────────────────────
             'T_celsius':     'Experiment temperature (°C). Scales all kinetics via Q10.',
@@ -252,7 +252,7 @@ class Translator:
             'g_katp_max': 'Макс. проводимость ATP-чувствительных K⁺ каналов (мСм/см²). Открываются при АТФ < 0.5 мМ.',
             'katp_kd_atp_mM': 'Концентрация АТФ для полуактивации K_ATP (мМ).',
             'atp_max_mM': 'Базовая внутриклеточная концентрация АТФ (мМ). Здоровые нейроны: 2-5 мМ.',
-            'atp_synthesis_rate': 'Скорость синтеза АТФ через окислительное фосфорилирование (нмоль/см²/с).',
+            'atp_synthesis_rate': 'Скорость синтеза АТФ через окислительное фосфорилирование (мМ/с). Норма ~0.5; гипоксия 0.005–0.05.',
 
             # ── Среда ────────────────────────────────────────────────
             'T_celsius':     'Đ˘ĐµĐĽĐżĐµŃ€Đ°Ń‚ŃŃ€Đ° ŃŤĐşŃĐżĐµŃ€Đ¸ĐĽĐµĐ˝Ń‚Đ° (°C). ĐśĐ°ŃŃŃ‚Đ°Đ±Đ¸Ń€ŃĐµŃ‚ ĐşĐ¸Đ˝ĐµŃ‚Đ¸ĐşŃ Ń‡ĐµŃ€ĐµĐ· Q10.',

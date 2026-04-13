@@ -32,13 +32,13 @@ from .rhs import (
     NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
     ATP_MIN_M_M, ATP_MAX_M_M, ATP_PUMP_FAILURE_THRESHOLD,
     compute_na_k_pump_current, compute_na_k_pump_drive,
+    compute_metabolism_and_pump,
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
 from .hines import hines_solve, update_gates_analytic
 from .kinetics import am_lut, bm_lut, ah_lut, bh_lut, an_lut, bn_lut
 
-_NA_PUMP_FACTOR = 1e3 / (3.0 * 96485.0)
-_CA_PUMP_FACTOR = 1e3 / (2.0 * 96485.0)
+# _NA_PUMP_FACTOR and _CA_PUMP_FACTOR now live in rhs.py (used by compute_metabolism_and_pump)
 
 
 @njit(cache=True)
@@ -245,6 +245,7 @@ def run_native_loop(
         k_o_clearance_tau_ms,
     ) = unpack_env_params(physics.env_params)
     b_ca = physics.b_ca
+    nmda_mg_block_mM = physics.nmda_mg_block_mM
 
     # ── Shared state offsets ──
     offsets = physics.state_offsets
@@ -507,7 +508,7 @@ def run_native_loop(
             if is_cond:
                 g_syn = i_stim_p
                 if is_nmda:
-                    g_syn *= nmda_mg_block(vi, mg_ext)
+                    g_syn *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
                 i_stim_eff = -g_syn * (vi - e_syn)   # inward ⟹ positive contribution
                 # Add g_syn to diagonal for fully implicit treatment of fast synaptic events
                 d[i] += g_syn
@@ -525,7 +526,7 @@ def run_native_loop(
                 if is_cond_2:
                     g2 = i_stim_s
                     if is_nmda_2:
-                        g2 *= nmda_mg_block(vi, mg_ext)
+                        g2 *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
                     i_stim_eff += -g2 * (vi - e_syn_2)
                     # Add g2 to diagonal for fully implicit treatment of fast synaptic events
                     d[i] += g2
@@ -598,61 +599,37 @@ def run_native_loop(
                     y_new = CA_I_MAX_M_M
                 y[off_ca + i] = y_new
 
-        # ATP dynamics (simple Euler integration)
+        # ATP dynamics (simple Euler integration) — uses unified helper from rhs.py
         if dyn_atp:
             for i in range(n_comp):
                 atp_val = y[off_atp + i]
                 na_i_val = y[off_na_i + i]
                 k_o_val = y[off_k_o + i]
                 vi = y[i]
-                mi = y[off_m + i]
-                hi = y[off_h + i]
                 ena_i = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin)
                 ek_i = nernst_k_ion(k_i_mM, k_o_val, t_kelvin)
 
-                i_na = gna_v[i] * (mi ** 3) * hi * (vi - ena_i)
-                if physics.en_nap:
-                    i_na += gnap_v[i] * y[off_x + i] * (vi - ena_i)
-                if physics.en_nar:
-                    i_na += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena_i)
-
-                i_k_total = gk_v[i] * (y[off_n + i] ** 4) * (vi - ek_i)
-                if physics.en_ia:
-                    i_k_total += ga_v[i] * y[off_a + i] * y[off_b + i] * (vi - ek_i)
-                if physics.en_sk:
-                    i_k_total += gsk_v[i] * y[off_zsk + i] * (vi - ek_i)
-                if physics.en_im:
-                    i_k_total += gim_v[i] * y[off_w + i] * (vi - ek_i)
-
-                atp_ratio = atp_val / max(katp_kd_atp_mM, 1e-12)
-                g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
-                i_k_total += g_katp * (vi - ek_i)
-
-                i_pump = compute_na_k_pump_current(i_na, atp_val)
-                pump_consumption = compute_na_k_pump_drive(i_na, atp_val) * _NA_PUMP_FACTOR
-                if dyn_ca:
-                    pump_consumption += max(0.0, i_ca_influx_v[i]) * _CA_PUMP_FACTOR
-
-                datp = atp_synthesis_rate * 0.001 - pump_consumption
-                if atp_val < ATP_PUMP_FAILURE_THRESHOLD:
-                    datp *= atp_val / ATP_PUMP_FAILURE_THRESHOLD
-                if atp_val <= ATP_MIN_M_M and datp < 0.0:
-                    datp = abs(datp) * 0.5
-                elif atp_val >= ATP_MAX_M_M and datp > 0.0:
-                    datp = -abs(datp) * 0.5
-
-                dnai = ion_drift_gain * (max(0.0, -i_na) - 3.0 * max(0.0, i_pump))
-                dko = ion_drift_gain * (max(0.0, i_k_total) - 2.0 * max(0.0, i_pump))
-                dko -= (k_o_val - k_o_rest_mM) / max(k_o_clearance_tau_ms, 1e-12)
-
-                if na_i_val <= NA_I_MIN_M_M and dnai < 0.0:
-                    dnai = 0.0
-                elif na_i_val >= NA_I_MAX_M_M and dnai > 0.0:
-                    dnai = 0.0
-                if k_o_val <= K_O_MIN_M_M and dko < 0.0:
-                    dko = 0.0
-                elif k_o_val >= K_O_MAX_M_M and dko > 0.0:
-                    dko = 0.0
+                mi = y[off_m + i]
+                hi = y[off_h + i]
+                ni = y[off_n + i]
+                xi_v = y[off_x + i] if en_nap else 0.0
+                yi_v = y[off_y + i] if en_nar else 0.0
+                ji_v = y[off_j + i] if en_nar else 0.0
+                ai_v = y[off_a + i] if en_ia else 0.0
+                bi_v = y[off_b + i] if en_ia else 0.0
+                zi_v = y[off_zsk + i] if en_sk else 0.0
+                wi_v = y[off_w + i] if en_im else 0.0
+                _i_pump, _i_katp, datp, dnai, dko = compute_metabolism_and_pump(
+                    vi, mi, hi, ni, xi_v, yi_v, ji_v, ai_v, bi_v, zi_v, wi_v,
+                    gna_v[i], gk_v[i], ga_v[i], gsk_v[i], gim_v[i], gnap_v[i], gnar_v[i],
+                    ena_i, ek_i,
+                    en_nap, en_nar, en_ia, en_sk, en_im, dyn_ca,
+                    g_katp_max, katp_kd_atp_mM,
+                    atp_val, atp_synthesis_rate,
+                    na_i_val, k_o_val, k_o_rest_mM,
+                    ion_drift_gain, k_o_clearance_tau_ms,
+                    i_ca_influx_v[i],
+                )
 
                 y[off_atp + i] = min(max(atp_val + datp * dt, ATP_MIN_M_M), ATP_MAX_M_M)
                 y[off_na_i + i] = min(max(na_i_val + dnai * dt, NA_I_MIN_M_M), NA_I_MAX_M_M)

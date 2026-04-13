@@ -28,8 +28,14 @@ ATP_MIN_M_M = 0.0
 ATP_MAX_M_M = 10.0
 ATP_ISCHEMIC_THRESHOLD = 0.5  # mM - K_ATP opens below this threshold
 ATP_PUMP_FAILURE_THRESHOLD = 0.2  # mM - pumps fail below this threshold
-_NA_PUMP_FACTOR = 1e3 / (3.0 * 96485.0)
-_CA_PUMP_FACTOR = 1e3 / (2.0 * 96485.0)
+
+# Dimensional analysis for µA/cm² → mM/ms conversion:
+#   d[C]/dt = I_density / (z · F · d_shell)  [mol/(cm³·s)]
+#   × 1e6 (mol/cm³→mM) × 1e-3 (s→ms) = 1e-3 / (z·F·d_shell)
+# d_shell = 1µm submembrane metabolic shell (Kager et al. 2000, J Neurophysiol 84:495)
+_METABOLIC_DEPTH_CM = 1.0e-4  # 1.0 µm
+_NA_PUMP_FACTOR = 1e-3 / (3.0 * F_CONST * _METABOLIC_DEPTH_CM)  # 1 ATP per 3 Na+
+_CA_PUMP_FACTOR = 1e-3 / (2.0 * F_CONST * _METABOLIC_DEPTH_CM)  # 1 ATP per Ca²⁺
 _PUMP_CURRENT_FRACTION = 0.05
 
 # Noise parameters
@@ -55,10 +61,10 @@ E_EXCITATORY = 0.0  # AMPA, NMDA, Kainate, Nicotinic (cation), ~0 mV
 # Reference: Johnston & Wu 1995, Foundations of Cellular Neurophysiology
 
 # NMDA Mg2+ block constants
-MG_BLOCK_CONST = 3.57  # mM, physiological Mg2+ concentration
+MG_BLOCK_CONST_DEFAULT = 3.57  # mM, default affinity (now user-configurable via EnvironmentParams)
 MG_BLOCK_VOLTAGE_FACTOR = -0.062  # mV^-1, voltage sensitivity
 # Reference: Jahr & Stevens 1990, J Neurosci 10: 1830-1837
-# B(V) = 1 / (1 + [Mg2+]/3.57 * exp(-0.062 * V))
+# B(V) = 1 / (1 + [Mg2+]/mg_block_mM * exp(-0.062 * V))
 
 @njit(float64(float64, float64, float64), cache=True)
 def nernst_ca_ion(ca_i, ca_ext, t_kelvin):
@@ -160,6 +166,85 @@ def clamp_calcium_derivative(ca_val: float64, dca: float64) -> float64:
     return dca
 
 @njit(cache=True)
+def compute_metabolism_and_pump(
+    vi, mi, hi, ni, xi, yi, ji, ai, bi, zi, wi,
+    gna, gk, ga, gsk, gim, gnap, gnar,
+    ena_i, ek_i,
+    en_nap, en_nar, en_ia, en_sk, en_im, dyn_ca,
+    g_katp_max, katp_kd_atp_mM,
+    atp_i_val, atp_synthesis_rate,
+    na_i_val, k_o_val, k_o_rest_mM,
+    ion_drift_gain, k_o_clearance_tau_ms,
+    i_ca_influx,
+):
+    """Unified metabolism + pump computation for a single compartment.
+
+    Computes total Na/K currents, Na/K pump, K_ATP channel, and metabolic
+    derivatives (d[ATP]/dt, d[Na_i]/dt, d[K_o]/dt).
+
+    Called from both rhs_multicompartment (SciPy BDF wrapper) and
+    run_native_loop (Backward-Euler Hines) to guarantee identical physics.
+
+    Returns: (i_pump, i_katp, datp, dnai, dko)
+    """
+    # ── Total Na current (transient + persistent + resurgent) ──
+    i_na_total = gna * (mi ** 3) * hi * (vi - ena_i)
+    if en_nap:
+        i_na_total += gnap * xi * (vi - ena_i)
+    if en_nar:
+        i_na_total += gnar * yi * ji * (vi - ena_i)
+
+    # ── Total K current (DR + IA + SK + IM) ──
+    i_k_total = gk * (ni ** 4) * (vi - ek_i)
+    if en_ia:
+        i_k_total += ga * ai * bi * (vi - ek_i)
+    if en_sk:
+        i_k_total += gsk * zi * (vi - ek_i)
+    if en_im:
+        i_k_total += gim * wi * (vi - ek_i)
+
+    # ── K_ATP channel: g = g_max / (1 + ([ATP]/Kd)^2) ──
+    atp_ratio = atp_i_val / max(katp_kd_atp_mM, 1e-12)
+    g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
+    i_katp = g_katp * (vi - ek_i)
+    i_k_total += i_katp
+
+    # ── Na/K pump current (electrogenic, outward-positive) ──
+    i_pump = compute_na_k_pump_current(i_na_total, atp_i_val)
+
+    # ── ATP ODE: d[ATP]/dt = synthesis - pump_consumption ──
+    pump_drive = compute_na_k_pump_drive(i_na_total, atp_i_val)
+    pump_consumption = pump_drive * _NA_PUMP_FACTOR
+    if dyn_ca:
+        pump_consumption += max(0.0, i_ca_influx) * _CA_PUMP_FACTOR
+
+    datp = atp_synthesis_rate * 0.001 - pump_consumption
+    if atp_i_val < ATP_PUMP_FAILURE_THRESHOLD:
+        datp *= atp_i_val / ATP_PUMP_FAILURE_THRESHOLD
+    if atp_i_val <= ATP_MIN_M_M and datp < 0.0:
+        datp = abs(datp) * 0.5
+    elif atp_i_val >= ATP_MAX_M_M and datp > 0.0:
+        datp = -abs(datp) * 0.5
+
+    # ── Na_i drift: inward Na load - pump efflux (3 Na+/cycle) ──
+    dnai = ion_drift_gain * (max(0.0, -i_na_total) - 3.0 * max(0.0, i_pump))
+    if na_i_val <= NA_I_MIN_M_M and dnai < 0.0:
+        dnai = abs(dnai) * 0.5
+    elif na_i_val >= NA_I_MAX_M_M and dnai > 0.0:
+        dnai = -abs(dnai) * 0.5
+
+    # ── K_o drift: outward K flux - pump influx (2 K+/cycle) + clearance ──
+    dko = ion_drift_gain * (max(0.0, i_k_total) - 2.0 * max(0.0, i_pump))
+    dko -= (k_o_val - k_o_rest_mM) / max(k_o_clearance_tau_ms, 1e-12)
+    if k_o_val <= K_O_MIN_M_M and dko < 0.0:
+        dko = abs(dko) * 0.5
+    elif k_o_val >= K_O_MAX_M_M and dko > 0.0:
+        dko = -abs(dko) * 0.5
+
+    return i_pump, i_katp, datp, dnai, dko
+
+
+@njit(cache=True)
 def _calculate_syn_tau(stype, atau_mult):
     """
     Map a conductance-based synapse type code to its literature baseline rise and decay time constants, scaled by a multiplier.
@@ -246,14 +331,14 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz):
     # Default: const (stype == 0)
     return iext
 
-@njit(float64(float64, float64), cache=True)
-def nmda_mg_block(V, Mg_ext):
+@njit(float64(float64, float64, float64), cache=True)
+def nmda_mg_block(V, Mg_ext, mg_block_mM=3.57):
     """Voltage-dependent MgÂ˛âş block of NMDA receptors.
 
     B(V) = 1 / (1 + [MgÂ˛âş]/MG_BLOCK_CONST * exp(MG_BLOCK_VOLTAGE_FACTOR * V))
     Reference: Jahr & Stevens 1990, J Neurosci 10:1830
     """
-    return 1.0 / (1.0 + (Mg_ext / MG_BLOCK_CONST) * np.exp(MG_BLOCK_VOLTAGE_FACTOR * V))
+    return 1.0 / (1.0 + (Mg_ext / max(mg_block_mM, 1e-12)) * np.exp(MG_BLOCK_VOLTAGE_FACTOR * V))
 
 
 @njit(cache=True)
@@ -457,7 +542,8 @@ def rhs_multicompartment(
         k_o_clearance_tau_ms,
     ) = unpack_env_params(physics_params.env_params)
     b_ca = physics_params.b_ca
-    
+    nmda_mg_block_mM = physics_params.nmda_mg_block_mM
+
     # Primary stimulation
     stype = physics_params.stype
     iext = physics_params.iext
@@ -605,32 +691,20 @@ def rhs_multicompartment(
             ca_i_val, ca_ext, ca_rest, t_kelvin,
         )
 
-        # K_ATP current: ATP-sensitive potassium channel
-        # g_KATP = g_max / (1 + ([ATP]/K_d)^2)
-        # I_KATP = g_KATP * (V - E_K)
+        # Unified metabolism: pump current, K_ATP, and metabolic derivatives
+        i_pump, i_katp, datp, dnai, dko = compute_metabolism_and_pump(
+            vi, mi, hi, ni, xi, yi, ji, ai, bi, zi, wi,
+            gna_v[i], gk_v[i], ga_v[i], gsk_v[i], gim_v[i], gnap_v[i], gnar_v[i],
+            ena_i, ek_i,
+            en_nap, en_nar, en_ia, en_sk, en_im, dyn_ca,
+            g_katp_max, katp_kd_atp_mM,
+            atp_i_val, atp_synthesis_rate,
+            na_i_val, k_o_val, k_o_rest_mM,
+            ion_drift_gain, k_o_clearance_tau_ms,
+            i_ca_influx,
+        )
         if dyn_atp:
-            atp_ratio = atp_i_val / katp_kd_atp_mM
-            g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
-            i_katp = g_katp * (vi - ek_i)
             i_ion += i_katp
-
-        # Electrogenic Na/K pump current: outward-positive, scales with inward Na load
-        i_na_total = gna_v[i] * (mi ** 3) * hi * (vi - ena_i)
-        if en_nap:
-            i_na_total += gnap_v[i] * xi * (vi - ena_i)
-        if en_nar:
-            i_na_total += gnar_v[i] * yi * ji * (vi - ena_i)
-        i_k_total = gk_v[i] * (ni ** 4) * (vi - ek_i)
-        if en_ia:
-            i_k_total += ga_v[i] * ai * bi * (vi - ek_i)
-        if en_sk:
-            i_k_total += gsk_v[i] * zi * (vi - ek_i)
-        if en_im:
-            i_k_total += gim_v[i] * wi * (vi - ek_i)
-        if dyn_atp:
-            i_k_total += i_katp
-        pump_atp_val = atp_i_val if dyn_atp else atp_max_mM
-        i_pump = compute_na_k_pump_current(i_na_total, pump_atp_val)
 
         # Axial coupling (sparse Laplacian row i)
         i_ax = 0.0
@@ -646,7 +720,7 @@ def rhs_multicompartment(
         if is_conductance_based:
             g_syn = i_stim_primary  # distributed conductance [mS/cmÂ˛]
             if is_nmda:
-                g_syn *= nmda_mg_block(vi, mg_ext)
+                g_syn *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
             i_stim_eff = -(g_syn * (vi - e_syn))
         else:
             i_stim_eff = i_stim_primary
@@ -660,7 +734,7 @@ def rhs_multicompartment(
             if is_cond_2:
                 g2 = i_stim_secondary
                 if is_nmda_2:
-                    g2 *= nmda_mg_block(vi, mg_ext)
+                    g2 *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
                 i_stim_eff -= g2 * (vi - e_syn_2)
             else:
                 i_stim_eff += i_stim_secondary
@@ -715,8 +789,9 @@ def rhs_multicompartment(
             dydt[off_y + i] = phi_nar[i] * (ay_NaR(vi) * (1.0 - yi) - by_NaR(vi) * yi)
             dydt[off_j + i] = phi_nar[i] * (aj_NaR(vi) * (1.0 - ji) - bj_NaR(vi) * ji)
 
-        # SK gate ODE: dz/dt = phi_k * (z_inf(Ca) - z) / tau_SK
-        # SK is a Ca-activated K channel â€” temperature scaling via phi_k.
+        # SK gate: dz/dt = (z_inf(Ca) - z) / tau_eff,  tau_eff = tau_SK / phi_k
+        # Unified with hines.py analytic: z_new = z_inf + (z-z_inf)*exp(-dt/tau_eff)
+        # ODE form here because BDF needs continuous derivatives.
         # Hirschberg et al. 1998, J Gen Physiol 111:565
         if en_sk:
             zi = y[off_zsk + i]
@@ -725,7 +800,8 @@ def rhs_multicompartment(
             else:
                 ca_sk = ca_rest
             z_inf = z_inf_SK(ca_sk)
-            dydt[off_zsk + i] = phi_k[i] * (z_inf - zi) / tau_sk
+            tau_eff = max(tau_sk, 1e-12) / max(phi_k[i], 1e-12)
+            dydt[off_zsk + i] = (z_inf - zi) / tau_eff
 
         # Calcium dynamics
         if dyn_ca:
@@ -733,47 +809,12 @@ def rhs_multicompartment(
             dca = b_ca[i] * i_ca_influx - (ca_i_val - ca_rest) / tau_ca
             dydt[off_ca + i] = clamp_calcium_derivative(ca_i_val, dca)
 
-        # ATP dynamics
+        # Store metabolism derivatives (already computed by compute_metabolism_and_pump)
         if dyn_atp:
-            atp_i_val = y[off_atp + i]
-            pump_drive = compute_na_k_pump_drive(i_na_total, atp_i_val)
-            pump_consumption = pump_drive * _NA_PUMP_FACTOR
-            if dyn_ca:
-                pump_consumption += i_ca_influx * _CA_PUMP_FACTOR
-
-            # ATP ODE: d[ATP]/dt = Synthesis - PumpConsumption
-            datp = atp_synthesis_rate * 0.001 - pump_consumption
-
-            # Metabolic feedback: scale pump efficiency if ATP < 0.2 mM
-            # This affects calcium pump time constant (tau_ca) and Na/K pump efficiency
-            # Applied in the next time step via parameter scaling
-            if atp_i_val < ATP_PUMP_FAILURE_THRESHOLD:
-                # Pump failure: reduce synthesis efficiency
-                datp *= atp_i_val / ATP_PUMP_FAILURE_THRESHOLD
-
-            # Clamp ATP to physiological bounds
-            if atp_i_val <= ATP_MIN_M_M and datp < 0.0:
-                datp = abs(datp) * 0.5
-            elif atp_i_val >= ATP_MAX_M_M and datp > 0.0:
-                datp = -abs(datp) * 0.5
-
             dydt[off_atp + i] = datp
-
             if off_na_i >= 0:
-                dnai = ion_drift_gain * (max(0.0, -i_na_total) - 3.0 * i_pump)
-                if na_i_val <= NA_I_MIN_M_M and dnai < 0.0:
-                    dnai = abs(dnai) * 0.5
-                elif na_i_val >= NA_I_MAX_M_M and dnai > 0.0:
-                    dnai = -abs(dnai) * 0.5
                 dydt[off_na_i + i] = dnai
-
             if off_k_o >= 0:
-                dko = ion_drift_gain * (max(0.0, i_k_total) - 2.0 * i_pump)
-                dko -= (k_o_val - k_o_rest_mM) / max(k_o_clearance_tau_ms, 1e-12)
-                if k_o_val <= K_O_MIN_M_M and dko < 0.0:
-                    dko = abs(dko) * 0.5
-                elif k_o_val >= K_O_MAX_M_M and dko > 0.0:
-                    dko = -abs(dko) * 0.5
                 dydt[off_k_o + i] = dko
 
     # Dendritic filter ODEs (outside main loop â€” not per-compartment)

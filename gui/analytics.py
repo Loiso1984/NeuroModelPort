@@ -782,19 +782,19 @@ class AnalyticsWidget(QTabWidget):
 
         # ── Phase Plane: yellow ghost dot ────────────────────────────
         if hasattr(self, 'ax_phase') and hasattr(self, 'fig_phase'):
-            n_comp = int(self._last_result.n_comp)
-            if n_comp > 0:
-                off_n = 3 * n_comp
-                y = self._last_result.y
-                v_soma = y[0, :]
-                n_soma = y[off_n, :]
+            # Use the same gate trace that the phase plane is currently showing
+            phase_data = getattr(self, '_phase_full_data', None)
+            if phase_data is not None:
+                ph_t, ph_V, ph_gate, _cfg, _I, _st, _gk = phase_data
+                v_val = np.interp(t_ms, ph_t, ph_V)
+                g_val = np.interp(t_ms, ph_t, ph_gate)
                 if hasattr(self, '_phase_highlight_dot') and self._phase_highlight_dot is not None:
                     try:
                         self._phase_highlight_dot[0].remove()
                     except Exception:
                         pass
                 self._phase_highlight_dot = self.ax_phase.plot(
-                    v_soma[idx], n_soma[idx],
+                    v_val, g_val,
                     'o', color='#F9E2AF', markersize=10,
                     markeredgecolor='black', markeredgewidth=1.5,
                     zorder=10,
@@ -1156,7 +1156,7 @@ class AnalyticsWidget(QTabWidget):
         import matplotlib.gridspec as gridspec
         # Create larger figure for taller/wider graphs
         self.fig_energy, cvs = _mpl_fig(1, 1, figsize=(10.5, 12), tight=False)
-        # v11.19: Updated layout - 4 time-series plots on left, pie chart in top-right corner
+        # v11.20: 4 time-series + horizontal stacked bar (replaces pie chart)
         gs = gridspec.GridSpec(4, 2, width_ratios=[8, 2], height_ratios=[1, 1, 1, 1],
                                figure=self.fig_energy, hspace=0.35, wspace=0.25)
         # Time-series plots in left column (all 4 rows)
@@ -1164,8 +1164,8 @@ class AnalyticsWidget(QTabWidget):
             self.fig_energy.add_subplot(gs[0, 0]),  # Balance Error
             self.fig_energy.add_subplot(gs[1, 0]),  # Cumulative Charge
             self.fig_energy.add_subplot(gs[2, 0]),  # Power
-            self.fig_energy.add_subplot(gs[3, 0]),  # ATP Pool (new)
-            self.fig_energy.add_subplot(gs[0, 1]),  # Pie chart in top-right corner
+            self.fig_energy.add_subplot(gs[3, 0]),  # ATP Pool
+            self.fig_energy.add_subplot(gs[0, 1]),  # ATP Breakdown (stacked bar)
         ]
         self.cvs_energy = cvs
         self._tab_figures['Energy & Balance'] = self.fig_energy
@@ -1174,8 +1174,27 @@ class AnalyticsWidget(QTabWidget):
         self._energy_texts: dict[str, object] = {}
         self._atp_line = None
         self._atp_threshold_line = None
-        self._pie_chart = None
-        self._pie_no_data_text = None
+        # Pre-allocate horizontal stacked bar artists (created once, updated in-place)
+        ax5 = self.ax_energy[4]
+        bar_colors = [
+            CHAN_COLORS.get('Na', '#FF6B6B'),
+            CHAN_COLORS.get('ICa', '#FA9600'),
+            '#888888',
+        ]
+        self._atp_bar_patches = []
+        left = 0.0
+        for c in bar_colors:
+            bar = ax5.barh(0, 0.0, left=left, height=0.5, color=c, edgecolor='none')
+            self._atp_bar_patches.append(bar[0])
+        ax5.set_xlim(0, 100)
+        ax5.set_yticks([])
+        ax5.set_xlabel('%', fontsize=9)
+        ax5.set_title('ATP Breakdown', fontsize=10)
+        self._atp_bar_labels = ['Na+ Pump', 'Ca2+ Pump', 'Resting']
+        self._atp_bar_no_data_text = ax5.text(
+            0.5, 0.5, 'No ATP data', ha='center', va='center',
+            transform=ax5.transAxes, fontsize=10, color='#BAC2DE', visible=False,
+        )
         return _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Energy & Balance'),
@@ -3271,17 +3290,15 @@ class AnalyticsWidget(QTabWidget):
         
         _set_canvas_margins(self.fig_energy, left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
 
-        # Add crosshair and zoom to time-series axes only (not pie chart)
+        # Add crosshair and zoom to time-series axes only (not stacked bar)
         for i, ax in enumerate(self.ax_energy[:4]):  # First 4 axes (time-series plots)
             if hasattr(ax, 'crosshair'):
                 continue  # Already added
-            # Add crosshair cursor
             from matplotlib.widgets import Cursor
             ax.crosshair = Cursor(ax, useblit=True, color='red', linewidth=0.5, linestyle='--')
-            # Enable zoom
             ax.set_navigate(True)
 
-        # ── Row 5: ATP Breakdown Pie Chart (top-right corner) ───────
+        # ── Row 5: ATP Breakdown Horizontal Stacked Bar (top-right) ──
         atp_bd = getattr(result, 'atp_breakdown', None)
         if atp_bd is None or not isinstance(atp_bd, dict):
             atp_bd = {}
@@ -3290,58 +3307,29 @@ class AnalyticsWidget(QTabWidget):
         baseline = atp_bd.get('baseline', 0.0)
         total = atp_bd.get('total', 0.0)
 
-        # Use standard channel colors, highlight Ca_pump in red if > 30% (metabolic stress)
-        ca_ratio = ca_pump / total if total > 0 else 0.0
-        if ca_ratio > 0.3:
-            # Metabolic stress: highlight Ca2+ pump in bright red
-            colors = [CHAN_COLORS.get('Na', '#FF6B6B'), '#FF0000', '#888888']
-        else:
-            colors = [CHAN_COLORS.get('Na', '#FF6B6B'), CHAN_COLORS.get('Ca', '#4ECDC4'), '#888888']
-        labels = ['Na+ Pump', 'Ca2+ Pump', 'Resting Leakage']
-        sizes = [na_pump, ca_pump, baseline]
-        title_suffix = ''
-
-        # Clear previous pie chart artists explicitly; ax.pie returns tuples/lists, not a single artist.
-        if self._pie_chart is not None:
-            for artist_group in self._pie_chart:
-                if isinstance(artist_group, (list, tuple)):
-                    for artist in artist_group:
-                        try:
-                            artist.remove()
-                        except Exception:
-                            pass
-                else:
-                    try:
-                        artist_group.remove()
-                    except Exception:
-                        pass
-            self._pie_chart = None
-        if self._pie_no_data_text is not None:
-            self._pie_no_data_text.set_visible(False)
-
-        # Create new pie chart in top-right corner
         if total > 0:
-            title_suffix = ' (METABOLIC STRESS)' if ca_ratio > 0.3 else ''
-            self._pie_chart = ax5.pie(
-                sizes,
-                labels=labels,
-                colors=colors,
-                autopct='%1.1f%%',
-                startangle=90,
-                textprops={'fontsize': 9},
-            )
-        else:
-            if self._pie_no_data_text is None:
-                self._pie_no_data_text = ax5.text(
-                    0.5, 0.5, 'No ATP data', ha='center', va='center',
-                    transform=ax5.transAxes, fontsize=10, color='#BAC2DE'
-                )
+            pcts = [100.0 * na_pump / total, 100.0 * ca_pump / total, 100.0 * baseline / total]
+            left = 0.0
+            for patch, w in zip(self._atp_bar_patches, pcts):
+                patch.set_width(w)
+                patch.set_x(left)
+                patch.set_visible(True)
+                left += w
+            # Highlight Ca2+ pump in red if > 30% (metabolic stress)
+            ca_ratio = ca_pump / total
+            if ca_ratio > 0.3:
+                self._atp_bar_patches[1].set_facecolor('#FF0000')
             else:
-                self._pie_no_data_text.set_visible(True)
-                self._pie_no_data_text.set_text('No ATP data')
+                self._atp_bar_patches[1].set_facecolor(CHAN_COLORS.get('ICa', '#FA9600'))
+            title_suffix = ' (STRESS)' if ca_ratio > 0.3 else ''
+            ax5.set_title(f'ATP Breakdown (Tot: {total:.2e}){title_suffix}', fontsize=10)
+            self._atp_bar_no_data_text.set_visible(False)
+        else:
+            for patch in self._atp_bar_patches:
+                patch.set_visible(False)
+            self._atp_bar_no_data_text.set_visible(True)
+            ax5.set_title('ATP Breakdown', fontsize=10)
 
-        ax5.set_title(f'ATP Breakdown (Total: {total:.3e} nmol/cm^2){title_suffix}', fontsize=10)
-        ax5.axis('equal')
         _set_canvas_margins(self.fig_energy, left=0.08, right=0.96, top=0.96, bottom=0.06, hspace=0.42, wspace=0.28)
         self.cvs_energy.draw_idle()
 

@@ -301,6 +301,7 @@ class PhysicsParams(NamedTuple):
     tau_ca: float64
     b_ca: np.ndarray
     mg_ext: float64
+    nmda_mg_block_mM: float64
     tau_sk: float64
     im_speed_multiplier: float64
     env_params: np.ndarray
