@@ -194,23 +194,32 @@ class DendriticFilterParams(BaseModel):
     
     Instead of directly injecting current into soma, the dendritic filter mode
     applies a CURRENT SOURCE TEST where stimulus is applied at dendrites,
-    then filtered through cable properties (exponential decay + low-pass temporal filter)
-    before reaching the soma.
+    then filtered through cable properties before reaching the soma.
     
-    Physics:
-    1. Amplitude attenuation: A(d) = exp(-distance/space_constant)
-       - Models cable decay with distance from stimulation site
-       - Typical parameters: exp(-150/150) â‰ 0.368 (63% loss)
-    
-    2. Temporal filtering: tau_dendritic determines the low-pass corner frequency
+    Physics (3 stages):
+    1. TEMPORAL FILTERING (low-pass) at dendrite site:
+       tau_dendritic determines corner frequency
        - Fast components (synaptic transients): heavily attenuated
        - Slow components (sustained input): passed through
-       - Results in more realistic somatic response
+       - Typical: 5-20 ms for dendritic membrane time constant
+    
+    2. PROPAGATION DELAY along cable:
+       delay_ms = distance / conduction_velocity
+       - Passive dendrites: 100-500 µm/ms (0.1-0.5 m/s)
+       - For 200 µm @ 250 µm/ms: delay = 0.8 ms
+       - Important for temporal precision of synaptic integration
+    
+    3. AMPLITUDE ATTENUATION (spatial decay):
+       A(d) = exp(-distance/space_constant)
+       - Typical parameters: exp(-150/150) ≈ 0.368 (63% loss)
+       - DC mode: steady-state attenuation
+       - AC mode: frequency-dependent (higher freq = more attenuation)
     
     Default values are PHYSIOLOGICALLY REALISTIC for L5 pyramidal neurons:
-    - distance_um: 150 Âµm (middle-range dendrite, soma to proximal/distal transition)
-    - space_constant_um: 150 Âµm (cable space constant for soma-proximal dendrites)
-    - tau_dendritic_ms: 10 ms (dendritic integration time scale)
+    - distance_um: 150 µm (middle-range dendrite)
+    - space_constant_um: 150 µm (cable space constant)
+    - tau_dendritic_ms: 10 ms (dendritic integration)
+    - conduction_velocity_um_ms: 250 µm/ms (0.25 m/s, passive propagation)
     """
     
     enabled: bool = Field(default=True, description="Enable dendritic filtering")
@@ -225,6 +234,15 @@ class DendriticFilterParams(BaseModel):
     tau_dendritic_ms: float = Field(
         default=10.0, gt=0,
         description="Dendritic low-pass filter time constant Ď„ (ms). Typical: 5-20 ms"
+    )
+    # Propagation delay parameter (NEW in dendritic_filter.py)
+    conduction_velocity_um_ms: float = Field(
+        default=250.0, gt=0, le=1000.0,
+        description="Signal conduction velocity (Âµm/ms = m/s). Passive dendrites: 100-500 Âµm/ms (0.1-0.5 m/s). Default: 250 Âµm/ms"
+    )
+    show_propagation_delay_hint: bool = Field(
+        default=True,
+        description="Show propagation delay hint in UI"
     )
     # AC attenuation parameters (v10.3)
     filter_mode: Literal["Classic (DC)", "Physiological (AC)"] = Field(

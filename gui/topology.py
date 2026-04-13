@@ -12,7 +12,7 @@ v10.3 additions:
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QLabel,
@@ -30,6 +30,9 @@ from .delay_target import resolve_delay_target
 
 class TopologyWidget(QWidget):
     """Visual morphology schematic, updated after each run."""
+
+    compartment_selected = Signal(int)
+    time_scrubbed = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -811,12 +814,29 @@ class TopologyWidget(QWidget):
             self._btn_play_heatmap.setText("▶")
         self._time_slider.setValue(nxt)
 
+    def highlight_time(self, t_ms: float):
+        """Highlight a specific time point on the heatmap (called from Oscilloscope)."""
+        if self._heatmap_data is None or self._heatmap_time is None:
+            return
+        # Find nearest time index
+        idx = int(np.argmin(np.abs(self._heatmap_time - t_ms)))
+        idx = max(0, min(idx, len(self._heatmap_time) - 1))
+        # Update slider without emitting signal to avoid feedback loop
+        self._time_slider.blockSignals(True)
+        self._time_slider.setValue(idx)
+        self._time_slider.blockSignals(False)
+        # Update the visual
+        self._on_time_scrub(idx)
+
     def _on_time_scrub(self, idx: int):
         if self._heatmap_data is None or self._heatmap_time is None:
             return
         idx = max(0, min(idx, self._heatmap_data.shape[1] - 1))
         t_val = self._heatmap_time[idx]
         self._lbl_time.setText(f"t = {t_val:.1f} ms")
+
+        # Emit signal for bi-directional sync with Oscilloscope
+        self.time_scrubbed.emit(float(t_val))
 
         v_data = self._heatmap_data[:, idx]
         n_comp = v_data.shape[0]

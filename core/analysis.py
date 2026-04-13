@@ -1235,6 +1235,193 @@ def reconstruct_stimulus_trace(result) -> np.ndarray:
     return _reconstruct_stimulus_proxy(result)
 
 
+def compute_csd(v_all: np.ndarray, dx: float) -> np.ndarray:
+    """
+    Compute Current-Source Density (CSD) from spatial voltage profile.
+
+    Math: CSD_i = -(V_{i-1} - 2V_i + V_{i+1}) / dx^2
+
+    This approximates the second spatial derivative of membrane potential,
+    revealing where ions enter (current sinks, negative CSD) or leave
+    (current sources, positive CSD) the neuron.
+
+    Parameters
+    ----------
+    v_all : np.ndarray
+        2D array of shape (n_comp, n_time) with membrane potentials (mV)
+    dx : float
+        Spatial step size between compartments (cm)
+
+    Returns
+    -------
+    csd : np.ndarray
+        2D array of shape (n_comp, n_time) with CSD values (mV/cm²)
+        First and last compartments are padded with zeros (boundary condition)
+    """
+    v_all = np.asarray(v_all, dtype=float)
+    if v_all.ndim != 2:
+        raise ValueError(f"v_all must be 2D, got shape {v_all.shape}")
+
+    n_comp, n_time = v_all.shape
+    if n_comp < 3:
+        # Cannot compute second derivative with fewer than 3 points
+        return np.zeros_like(v_all)
+
+    csd = np.zeros_like(v_all)
+    dx2 = dx * dx
+
+    # Central difference for interior points
+    # CSD_i = -(V_{i-1} - 2V_i + V_{i+1}) / dx^2 = (2V_i - V_{i-1} - V_{i+1}) / dx^2
+    for i in range(1, n_comp - 1):
+        csd[i, :] = (2.0 * v_all[i, :] - v_all[i - 1, :] - v_all[i + 1, :]) / dx2
+
+    # Boundary conditions: Neumann (zero derivative at boundaries)
+    # Forward/backward difference at boundaries
+    csd[0, :] = (v_all[1, :] - v_all[0, :]) / dx2
+    csd[-1, :] = (v_all[-1, :] - v_all[-2, :]) / dx2
+
+    return csd
+
+
+def shannon_entropy_isi(spike_times_ms: np.ndarray, bins: int = 20) -> float:
+    """
+    Compute Shannon Entropy of the Inter-Spike Interval (ISI) distribution.
+
+    Formula: H = -sum(p(ISI) * log(p(ISI)))
+
+    This quantifies the "randomness" or "information capacity" of the firing pattern.
+    Higher entropy = more irregular, information-rich firing.
+    Lower entropy = more regular, periodic firing.
+
+    Parameters
+    ----------
+    spike_times_ms : np.ndarray
+        Array of spike times in milliseconds
+    bins : int
+        Number of bins for ISI histogram
+
+    Returns
+    -------
+    entropy : float
+        Shannon entropy in bits (log base 2)
+    """
+    if len(spike_times_ms) < 3:
+        return 0.0
+
+    isi = np.diff(spike_times_ms)
+    if len(isi) == 0:
+        return 0.0
+
+    # Create histogram
+    hist, _ = np.histogram(isi, bins=bins, density=True)
+
+    # Remove zero probabilities
+    hist = hist[hist > 0]
+
+    if len(hist) == 0:
+        return 0.0
+
+    # Compute Shannon entropy: H = -sum(p * log2(p))
+    entropy = -np.sum(hist * np.log2(hist))
+
+    return float(entropy)
+
+
+def compute_biophysical_metrics(result, stats: dict | None = None) -> dict:
+    """
+    Compute comprehensive biophysical metrics for the Radar Chart (Fingerprint).
+
+    Returns normalized metrics (0.0 to 1.0) for:
+    1. Firing Rate (Hz, normalized to 0-200 Hz)
+    2. Adaptation Index (normalized: 0=no adaptation, 1=max adaptation)
+    3. Spike Half-width (ms, normalized: 0-2 ms)
+    4. Input Resistance (MOhm*cm², normalized: 0-100)
+    5. Energy Cost (ATP estimate, normalized to 0-1e6 nmol/cm²)
+    6. Peak-to-Threshold Ratio (normalized: 1.0-1.5)
+
+    Parameters
+    ----------
+    result : SimulationResult
+        The simulation result object
+    stats : dict, optional
+        Pre-computed spike statistics
+
+    Returns
+    -------
+    metrics : dict
+        Dictionary with raw values and normalized scores
+    """
+    from core.analysis import spike_halfwidth, adaptation_index
+
+    metrics = {
+        'firing_rate_hz': 0.0,
+        'adaptation_index': 0.0,
+        'spike_halfwidth_ms': 0.0,
+        'input_resistance_mohm': 0.0,
+        'energy_cost_atp': 0.0,
+        'peak_threshold_ratio': 1.0,
+        # Normalized values (0-1)
+        'firing_rate_norm': 0.0,
+        'adaptation_norm': 0.5,  # Center = no adaptation
+        'halfwidth_norm': 0.5,
+        'resistance_norm': 0.5,
+        'energy_norm': 0.0,
+        'peak_threshold_norm': 0.0,
+    }
+
+    # Firing rate
+    if stats and 'f_inst' in stats and np.isfinite(stats['f_inst']):
+        metrics['firing_rate_hz'] = float(stats['f_inst'])
+    elif stats and 'f_s' in stats and np.isfinite(stats['f_s']):
+        metrics['firing_rate_hz'] = float(stats['f_s'])
+    metrics['firing_rate_norm'] = min(1.0, metrics['firing_rate_hz'] / 200.0)
+
+    # Adaptation Index
+    if stats and 'spike_times' in stats and len(stats['spike_times']) >= 3:
+        ai = adaptation_index(stats['spike_times'])
+        metrics['adaptation_index'] = float(ai)
+        # Normalize: -1 to 1 -> 0 to 1
+        metrics['adaptation_norm'] = (ai + 1.0) / 2.0
+    else:
+        metrics['adaptation_norm'] = 0.5  # Neutral
+
+    # Spike Half-width
+    if hasattr(result, 'v_soma') and hasattr(result, 't'):
+        hw = spike_halfwidth(result.v_soma, result.t)
+        if np.isfinite(hw):
+            metrics['spike_halfwidth_ms'] = float(hw)
+            # Normalize: 0-2 ms -> 0-1
+            metrics['halfwidth_norm'] = max(0.0, min(1.0, hw / 2.0))
+
+    # Input Resistance
+    if hasattr(result, 'config') and hasattr(result.config, 'channels'):
+        gL = result.config.channels.gL
+        if gL > 0:
+            Rin = 1.0 / gL  # kOhm*cm²
+            metrics['input_resistance_mohm'] = float(Rin)
+            # Normalize: 0-100 -> 0-1
+            metrics['resistance_norm'] = min(1.0, Rin / 100.0)
+
+    # Energy Cost (ATP estimate)
+    if hasattr(result, 'atp_estimate'):
+        atp = result.atp_estimate
+        metrics['energy_cost_atp'] = float(atp)
+        # Normalize: typical range 0 to 1e6 nmol/cm²
+        metrics['energy_norm'] = min(1.0, atp / 1e6)
+
+    # Peak-to-Threshold Ratio
+    if stats and 'peak_V' in stats and 'threshold_V' in stats:
+        peak = stats['peak_V']
+        thresh = stats['threshold_V']
+        if np.isfinite(peak) and np.isfinite(thresh) and thresh != 0:
+            ratio = peak / thresh
+            metrics['peak_threshold_ratio'] = float(ratio)
+            # Normalize: typical range 1.0-1.5 -> 0-1
+            metrics['peak_threshold_norm'] = max(0.0, min(1.0, (ratio - 1.0) / 0.5))
+
+    return metrics
+
+
 def estimate_spike_modulation(
     spike_times_ms: np.ndarray,
     t_ms: np.ndarray,
@@ -1714,6 +1901,18 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         modulation.update(mod_raw)
         modulation["source"] = source
 
+    # ──────────────────────────────────────────────────────────────
+    #  Shannon Entropy of ISI (Information Theory Analysis)
+    # ──────────────────────────────────────────────────────────────
+    isi_entropy_bits = np.nan
+    # Compute entropy only for stochastic simulations
+    is_stochastic = bool(
+        getattr(cfg.stim, "stoch_gating", False)
+        or getattr(cfg.stim, "synaptic_train_type", "none") == "poisson"
+    )
+    if is_stochastic and n_spikes > 2:
+        isi_entropy_bits = shannon_entropy_isi(spike_times, bins=20)
+
     return {
         'n_spikes':            n_spikes,
         'spike_times':         spike_times,
@@ -1779,4 +1978,5 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         'modulation_phase_bin_centers_rad': modulation["phase_bin_centers_rad"],
         'modulation_phase_rate_hz': modulation["phase_rate_hz"],
         'modulation_low_statistical_power': modulation["low_statistical_power"],
+        'isi_entropy_bits':    isi_entropy_bits,
     }

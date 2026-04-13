@@ -303,17 +303,38 @@ def _spike_detect_kwargs_from_analysis(ana) -> dict:
 
 
 def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = 2000) -> tuple[np.ndarray, np.ndarray]:
-    """Fast stride downsampling for interactive plotting paths."""
+    """Peak-preserving Min-Max Decimation for high-fidelity spike rendering.
+
+    Min-Max Decimation ensures every spike peak is visible by capturing both
+    min and max values within each chunk. For AP traces with 1ms peaks,
+    this prevents aliasing that occurs with naive stride sampling [::step].
+    """
     n = int(len(t))
     if n <= max_points or max_points <= 0:
         return t, y
-    step = max(1, n // max_points)
-    t_ds = t[::step]
-    y_ds = y[::step]
-    if len(t_ds) == 0 or t_ds[-1] != t[-1]:
-        t_ds = np.concatenate((t_ds, np.array([t[-1]])))
-        y_ds = np.concatenate((y_ds, np.array([y[-1]])))
-    return t_ds, y_ds
+
+    # Each chunk contributes 2 points (min and max)
+    n_chunks = max_points // 2
+    chunk_size = max(1, n // n_chunks)
+
+    # Collect min and max indices from each chunk
+    indices = []
+    for i in range(0, n, chunk_size):
+        end = min(i + chunk_size, n)
+        chunk = y[i:end]
+        min_idx = i + int(np.argmin(chunk))
+        max_idx = i + int(np.argmax(chunk))
+        indices.append(min_idx)
+        indices.append(max_idx)
+
+    # Sort indices to maintain temporal order
+    indices = np.unique(np.array(indices, dtype=np.int64))
+
+    # Always include the last point for trace continuity
+    if indices[-1] != n - 1:
+        indices = np.concatenate([indices, np.array([n - 1])])
+
+    return t[indices], y[indices]
 
 
 def _spike_detect_kwargs_from_stats(stats: dict) -> dict:
@@ -469,10 +490,11 @@ class AnalyticsWidget(QTabWidget):
         self._building_lazy_tab = False  # re-entrancy guard for _on_tab_changed
         self._active_category = 'All'  # Current category filter
         self._category_mapping = {  # Map tab indices to categories
-            1: 'Single', 2: 'Single', 3: 'Single', 4: 'Single', 16: 'Single',
+            1: 'Single', 2: 'Single', 3: 'Single', 4: 'Single', 16: 'Single', 17: 'Single',
             5: 'Spectral', 6: 'Spectral', 7: 'Spectral',
             8: 'Sweep', 9: 'Sweep', 10: 'Sweep', 11: 'Sweep',
-            12: 'Physics', 13: 'Physics', 14: 'Physics', 15: 'Physics', 17: 'Physics',
+            12: 'Physics', 13: 'Physics', 14: 'Physics', 15: 'Physics', 18: 'Physics',
+            19: 'Debug',
         }
         self._all_tab_specs = {}  # Store all tab specs for rebuilding
         self._tab_figures = {}  # Store figures for fullscreen access
@@ -582,6 +604,10 @@ class AnalyticsWidget(QTabWidget):
             14: {'builder': '_build_tab_energy_balance', 'updater': '_update_energy_balance', 'title': 'Energy & Balance', 'needs_morph': True},
             15: {'builder': '_build_tab_spike_shape', 'updater': '_update_spike_shape', 'title': 'Spike Shape', 'needs_stats': True},
             16: {'builder': '_build_tab_poincare',    'updater': '_update_poincare',       'title': 'Poincare (ISI)', 'needs_stats': True},
+            17: {'builder': '_build_tab_isi_dist',    'updater': '_update_isi_dist',       'title': 'ISI Distribution', 'needs_stats': True},
+            18: {'builder': '_build_tab_fingerprint', 'updater': '_update_fingerprint',   'title': 'Fingerprint', 'needs_stats': True},
+            19: {'builder': '_build_tab_csd',         'updater': '_update_csd',            'title': 'CSD', 'needs_morph': True},
+            20: {'builder': '_build_tab_debug',       'updater': '_update_debug',          'title': 'Debug LTE'},
         }
         self._tab_specs = self._all_tab_specs.copy()  # Current visible tabs
         for idx, spec in self._tab_specs.items():
@@ -1120,6 +1146,20 @@ class AnalyticsWidget(QTabWidget):
             ha='left', va='top', color='#F38BA8', fontsize=10,
             bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8)
         )
+
+        # Add Vector Field overlay checkbox
+        from PySide6.QtWidgets import QCheckBox
+        self._cb_vector_field = QCheckBox("Show Vector Field")
+        self._cb_vector_field.setChecked(False)
+        self._cb_vector_field.setStyleSheet("color:#CDD6F4; font-size:11px;")
+        self._cb_vector_field.stateChanged.connect(self._on_phase_vector_field_changed)
+        slider_layout.addWidget(self._cb_vector_field)
+
+        # Initialize vector field storage
+        self._vector_field_quiver = None
+        self._vector_field_grid_V = None
+        self._vector_field_grid_gate = None
+
         self._phase_explain_label = QLabel("")
         self._phase_explain_label.setWordWrap(True)
         self._phase_explain_label.setStyleSheet("color:#BAC2DE; font-size:11px;")
@@ -1372,6 +1412,35 @@ class AnalyticsWidget(QTabWidget):
         )
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Poincare (ISI)'))
 
+    def _build_tab_isi_dist(self) -> QWidget:
+        """Build the ISI Distribution tab with histogram and Shannon entropy."""
+        self.fig_isi_dist, cvs = _mpl_fig(2, 1, figsize=(10.0, 9.0), tight=False)
+        self._isi_dist_axes = [self.fig_isi_dist.add_subplot(2, 1, k) for k in range(1, 3)]
+        _set_canvas_margins(self.fig_isi_dist, left=0.10, right=0.90, top=0.94, bottom=0.08, hspace=0.38, wspace=0.20)
+        self.cvs_isi_dist = cvs
+        self._tab_figures['ISI Distribution'] = self.fig_isi_dist
+
+        # Initialize plot elements
+        ax_hist, ax_metrics = self._isi_dist_axes
+        self._isi_hist_bars = None
+        self._isi_fit_line = None
+        self._isi_metrics_text = None
+
+        ax_hist.set_xlabel('ISI (ms)')
+        ax_hist.set_ylabel('Count')
+        ax_hist.set_title('ISI Distribution Histogram')
+
+        ax_metrics.set_xlim(0, 1)
+        ax_metrics.set_ylim(0, 1)
+        ax_metrics.axis('off')
+
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('ISI Distribution'),
+            scroll_canvas=True,
+            min_canvas_height=920,
+        )
+
     def _build_tab_bif(self) -> QWidget:
         self.fig_bif, cvs = _mpl_fig(2, 2, figsize=(10.2, 9.2), tight=False)
         self.ax_bif = [self.fig_bif.add_subplot(2, 2, k) for k in range(1, 5)]
@@ -1611,6 +1680,126 @@ class AnalyticsWidget(QTabWidget):
         )
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
 
+    def _build_tab_fingerprint(self) -> QWidget:
+        """Build the Radar Chart (Biophysical Fingerprint) tab."""
+        self.fig_fingerprint, cvs = _mpl_fig(1, 1, figsize=(8.8, 8.8), tight=False)
+        # Use polar projection for radar chart
+        self.ax_fingerprint = self.fig_fingerprint.add_subplot(1, 1, 1, polar=True)
+        self.cvs_fingerprint = cvs
+        self._tab_figures['Fingerprint'] = self.fig_fingerprint
+        # Initialize empty radar chart
+        self._radar_labels = ['Firing Rate', 'Adaptation', 'Half-width', 'Rin', 'Energy', 'P/T Ratio']
+        self._radar_angles = np.linspace(0, 2 * np.pi, len(self._radar_labels), endpoint=False).tolist()
+        self._radar_angles += self._radar_angles[:1]  # Complete the circle
+        self._radar_fill = None
+        self._radar_line = None
+        self._radar_points = None
+        self._radar_text = None
+        # Set up the axes
+        self.ax_fingerprint.set_xticks(self._radar_angles[:-1])
+        self.ax_fingerprint.set_xticklabels(self._radar_labels, size=10)
+        self.ax_fingerprint.set_ylim(0, 1)
+        self.ax_fingerprint.set_title('Biophysical Fingerprint', fontsize=14, fontweight='bold', pad=20)
+        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Fingerprint'))
+
+    def _build_tab_csd(self) -> QWidget:
+        """Build the CSD (Current-Source Density) spatial heatmap tab with time slider."""
+        from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QSlider, QLabel, QPushButton, QFrame
+
+        # Main container with vertical layout
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(4)
+
+        # Controls panel
+        controls = QFrame()
+        controls.setStyleSheet("QFrame { background: #1E1E2E; border-radius: 4px; padding: 4px; }")
+        ctrl_layout = QHBoxLayout(controls)
+        ctrl_layout.setContentsMargins(8, 4, 8, 4)
+        ctrl_layout.setSpacing(10)
+
+        # Time slider for spatial profile at specific time
+        ctrl_layout.addWidget(QLabel("<span style='color:#CDD6F4'>Profile at t=</span>"))
+
+        self._csd_time_slider = QSlider(Qt.Orientation.Horizontal)
+        self._csd_time_slider.setRange(0, 100)
+        self._csd_time_slider.setValue(50)
+        self._csd_time_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #313244; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #89B4FA; width: 14px; margin: -5px 0; border-radius: 7px; }
+        """)
+        self._csd_time_slider.valueChanged.connect(self._on_csd_time_changed)
+        ctrl_layout.addWidget(self._csd_time_slider, stretch=1)
+
+        self._lbl_csd_time = QLabel("<span style='color:#89B4FA'>50%</span>")
+        ctrl_layout.addWidget(self._lbl_csd_time)
+
+        # Play button for animation
+        self._btn_csd_play = QPushButton("▶ Play")
+        self._btn_csd_play.setStyleSheet("""
+            QPushButton { background: #313244; color: #A6E3A1; border: 1px solid #45475A;
+                         border-radius: 4px; padding: 4px 12px; font-size: 11px; }
+            QPushButton:hover { background: #45475A; }
+        """)
+        self._btn_csd_play.clicked.connect(self._on_csd_play_clicked)
+        ctrl_layout.addWidget(self._btn_csd_play)
+
+        # Export button
+        btn_export = QPushButton("📊 Export Profile")
+        btn_export.setStyleSheet("""
+            QPushButton { background: #313244; color: #89B4FA; border: 1px solid #45475A;
+                         border-radius: 4px; padding: 4px 12px; font-size: 11px; }
+            QPushButton:hover { background: #45475A; }
+        """)
+        btn_export.clicked.connect(self._on_csd_export_clicked)
+        ctrl_layout.addWidget(btn_export)
+
+        main_layout.addWidget(controls)
+
+        # Matplotlib figure
+        self.fig_csd, cvs = _mpl_fig(2, 1, figsize=(10.0, 8.5), tight=False)
+        self._csd_axes = [self.fig_csd.add_subplot(2, 1, k) for k in range(1, 3)]
+        # Add third axis for spatial profile
+        self._csd_profile_ax = self.fig_csd.add_subplot(2, 2, 4)  # Right side, bottom half
+        _set_canvas_margins(self.fig_csd, left=0.08, right=0.94, top=0.95, bottom=0.10, hspace=0.38, wspace=0.30)
+        self.cvs_csd = cvs
+        self._tab_figures['CSD'] = self.fig_csd
+        self._csd_im = None
+        self._csd_cbar = None
+        self._csd_vm_line = None
+        self._csd_profile_line = None
+        self._csd_profile_fill = None
+        self._csd_current_result = None  # Store for animation
+
+        # Store animation timer
+        self._csd_play_timer = None
+
+        main_layout.addWidget(cvs, stretch=1)
+
+        return _tab_with_toolbar(
+            container,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('CSD'),
+            scroll_canvas=True,
+            min_canvas_height=920,
+        )
+
+    def _build_tab_debug(self) -> QWidget:
+        """Build the Debug LTE (Local Truncation Error) Monitor tab."""
+        self.fig_debug, cvs = _mpl_fig(2, 1, figsize=(10.0, 9.0), tight=False)
+        self._debug_axes = [self.fig_debug.add_subplot(2, 1, k) for k in range(1, 3)]
+        _set_canvas_margins(self.fig_debug, left=0.08, right=0.94, top=0.95, bottom=0.08, hspace=0.34, wspace=0.20)
+        self.cvs_debug = cvs
+        self._tab_figures['Debug LTE'] = self.fig_debug
+        self._lte_lines = None
+        self._lte_threshold_line = None
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Debug LTE'),
+            scroll_canvas=True,
+            min_canvas_height=920,
+        )
+
     # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
     # ─────────────────────────────────────────────────────────────────
@@ -1644,10 +1833,14 @@ class AnalyticsWidget(QTabWidget):
         self._update_currents(result)
         self._update_gates(result)
         self._update_equil(result)
+        self._update_fingerprint(result, stats)
+        self._update_csd(result)
+        self._update_debug(result)
         if result.morph:
             self._update_energy_balance(result)
         self._update_spike_shape(result, stats)
         self._update_poincare(result, stats)
+        self._update_isi_dist(result, stats)
 
 
     def _compute_lle_now(self):
@@ -3031,12 +3224,53 @@ class AnalyticsWidget(QTabWidget):
         ax.grid(alpha=0.3)
         ax.legend(fontsize=9)
 
+        # ── Vector Field Overlay ───────────────────────────────────────
+        if hasattr(self, '_cb_vector_field') and self._cb_vector_field.isChecked():
+            if len(t) > 1 and len(V) > 1:
+                dt = float(np.median(np.diff(t)))
+                dV = np.gradient(V, dt)
+                dgate = np.gradient(gate_t, dt)
+                # Create grid for quiver plot
+                V_grid = np.linspace(-90, 40, 15)
+                gate_grid = np.linspace(0, 1, 10)
+                VG, GG = np.meshgrid(V_grid, gate_grid)
+                # Interpolate derivatives to grid
+                from scipy.interpolate import griddata
+                points = np.column_stack([V, gate_t])
+                dV_grid = griddata(points, dV, (VG, GG), method='linear', fill_value=0)
+                dG_grid = griddata(points, dgate, (VG, GG), method='linear', fill_value=0)
+                # Normalize arrows
+                mag = np.sqrt(dV_grid**2 + dG_grid**2)
+                mag[mag == 0] = 1
+                scale = 5.0
+                if self._vector_field_quiver is None:
+                    self._vector_field_quiver = ax.quiver(
+                        VG, GG, dV_grid/mag*scale, dG_grid/mag*scale,
+                        mag, cmap='viridis', scale=20, width=0.003, alpha=0.7
+                    )
+                else:
+                    self._vector_field_quiver.set_offsets(np.column_stack([VG.ravel(), GG.ravel()]))
+                    self._vector_field_quiver.set_UVC(
+                        (dV_grid/mag*scale).ravel(),
+                        (dG_grid/mag*scale).ravel(),
+                        mag.ravel()
+                    )
+        else:
+            if self._vector_field_quiver is not None:
+                self._vector_field_quiver.remove()
+                self._vector_field_quiver = None
+
         self.cvs_phase.draw_idle()
 
     def _on_phase_time_slider_changed(self, value: int):
         """Handle time slider change to update phase plane plot with selected time window."""
         if self._phase_full_data is None:
             return
+        if hasattr(self, '_last_result') and self._last_result is not None:
+            self._update_phase(self._last_result, self._last_stats)
+
+    def _on_phase_vector_field_changed(self, state: int):
+        """Handle vector field checkbox change."""
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_phase(self._last_result, self._last_stats)
 
@@ -3542,6 +3776,115 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_poincare.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
+    #  18 — ISI DISTRIBUTION (Shannon Entropy Dashboard)
+    # ─────────────────────────────────────────────────────────────────
+    def _update_isi_dist(self, result, stats: dict):
+        """Update ISI Distribution histogram with Shannon entropy metrics."""
+        if not hasattr(self, 'fig_isi_dist'):
+            return
+
+        from core.analysis import detect_spikes, shannon_entropy_isi
+
+        ax_hist, ax_metrics = self._isi_dist_axes
+
+        # Get spike times
+        if stats and 'spike_times' in stats:
+            spike_times = np.asarray(stats['spike_times'])
+        else:
+            t = np.asarray(result.t, dtype=float)
+            v = np.asarray(result.v_soma, dtype=float)
+            peak_idx, spike_times, _ = detect_spikes(v, t)
+
+        n_spikes = len(spike_times)
+
+        # Need at least 2 spikes for ISI
+        if n_spikes < 2:
+            ax_hist.clear()
+            ax_hist.text(0.5, 0.5, 'Need ≥2 spikes for ISI distribution',
+                        ha='center', va='center', transform=ax_hist.transAxes,
+                        fontsize=12, color='#89B4FA')
+            ax_metrics.clear()
+            ax_metrics.set_xlim(0, 1)
+            ax_metrics.set_ylim(0, 1)
+            ax_metrics.axis('off')
+            self.cvs_isi_dist.draw_idle()
+            return
+
+        # Calculate ISIs
+        isi = np.diff(spike_times)
+
+        # Histogram
+        ax_hist.clear()
+        bins = min(20, max(5, n_spikes // 2))
+        counts, bin_edges, patches = ax_hist.hist(isi, bins=bins, alpha=0.7, color='#89B4FA', edgecolor='#45475A')
+
+        # Fit exponential if enough data
+        if len(isi) >= 5:
+            try:
+                from scipy.stats import expon
+                loc, scale = expon.fit(isi)
+                x_fit = np.linspace(isi.min(), isi.max(), 100)
+                y_fit = expon.pdf(x_fit, loc, scale) * len(isi) * (bin_edges[1] - bin_edges[0])
+                ax_hist.plot(x_fit, y_fit, 'r--', lw=2, label=f'Exp fit (τ={scale:.1f}ms)')
+                ax_hist.legend(fontsize=9)
+            except Exception:
+                pass
+
+        ax_hist.set_xlabel('ISI (ms)')
+        ax_hist.set_ylabel('Count')
+        ax_hist.set_title(f'ISI Distribution (N={n_spikes} spikes, {len(isi)} ISIs)')
+        ax_hist.grid(alpha=0.2)
+
+        # Metrics panel with Shannon entropy
+        ax_metrics.clear()
+        ax_metrics.set_xlim(0, 1)
+        ax_metrics.set_ylim(0, 1)
+        ax_metrics.axis('off')
+
+        # Compute statistics
+        mean_isi = np.mean(isi)
+        std_isi = np.std(isi)
+        cv_isi = std_isi / mean_isi if mean_isi > 0 else 0
+
+        # Shannon entropy
+        if len(isi) >= 3:
+            entropy_bits = shannon_entropy_isi(spike_times, bins=min(20, len(isi)))
+        else:
+            entropy_bits = 0.0
+
+        # Max entropy for comparison (uniform distribution)
+        max_entropy = np.log2(bins) if bins > 0 else 0
+        entropy_ratio = entropy_bits / max_entropy if max_entropy > 0 else 0
+
+        # Regularity metrics
+        is_regular = cv_isi < 0.1
+        is_bursting = np.any(isi[:-1] / np.maximum(isi[1:], 1e-10) > 3)
+
+        # Format metrics text
+        metrics_text = (
+            f"ISI Statistics:\n"
+            f"  Mean: {mean_isi:.2f} ms\n"
+            f"  Std:  {std_isi:.2f} ms\n"
+            f"  CV:   {cv_isi:.3f} {'(regular)' if is_regular else '(irregular)'}\n"
+            f"\n"
+            f"Shannon Entropy:\n"
+            f"  H = {entropy_bits:.2f} bits\n"
+            f"  H/Hmax = {entropy_ratio:.2%}\n"
+            f"  Pattern: {'Regular/Poisson' if entropy_ratio > 0.7 else 'Bursting/Structured' if is_bursting else 'Adaptive/Mixed'}\n"
+            f"\n"
+            f"Classification:\n"
+            f"  {'✓ Regular spiking' if is_regular else '⚡ Irregular spiking'}\n"
+            f"  {'⚡ Bursting detected' if is_bursting else '✓ No bursting'}"
+        )
+
+        ax_metrics.text(0.05, 0.95, metrics_text, transform=ax_metrics.transAxes,
+                       fontsize=10, verticalalignment='top', fontfamily='monospace',
+                       color='#CDD6F4',
+                       bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8, edgecolor='#45475A'))
+
+        self.cvs_isi_dist.draw_idle()
+
+    # ─────────────────────────────────────────────────────────────────
     #  12 — SPECTROGRAM  (STFT of soma Vm)
     # ─────────────────────────────────────────────────────────────────
     def _update_spectrogram(self, result):
@@ -3935,6 +4278,395 @@ class AnalyticsWidget(QTabWidget):
         _set_canvas_margins(self.fig_excmap, left=0.08, right=0.96, top=0.94, bottom=0.08, hspace=0.32, wspace=0.24)
         self.cvs_excmap.draw_idle()
         self.setCurrentWidget(self.tab_excmap)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  12 — FINGERPRINT (Radar Chart)
+    # ─────────────────────────────────────────────────────────────────
+    # Reference: Healthy Pyramidal L5 neuron baseline (normalized 0-1)
+    _REFERENCE_BASELINE = [0.5, 0.5, 0.5, 0.5, 0.3, 0.5]  # [rate, adapt, hw, Rin, energy, P/T]
+
+    def _update_fingerprint(self, result, stats):
+        """Update the Radar Chart (Biophysical Fingerprint) tab."""
+        if not hasattr(self, 'fig_fingerprint'):
+            return
+        from core.analysis import compute_biophysical_metrics
+
+        ax = self.ax_fingerprint
+        metrics = compute_biophysical_metrics(result, stats)
+
+        # Get normalized values for each axis
+        values = [
+            metrics['firing_rate_norm'],
+            metrics['adaptation_norm'],
+            metrics['halfwidth_norm'],
+            metrics['resistance_norm'],
+            metrics['energy_norm'],
+            metrics['peak_threshold_norm'],
+        ]
+        values_closed = values + values[:1]
+
+        # Reference baseline (healthy pyramidal) — for comparison
+        ref_values = self._REFERENCE_BASELINE + self._REFERENCE_BASELINE[:1]
+
+        # Update or create the radar chart elements
+        if self._radar_fill is None:
+            # Reference polygon (dashed gray)
+            self._radar_ref_line = ax.plot(
+                self._radar_angles, ref_values, '--', linewidth=1.5,
+                color='#6C7086', alpha=0.7, label='Healthy L5 Ref'
+            )[0]
+            self._radar_fill = ax.fill(
+                self._radar_angles, values_closed, alpha=0.25, color='#89B4FA'
+            )[0]
+            self._radar_line = ax.plot(
+                self._radar_angles, values_closed, 'o-', linewidth=2,
+                color='#89B4FA', label='Current', markersize=6
+            )[0]
+            # Add legend
+            ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1),
+                     fontsize=8, framealpha=0.8, facecolor='#1E1E2E')
+        else:
+            self._radar_fill.set_xy(np.column_stack([self._radar_angles, values_closed]))
+            self._radar_line.set_data(self._radar_angles, values_closed)
+
+        # Compute deviation from reference for summary
+        deviations = [
+            (values[i] - self._REFERENCE_BASELINE[i]) / max(0.01, self._REFERENCE_BASELINE[i]) * 100
+            for i in range(6)
+        ]
+        avg_deviation = np.mean(np.abs(deviations))
+
+        # Color-coded summary
+        summary = (
+            f"Firing Rate: {metrics['firing_rate_hz']:.1f} Hz "
+            f"({values[0]:.2f}) {self._deviation_arrow(deviations[0])}\n"
+            f"Adaptation: {metrics['adaptation_index']:.2f} "
+            f"({values[1]:.2f}) {self._deviation_arrow(deviations[1])}\n"
+            f"Half-width: {metrics['spike_halfwidth_ms']:.2f} ms "
+            f"({values[2]:.2f}) {self._deviation_arrow(deviations[2])}\n"
+            f"Input R: {metrics['input_resistance_mohm']:.1f} MΩ·cm² "
+            f"({values[3]:.2f}) {self._deviation_arrow(deviations[3])}\n"
+            f"Energy: {metrics['energy_cost_atp']:.2e} "
+            f"({values[4]:.2f}) {self._deviation_arrow(deviations[4])}\n"
+            f"P/T Ratio: {metrics['peak_threshold_ratio']:.2f} "
+            f"({values[5]:.2f}) {self._deviation_arrow(deviations[5])}\n"
+            f"────────────────────\n"
+            f"Avg Deviation: {avg_deviation:.1f}%"
+        )
+
+        if self._radar_text is None:
+            self._radar_text = ax.text(
+                1.35, 0.5, summary, transform=ax.transAxes, fontsize=9,
+                verticalalignment='center', color='#CDD6F4',
+                bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8),
+                fontfamily='monospace'
+            )
+        else:
+            self._radar_text.set_text(summary)
+
+        ax.set_ylim(0, 1)
+        self.cvs_fingerprint.draw_idle()
+
+    def _deviation_arrow(self, pct_dev: float) -> str:
+        """Return arrow indicator for deviation from reference."""
+        if abs(pct_dev) < 10:
+            return "●"  # Within 10% — close to reference
+        elif pct_dev > 0:
+            return "↑" if pct_dev < 50 else "↑↑"  # Elevated
+        else:
+            return "↓" if pct_dev > -50 else "↓↓"  # Reduced
+
+    # ─────────────────────────────────────────────────────────────────
+    #  13 — CSD (Current-Source Density)
+    # ─────────────────────────────────────────────────────────────────
+    def _update_csd(self, result):
+        """Update the CSD spatial heatmap tab."""
+        if not hasattr(self, 'fig_csd'):
+            return
+        if not hasattr(result, 'v_all') or result.v_all is None:
+            return
+        if result.v_all.shape[0] < 3:
+            return  # Need at least 3 compartments for CSD
+
+        from core.analysis import compute_csd
+
+        # Store result for animation and export
+        self._csd_current_result = result
+
+        ax_csd, ax_vm = self._csd_axes
+        ax_profile = self._csd_profile_ax
+
+        # Compute CSD
+        dx = getattr(result.config.morphology, 'dx', 0.001)  # Default 10 µm in cm
+        csd = compute_csd(result.v_all, dx)
+
+        t = result.t
+        n_comp = csd.shape[0]
+        x_pos = np.arange(n_comp)  # Compartment indices as spatial position
+
+        # Create meshgrid for heatmap
+        T, X = np.meshgrid(t, x_pos)
+
+        # Plot CSD heatmap
+        if self._csd_im is None:
+            self._csd_im = ax_csd.pcolormesh(T, X, csd, cmap='RdBu_r', shading='auto', vmin=-100, vmax=100)
+            self._csd_cbar = self.fig_csd.colorbar(self._csd_im, ax=ax_csd, label='CSD (mV/cm²)')
+        else:
+            self._csd_im.set_array(csd.ravel())
+            if self._csd_cbar is not None:
+                self._csd_cbar.update_normal(self._csd_im)
+
+        ax_csd.set_xlabel('Time (ms)')
+        ax_csd.set_ylabel('Compartment')
+        ax_csd.set_title('Current-Source Density (CSD): Sinks (red) = ion entry, Sources (blue) = ion exit')
+
+        # Plot voltage heatmap below for comparison
+        if self._csd_vm_line is None:
+            self._csd_vm_line = ax_vm.pcolormesh(T, X, result.v_all, cmap='viridis', shading='auto')
+            self.fig_csd.colorbar(self._csd_vm_line, ax=ax_vm, label='Vm (mV)')
+        else:
+            self._csd_vm_line.set_array(result.v_all.ravel())
+
+        ax_vm.set_xlabel('Time (ms)')
+        ax_vm.set_ylabel('Compartment')
+        ax_vm.set_title('Membrane Potential (Vm)')
+
+        # Add vertical line on heatmaps showing current time position
+        slider_pos = self._csd_time_slider.value() / 100.0
+        time_idx = int(slider_pos * (len(t) - 1))
+        current_t = t[time_idx]
+
+        # Draw/update time marker line
+        if hasattr(self, '_csd_time_line_csd'):
+            self._csd_time_line_csd.set_xdata([current_t, current_t])
+        else:
+            self._csd_time_line_csd = ax_csd.axvline(x=current_t, color='white', lw=2, alpha=0.7)
+        if hasattr(self, '_csd_time_line_vm'):
+            self._csd_time_line_vm.set_xdata([current_t, current_t])
+        else:
+            self._csd_time_line_vm = ax_vm.axvline(x=current_t, color='white', lw=2, alpha=0.7)
+
+        # Update spatial profile plot
+        self._update_csd_profile(csd, result.v_all, x_pos, time_idx, current_t)
+
+        _set_canvas_margins(self.fig_csd, left=0.08, right=0.94, top=0.95, bottom=0.10, hspace=0.38, wspace=0.30)
+        self.cvs_csd.draw_idle()
+
+    def _update_csd_profile(self, csd, v_all, x_pos, time_idx, current_t):
+        """Update the spatial profile plot at current time."""
+        ax_profile = self._csd_profile_ax
+
+        # Get CSD and Vm profiles at current time
+        csd_profile = csd[:, time_idx]
+        vm_profile = v_all[:, time_idx]
+
+        # Plot CSD profile
+        if self._csd_profile_line is None:
+            self._csd_profile_line = ax_profile.plot(csd_profile, x_pos, 'b-', lw=2, label='CSD')[0]
+            # Fill positive (sinks) in red, negative (sources) in blue
+            self._csd_profile_fill_pos = ax_profile.fill_betweenx(
+                x_pos, 0, csd_profile, where=(csd_profile >= 0), alpha=0.3, color='red', interpolate=True
+            )
+            self._csd_profile_fill_neg = ax_profile.fill_betweenx(
+                x_pos, 0, csd_profile, where=(csd_profile < 0), alpha=0.3, color='blue', interpolate=True
+            )
+            ax_profile.set_xlabel('CSD (mV/cm²)', color='#89B4FA')
+            ax_profile.set_ylabel('Compartment')
+            ax_profile.set_title(f'Spatial Profile @ t={current_t:.1f} ms')
+            ax_profile.axvline(x=0, color='gray', lw=0.5, linestyle='--')
+            ax_profile.grid(alpha=0.3)
+        else:
+            self._csd_profile_line.set_data(csd_profile, x_pos)
+            ax_profile.set_title(f'Spatial Profile @ t={current_t:.1f} ms')
+
+        ax_profile.set_xlim(-max(100, np.max(np.abs(csd_profile)) * 1.1),
+                          max(100, np.max(np.abs(csd_profile)) * 1.1))
+
+    def _on_csd_time_changed(self, value):
+        """Handle CSD time slider change."""
+        if self._csd_current_result is None:
+            return
+
+        # Update label
+        self._lbl_csd_time.setText(f"<span style='color:#89B4FA'>{value}%</span>")
+
+        # Update CSD plot with new time position
+        self._update_csd(self._csd_current_result)
+
+    def _on_csd_play_clicked(self):
+        """Animate CSD spatial profile over time."""
+        from PySide6.QtCore import QTimer
+
+        if self._csd_play_timer is not None and self._csd_play_timer.isActive():
+            # Stop animation
+            self._csd_play_timer.stop()
+            self._btn_csd_play.setText("▶ Play")
+            return
+
+        if self._csd_current_result is None:
+            return
+
+        # Start animation
+        self._btn_csd_play.setText("⏸ Pause")
+
+        def advance_frame():
+            current = self._csd_time_slider.value()
+            if current >= 100:
+                self._csd_time_slider.setValue(0)
+            else:
+                self._csd_time_slider.setValue(current + 2)  # +2% per frame
+
+        self._csd_play_timer = QTimer(self)
+        self._csd_play_timer.timeout.connect(advance_frame)
+        self._csd_play_timer.start(100)  # 100ms = 10 fps
+
+    def _on_csd_export_clicked(self):
+        """Export CSD spatial profile to CSV."""
+        import numpy as np
+        from PySide6.QtWidgets import QFileDialog
+
+        if self._csd_current_result is None:
+            return
+
+        # Get current time index
+        slider_pos = self._csd_time_slider.value() / 100.0
+        t = self._csd_current_result.t
+        time_idx = int(slider_pos * (len(t) - 1))
+        current_t = t[time_idx]
+
+        # Compute CSD
+        from core.analysis import compute_csd
+        dx = getattr(self._csd_current_result.config.morphology, 'dx', 0.001)
+        csd = compute_csd(self._csd_current_result.v_all, dx)
+
+        # Prepare data
+        n_comp = csd.shape[0]
+        x_pos = np.arange(n_comp)
+        csd_profile = csd[:, time_idx]
+        vm_profile = self._csd_current_result.v_all[:, time_idx]
+
+        # Export dialog
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export CSD Profile", f"csd_profile_t{current_t:.1f}ms.csv",
+            "CSV files (*.csv);;All files (*)"
+        )
+
+        if filename:
+            try:
+                np.savetxt(
+                    filename,
+                    np.column_stack([x_pos, csd_profile, vm_profile]),
+                    delimiter=',',
+                    header='Compartment,CSD_mV_per_cm2,Vm_mV',
+                    comments='',
+                    fmt='%.6f'
+                )
+                print(f"✅ CSD profile exported to: {filename}")
+            except Exception as e:
+                print(f"❌ Export failed: {e}")
+
+    # ─────────────────────────────────────────────────────────────────
+    #  14 — DEBUG LTE (Local Truncation Error) Monitor
+    # ─────────────────────────────────────────────────────────────────
+    def _update_debug(self, result):
+        """Update the Debug LTE (Local Truncation Error) Monitor tab."""
+        if not hasattr(self, 'fig_debug'):
+            return
+
+        ax_lte, ax_dt = self._debug_axes
+        t = result.t
+
+        # Check if we have the necessary data for LTE computation
+        if hasattr(result, 'solver_residual') and result.solver_residual is not None:
+            lte_data = np.asarray(result.solver_residual)
+        else:
+            # Fallback: compute a proxy from voltage derivative discontinuity
+            if len(t) > 2:
+                V = result.v_soma
+                dt = np.median(np.diff(t))
+                # Estimate residual from second derivative
+                d2V = np.gradient(np.gradient(V, dt), dt)
+                # Scale by dt for a proxy of truncation error
+                lte_data = np.abs(d2V) * (dt ** 2) / 2.0
+            else:
+                lte_data = np.zeros_like(t)
+
+        # Plot LTE over time
+        if self._lte_lines is None:
+            self._lte_lines = ax_lte.plot(t, lte_data, color='#F38BA8', lw=1.5)[0]
+        else:
+            self._lte_lines.set_data(t, lte_data)
+
+        ax_lte.set_xlabel('Time (ms)')
+        ax_lte.set_ylabel('LTE (mV)')
+        ax_lte.set_title('Local Truncation Error Monitor')
+        ax_lte.grid(alpha=0.3)
+
+        # Add threshold warning line at 1.0 mV
+        if self._lte_threshold_line is None:
+            self._lte_threshold_line = ax_lte.axhline(y=1.0, color='#FAB387', linestyle='--', linewidth=2, label='Warning threshold (1.0 mV)')
+        ax_lte.legend(fontsize=9)
+
+        # Check for excessive error and suggest adaptive timestep
+        max_lte = np.max(lte_data) if len(lte_data) > 0 else 0.0
+        mean_lte = np.mean(lte_data) if len(lte_data) > 0 else 0.0
+        current_dt = np.median(np.diff(t)) if len(t) > 1 else 0.05
+
+        # Smart adaptive timestep calculation
+        # LTE ∝ dt² for second-order methods, so to achieve target LTE:
+        # dt_new = dt_old * sqrt(target_LTE / max_LTE)
+        target_lte = 0.5  # Target max LTE (half of warning threshold)
+        if max_lte > target_lte:
+            suggested_dt = current_dt * np.sqrt(target_lte / max_lte)
+            # Round to reasonable precision
+            suggested_dt = max(0.001, round(suggested_dt, 4))  # Min 1 µs
+
+            warning_text = (
+                f'⚠ High LTE: {max_lte:.2f} mV (mean: {mean_lte:.3f} mV)\n'
+                f'   Current dt: {current_dt:.3f} ms\n'
+                f'   ➤ Suggested dt: {suggested_dt:.4f} ms\n'
+                f'   (for target LTE < {target_lte} mV)'
+            )
+            warning_color = '#F38BA8'
+        else:
+            # LTE is acceptable - show status
+            safety_margin = target_lte / max(max_lte, 0.01)
+            warning_text = (
+                f'✅ LTE OK: {max_lte:.3f} mV max\n'
+                f'   Safety margin: {safety_margin:.1f}×\n'
+                f'   dt can be ↑ by {np.sqrt(safety_margin):.1f}×'
+            )
+            warning_color = '#A6E3A1'
+
+        # Remove old warning text if exists
+        for txt in ax_lte.texts:
+            if hasattr(txt, '_lte_warning'):
+                txt.remove()
+
+        # Add new warning/status text
+        lte_text = ax_lte.text(
+            0.02, 0.98, warning_text,
+            transform=ax_lte.transAxes, fontsize=10, color=warning_color,
+            va='top', fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9, edgecolor=warning_color)
+        )
+        lte_text._lte_warning = True  # Mark for future removal
+
+        # Plot dt vs time in second panel
+        dt_arr = np.diff(t)
+        dt_arr = np.append(dt_arr, dt_arr[-1])  # Make same length as t
+        if hasattr(self, '_dt_lines') and self._dt_lines is not None:
+            self._dt_lines.set_data(t, dt_arr)
+        else:
+            self._dt_lines = ax_dt.plot(t, dt_arr, color='#89B4FA', lw=1.5)[0]
+
+        ax_dt.set_xlabel('Time (ms)')
+        ax_dt.set_ylabel('dt (ms)')
+        ax_dt.set_title('Integration Time Step')
+        ax_dt.grid(alpha=0.3)
+
+        _set_canvas_margins(self.fig_debug, left=0.08, right=0.94, top=0.95, bottom=0.08, hspace=0.34, wspace=0.20)
+        self.cvs_debug.draw_idle()
 
     def open_fullscreen(self):
         """Open analytics clone in a maximized window preserving current tab/data."""

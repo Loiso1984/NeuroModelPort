@@ -72,17 +72,39 @@ def _plot_point_budget(plot, *, min_points: int = 800, max_points: int = 6000, o
 
 
 def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POINTS) -> tuple[np.ndarray, np.ndarray]:
-    """Fast stride downsampling for interactive rendering paths."""
+    """Peak-preserving Min-Max Decimation for high-fidelity spike rendering.
+
+    Min-Max Decimation ensures every spike peak is visible by capturing both
+    min and max values within each chunk. For AP traces with 1ms peaks,
+    this prevents aliasing that occurs with naive stride sampling [::step].
+    """
     n = int(len(t))
     if n <= max_points or max_points <= 0:
         return t, y
-    step = max(1, n // max_points)
-    t_ds = t[::step]
-    y_ds = y[::step]
-    if len(t_ds) == 0 or t_ds[-1] != t[-1]:
-        t_ds = np.concatenate((t_ds, np.array([t[-1]])))
-        y_ds = np.concatenate((y_ds, np.array([y[-1]])))
-    return t_ds, y_ds
+
+    # Each chunk contributes 2 points (min and max)
+    n_chunks = max_points // 2
+    chunk_size = max(1, n // n_chunks)
+
+    # Collect min and max indices from each chunk
+    indices = []
+    for i in range(0, n, chunk_size):
+        end = min(i + chunk_size, n)
+        chunk = y[i:end]
+        min_idx = i + int(np.argmin(chunk))
+        max_idx = i + int(np.argmax(chunk))
+        indices.append(min_idx)
+        indices.append(max_idx)
+
+    # Sort indices to maintain temporal order
+    indices = np.unique(np.array(indices, dtype=np.int64))
+
+    # Always include the last point for trace continuity
+    if indices[-1] != n - 1:
+        indices = np.concatenate([indices, np.array([n - 1])])
+
+    return t[indices], y[indices]
+
 
 PLOT_THEMES = {
     "Default": {
@@ -166,6 +188,16 @@ class OscilloscopeWidget(QWidget):
         self._ref_label.setPos(0.02, 0.98)
         self._ref_label.setVisible(False)
         self._p_v.addItem(self._ref_label, ignoreBounds=True)
+        # External time marker line (for TopologyWidget sync)
+        self._time_marker_line = pg.InfiniteLine(
+            pos=0, angle=90,
+            pen=pg.mkPen('#F9E2AF', width=2, style=Qt.PenStyle.DashLine)
+        )
+        self._time_marker_line.setVisible(False)
+        self._p_v.addItem(self._time_marker_line, ignoreBounds=True)
+        # Ghost currents storage and curves (for Comparative Biophysics)
+        self._ref_currents: dict = {}  # Full currents dictionary reference
+        self._ghost_curves: dict = {}  # Ghost curve items for currents pane
 
     # ─────────────────────────────────────────────────────────────────
     def _title_html(self, text: str, color: str) -> str:
@@ -224,6 +256,37 @@ class OscilloscopeWidget(QWidget):
             self.crosshair_label.setText(f"t={mousePoint.x():.2f} ms\nV={mousePoint.y():.2f} mV")
             self.crosshair_label.setPos(mousePoint.x(), mousePoint.y())
             self.time_highlighted.emit(mousePoint.x())
+
+    def set_time_marker(self, t_ms: float):
+        """Set a vertical time marker line (called from TopologyWidget)."""
+        if not np.isfinite(t_ms):
+            self._time_marker_line.setVisible(False)
+            return
+        self._time_marker_line.setPos(float(t_ms))
+        self._time_marker_line.setVisible(True)
+
+    def set_delay_compartment(self, comp_idx: int):
+        """Set the delay target compartment index (called from TopologyWidget)."""
+        # Switch to Custom Compartment mode and set the index
+        self._combo_delay_target.blockSignals(True)
+        self._combo_delay_target.setCurrentText("Custom Compartment")
+        self._combo_delay_target.blockSignals(False)
+        # Update the spinbox
+        max_idx = self._spin_delay_comp.maximum()
+        if 1 <= comp_idx <= max_idx:
+            self._spin_delay_comp.blockSignals(True)
+            self._spin_delay_comp.setValue(comp_idx)
+            self._spin_delay_comp.blockSignals(False)
+            self._delay_target_name = "Custom Compartment"
+            self._delay_custom_index = comp_idx
+            self._spin_delay_comp.setEnabled(True)
+            # Emit signal to notify MainWindow
+            self.delay_target_changed.emit("Custom Compartment", comp_idx)
+            # Refresh plots if we have a result
+            if self._last_result is not None:
+                self.update_plots(self._last_result)
+            elif self._last_mc_results is not None:
+                self.update_plots_mc(self._last_mc_results)
 
     def cleanup(self):
         """Clean up resources to prevent memory leaks."""
@@ -460,6 +523,15 @@ class OscilloscopeWidget(QWidget):
         self._cb_keep_reference.setToolTip("Freeze current soma trace as a grey reference line for comparison")
         self._cb_keep_reference.setStyleSheet("color:#A6ADC8; font-size:11px;")
         vl2.addRow(self._cb_keep_reference)
+
+        # Ghost metrics display (Comparative Biophysics metrics)
+        self._lbl_ghost_metrics = QLabel("")
+        self._lbl_ghost_metrics.setStyleSheet(
+            "color:#89B4FA; font-size:10px; font-family:monospace; padding:4px;"
+        )
+        self._lbl_ghost_metrics.setWordWrap(True)
+        self._lbl_ghost_metrics.setToolTip("Quantitative comparison between current and reference traces")
+        vl2.addRow(self._lbl_ghost_metrics)
 
         self._cb_presentation = QCheckBox("Presentation Mode")
         self._cb_presentation.setChecked(False)
@@ -744,7 +816,13 @@ class OscilloscopeWidget(QWidget):
         self._ref_curve_v.setData([], [])
         self._ref_curve_v.setVisible(False)
         self._ref_label.setVisible(False)
-        
+        # Hide ghost curves
+        for c in self._ghost_curves.values():
+            c.setData([], [])
+            c.setVisible(False)
+        # Hide time marker line
+        self._time_marker_line.setVisible(False)
+
         self._apply_grid_alpha()
         self._set_default_titles()
 
@@ -784,7 +862,7 @@ class OscilloscopeWidget(QWidget):
         """
         self._last_result = result
         self._last_mc_results = None
-        
+
         # --- Handle Reference Trace (Comparison Mode) ---
         # Capture reference data BEFORE clearing current plots.
         # Uses setData/setVisible on the persistent curve — never removeItem/plot.
@@ -794,10 +872,18 @@ class OscilloscopeWidget(QWidget):
                 if old_t is not None and old_v is not None and len(old_t) > 0:
                     self._ref_curve_v.setData(old_t, old_v)
                     self._ref_curve_v.setVisible(True)
+            # Store full currents dictionary for Ghost Currents feature
+            if hasattr(result, 'currents') and result.currents:
+                self._ref_currents = dict(result.currents)
+                # Store time array for reference
+                if hasattr(result, 't'):
+                    self._ref_t = np.asarray(result.t)
         else:
             self._ref_curve_v.setData([], [])
             self._ref_curve_v.setVisible(False)
-        
+            self._ref_currents = {}
+            self._ref_t = None
+
         self.clear()
         self._sync_delay_controls(result)
         theme = PLOT_THEMES.get(self._theme_name, PLOT_THEMES["Default"])
@@ -1016,6 +1102,55 @@ class OscilloscopeWidget(QWidget):
             self._curves_i["Stim_filtered"].setData([], [])
             self._curves_i["Stim_filtered"].setVisible(False)
 
+        # ── Ghost Currents (Comparative Biophysics) ───────────────────
+        # Draw reference current traces as thin, semi-transparent dashed lines
+        if self._ref_currents and self._cb_keep_reference.isChecked():
+            for name, ref_curr in self._ref_currents.items():
+                if name in ('Stim_input', 'Stim_filtered'):
+                    continue
+                # Get color from CHAN_COLORS with alpha 0.3
+                base_col = CHAN_COLORS.get(name, (120, 120, 120, 150))
+                ghost_col = (base_col[0], base_col[1], base_col[2], 77)  # 77 ≈ 0.3 * 255
+                ghost_pen = pg.mkPen(
+                    color=ghost_col,
+                    width=1.0 * lw,
+                    style=Qt.PenStyle.DashLine
+                )
+                # Handle 2D arrays
+                ref_arr = np.asarray(ref_curr, dtype=float)
+                if ref_arr.ndim == 2:
+                    ref_arr = np.sum(ref_arr, axis=0)
+                # Use stored reference time or interpolate
+                if hasattr(self, '_ref_t') and self._ref_t is not None:
+                    t_ref = self._ref_t
+                    if len(t_ref) == len(ref_arr):
+                        t_ghost, y_ghost = _downsample_xy(t_ref, ref_arr, max_points=budget_i)
+                    else:
+                        continue
+                else:
+                    continue
+                # Get or create ghost curve
+                ghost_name = f"ghost_{name}"
+                c_ghost = self._ghost_curves.get(ghost_name)
+                if c_ghost is None:
+                    c_ghost = self._p_i.plot([], [], pen=ghost_pen, name=f"Ref_{name}")
+                    self._ghost_curves[ghost_name] = c_ghost
+                else:
+                    c_ghost.setPen(ghost_pen)
+                c_ghost.setData(t_ghost, y_ghost)
+                # Show ghost only if corresponding main current is visible
+                c_ghost.setVisible(self._cb_i.get(name, QCheckBox()).isChecked())
+
+        # Hide unused ghost curves
+        for name, c in self._ghost_curves.items():
+            base_name = name.replace("ghost_", "")
+            if base_name not in visible_currents or not self._cb_keep_reference.isChecked():
+                c.setData([], [])
+                c.setVisible(False)
+
+        # ── Ghost Currents Metrics (Quantitative Comparison) ──────────
+        self._update_ghost_metrics(result)
+
         for name, c in self._curves_i.items():
             if name not in visible_currents:
                 c.setData([], [])
@@ -1203,6 +1338,87 @@ class OscilloscopeWidget(QWidget):
         self._p_i.setTitle(self._title_html(f"Monte-Carlo: {n} trials — mean ± σ", "#FAB387"))
         self._p_v.autoRange()
         self._p_ca.autoRange()
+
+    # ─────────────────────────────────────────────────────────────────
+    def _update_ghost_metrics(self, result):
+        """Compute and display quantitative ghost currents comparison metrics."""
+        if not hasattr(self, '_lbl_ghost_metrics'):
+            return
+
+        # Only show metrics if reference exists and checkbox is checked
+        if not self._cb_keep_reference.isChecked() or not self._ref_currents:
+            self._lbl_ghost_metrics.setText("")
+            return
+
+        import numpy as np
+
+        metrics_lines = []
+        correlations = []
+        rms_errors = []
+
+        for name, ref_curr in self._ref_currents.items():
+            if name in ('Stim_input', 'Stim_filtered'):
+                continue
+
+            # Get current data
+            if not hasattr(result, 'currents') or name not in result.currents:
+                continue
+
+            curr_data = result.currents[name]
+            ref_arr = np.asarray(ref_curr, dtype=float)
+            curr_arr = np.asarray(curr_data, dtype=float)
+
+            # Handle 2D arrays
+            if ref_arr.ndim == 2:
+                ref_arr = np.sum(ref_arr, axis=0)
+            if curr_arr.ndim == 2:
+                curr_arr = np.sum(curr_arr, axis=0)
+
+            # Ensure same length
+            min_len = min(len(ref_arr), len(curr_arr))
+            if min_len < 2:
+                continue
+
+            ref_arr = ref_arr[:min_len]
+            curr_arr = curr_arr[:min_len]
+
+            # Compute metrics
+            try:
+                # Pearson correlation
+                if np.std(ref_arr) > 0 and np.std(curr_arr) > 0:
+                    corr = np.corrcoef(ref_arr, curr_arr)[0, 1]
+                else:
+                    corr = 0.0
+
+                # RMS error (normalized by reference amplitude)
+                ref_max = np.max(np.abs(ref_arr))
+                if ref_max > 0:
+                    rms = np.sqrt(np.mean((curr_arr - ref_arr)**2)) / ref_max * 100
+                else:
+                    rms = 0.0
+
+                correlations.append(corr)
+                rms_errors.append(rms)
+
+                # Only show individual metrics for visible currents
+                if self._cb_i.get(name, QCheckBox()).isChecked():
+                    metrics_lines.append(f"{name:6s}: r={corr:5.2f}  RMS={rms:5.1f}%")
+            except Exception:
+                continue
+
+        # Summary statistics
+        if correlations and rms_errors:
+            avg_corr = np.mean(correlations)
+            avg_rms = np.mean(rms_errors)
+
+            summary = f"Ghost Comparison (vs Reference):\n"
+            summary += f"Avg Correlation: {avg_corr:.3f}  |  Avg RMS: {avg_rms:.1f}%\n"
+            summary += "─" * 35 + "\n"
+            summary += "\n".join(metrics_lines[:5])  # Show top 5
+
+            self._lbl_ghost_metrics.setText(summary)
+        else:
+            self._lbl_ghost_metrics.setText("")
 
     # ─────────────────────────────────────────────────────────────────
     def _sync_checkboxes(self, result):

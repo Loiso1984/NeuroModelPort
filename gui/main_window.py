@@ -773,6 +773,14 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.topology,     "5) Topology")
 
+        # ── Bi-directional time sync between Oscilloscope and Topology ──
+        # Oscilloscope crosshair -> Topology heatmap update
+        self.oscilloscope.time_highlighted.connect(self.topology.highlight_time)
+        # Topology time slider -> Oscilloscope vertical marker line
+        self.topology.time_scrubbed.connect(self.oscilloscope.set_time_marker)
+        # Topology compartment click -> Oscilloscope delay target
+        self.topology.compartment_selected.connect(self.oscilloscope.set_delay_compartment)
+
         # ── Tab 5: Axon Biophysics ───────────────────────────────────
         # Step 6: Axon Biophysics
         self.axon_biophysics = AxonBiophysicsWidget()
@@ -1010,6 +1018,31 @@ class MainWindow(QMainWindow):
         sweep_selector_layout.addWidget(self._sweep_param_help)
         ana_layout.addWidget(sweep_selector)
         ana_layout.addWidget(self.form_ana)
+
+        # Auto-Rheobase Search button
+        btn_find_threshold = QPushButton("🔍 Find Threshold (Auto-Rheobase)")
+        btn_find_threshold.setStyleSheet("""
+            QPushButton {
+                background: #313244;
+                color: #89B4FA;
+                border: 1px solid #45475A;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #45475A;
+                color: #A6E3A1;
+            }
+        """)
+        btn_find_threshold.clicked.connect(self._on_find_threshold_clicked)
+        ana_layout.addWidget(btn_find_threshold)
+
+        self._lbl_rheobase_result = QLabel("")
+        self._lbl_rheobase_result.setWordWrap(True)
+        self._lbl_rheobase_result.setStyleSheet("color:#A6E3A1; font-size:11px;")
+        ana_layout.addWidget(self._lbl_rheobase_result)
+
         c_layout.addWidget(self.grp_ana)
 
         scroll.setWidget(content)
@@ -1451,7 +1484,7 @@ class MainWindow(QMainWindow):
         self._update_attenuation_hint()
 
     def _update_attenuation_hint(self):
-        """Update dynamic attenuation hint for dendritic filter (v10.3)."""
+        """Update dynamic attenuation hint for dendritic filter (v10.3+)."""
         if not hasattr(self, "lbl_attenuation_hint"):
             return
         dfilter = self.config_manager.config.dendritic_filter
@@ -1471,11 +1504,15 @@ class MainWindow(QMainWindow):
             attn = np.exp(-distance / space_const)
             mode_str = "DC"
         
-        # Bilingual hint
+        # Calculate propagation delay
+        velocity = dfilter.conduction_velocity_um_ms
+        delay_ms = distance / max(velocity, 1e-12)
+        
+        # Bilingual hint with attenuation and delay info
         if T.lang == 'RU':
-            text = f"Затухание: {attn:.2f} ({mode_str}) — доля сигнала до сомы"
+            text = f"Затухание: {attn:.2f} ({mode_str}) | Задержка: {delay_ms:.2f} мс | v={velocity:.0f} µm/ms"
         else:
-            text = f"Attenuation: {attn:.2f} ({mode_str}) — signal fraction reaching soma"
+            text = f"Attenuation: {attn:.2f} ({mode_str}) | Delay: {delay_ms:.2f} ms | v={velocity:.0f} µm/ms"
         self.lbl_attenuation_hint.setText(text)
 
     def _on_channel_field_changed(self, _field_name: str, _value):
@@ -1699,6 +1736,128 @@ class MainWindow(QMainWindow):
             )
             error_text.setPos(self._stim_preview_plot.width() / 2, 0)
             self._stim_preview_plot.addItem(error_text)
+
+    def _on_find_threshold_clicked(self):
+        """Run Auto-Rheobase Search using binary search algorithm with visualization.
+
+        Runs up to 10 mini-simulations (50ms each) to find the absolute
+        minimum I_ext required to trigger a single spike.
+        Includes convergence visualization and search tree display.
+        """
+        from core.solver import run_hh_simulation
+        from core.analysis import detect_spikes
+        from copy import deepcopy
+        import numpy as np
+
+        self._lbl_rheobase_result.setText("🔍 Searching for threshold...")
+        self._status("Running Auto-Rheobase Search...")
+        QApplication.processEvents()
+
+        # Initialize visualization
+        search_history = []  # [(I_low, I_high, I_mid, has_spike), ...]
+
+        # Binary search bounds (µA/cm²)
+        I_low = 0.0
+        I_high = 100.0
+
+        # First, find an upper bound that elicits a spike
+        cfg = deepcopy(self.config_manager.config)
+        cfg.stim.t_sim = 50.0  # Short simulation
+
+        self._lbl_rheobase_result.setText("🔍 Phase 1: Finding upper bound...")
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            cfg.stim.Iext = I_high
+            try:
+                result = run_hh_simulation(cfg)
+                pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
+                if len(spike_times) > 0:
+                    search_history.append((0.0, I_high, I_high, True))
+                    break
+            except Exception:
+                pass
+            I_high *= 2.0
+            search_history.append((0.0, I_high, I_high, False))
+            if I_high > 1000.0:
+                self._lbl_rheobase_result.setText("❌ Could not find upper bound for rheobase")
+                self._status("Auto-Rheobase Search failed")
+                return
+            self._lbl_rheobase_result.setText(
+                f"🔍 Phase 1: Expanding bound... I_high = {I_high:.1f} µA/cm²"
+            )
+            QApplication.processEvents()
+
+        # Binary search with visualization tracking
+        self._lbl_rheobase_result.setText("🔍 Phase 2: Binary search...")
+        for iteration in range(10):
+            I_mid = (I_low + I_high) / 2.0
+            cfg.stim.Iext = I_mid
+
+            try:
+                result = run_hh_simulation(cfg)
+                pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
+                has_spike = len(spike_times) > 0
+            except Exception:
+                has_spike = False
+
+            search_history.append((I_low, I_high, I_mid, has_spike))
+
+            if has_spike:
+                I_high = I_mid
+            else:
+                I_low = I_mid
+
+            self._lbl_rheobase_result.setText(
+                f"🔍 Iteration {iteration+1}/10: I = {I_mid:.2f} µA/cm²\n"
+                f"   Range: [{I_low:.2f}, {I_high:.2f}]"
+            )
+            self._status(f"Auto-Rheobase: iter {iteration+1}, I={I_mid:.2f}, spike={'YES' if has_spike else 'NO'}")
+            QApplication.processEvents()
+
+        # Final result
+        I_rheobase = (I_low + I_high) / 2.0
+        uncertainty = (I_high - I_low) / 2.0
+
+        # Build visualization text
+        viz_text = self._format_rheobase_visualization(search_history, I_rheobase, uncertainty)
+
+        self._lbl_rheobase_result.setText(
+            f"✅ Rheobase: {I_rheobase:.2f} ± {uncertainty:.2f} µA/cm²\n"
+            f"   Uncertainty: {uncertainty/I_rheobase*100:.1f}%\n\n"
+            f"{viz_text}"
+        )
+        self._status(f"Auto-Rheobase complete: {I_rheobase:.2f} µA/cm²")
+
+        # Update config
+        self.config_manager.config.stim.Iext = I_rheobase
+        self._refresh_all_forms()
+
+    def _format_rheobase_visualization(self, history, final_value, uncertainty):
+        """Format binary search history as ASCII visualization."""
+        if not history:
+            return ""
+
+        # ASCII tree visualization
+        lines = ["Search Tree (I_ext in µA/cm²):"]
+        lines.append("─" * 40)
+
+        # Find bounds for scaling
+        all_values = [h[2] for h in history]
+        max_val = max(all_values) if all_values else 100.0
+
+        # Build bar chart of search
+        for i, (I_low, I_high, I_mid, has_spike) in enumerate(history[-10:]):  # Last 10 iterations
+            # Scale to 30 chars
+            bar_len = int(30 * I_mid / max_val) if max_val > 0 else 0
+            bar = "█" * bar_len + "░" * (30 - bar_len)
+            marker = "●" if has_spike else "○"
+            lines.append(f"  {i+1:2d}: [{bar}] {I_mid:6.2f} {marker}")
+
+        lines.append("─" * 40)
+        lines.append(f"  ● = spike detected  ○ = no spike")
+        lines.append(f"  Final: {final_value:.2f} µA/cm²")
+
+        return "\n".join(lines)
 
     def _toggle_sidebar(self):
         """Toggle sidebar visibility."""
