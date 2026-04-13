@@ -26,22 +26,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.models import FullModelConfig
 from core.presets import apply_preset
 from core.solver import NeuronSolver
+from tests.shared_utils import _spike_times
 
 
 def _parse_csv_floats(raw: str) -> list[float]:
     return [float(x.strip()) for x in raw.split(",") if x.strip()]
-
-
-def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.ndarray:
-    idx = np.where((v[:-1] < threshold) & (v[1:] >= threshold))[0] + 1
-    if len(idx) == 0:
-        return np.array([], dtype=float)
-    st = t[idx]
-    keep = [0]
-    for i in range(1, len(st)):
-        if st[i] - st[keep[-1]] >= 1.0:
-            keep.append(i)
-    return st[keep]
 
 
 def _run_case(

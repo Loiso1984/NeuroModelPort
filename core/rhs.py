@@ -462,10 +462,15 @@ def get_event_driven_conductance(t: float64, stype: int32, iext: float64,
         return 0.0
     
     g = 0.0
+    window = 5.0 * tau_d
     for k in range(n_events):
-        # Validate event time
         event_time = event_times[k]
-        if event_time < 0.0 or event_time > t + 1000.0:  # Reasonable bounds
+        dt_event = t - event_time
+        # Skip future events (break if sorted, continue otherwise)
+        if dt_event < 0.0:
+            continue
+        # Skip events whose conductance has decayed to negligible levels
+        if dt_event > window:
             continue
         g += _biexp_waveform(t, event_time, tau_r, tau_d)
     return abs(iext) * g

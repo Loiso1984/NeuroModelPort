@@ -28,10 +28,8 @@ from .physics_params import PhysicsParams, unpack_conductances, unpack_env_param
 from .rhs import (
     get_stim_current, get_event_driven_conductance,
     _get_syn_reversal, nernst_ca_ion, nernst_na_ion, nernst_k_ion, nmda_mg_block,
-    CA_I_MIN_M_M, CA_I_MAX_M_M, effective_sk_calcium, clamp_calcium_derivative,
-    NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
-    ATP_MIN_M_M, ATP_MAX_M_M, ATP_PUMP_FAILURE_THRESHOLD,
-    compute_na_k_pump_current, compute_na_k_pump_drive,
+    CA_I_MIN_M_M, CA_I_MAX_M_M,
+    compute_na_k_pump_current,
     compute_metabolism_and_pump,
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
@@ -584,22 +582,22 @@ def run_native_loop(
             y[off_ifilt_secondary] = (y[off_ifilt_secondary] + factor_2 * i_att_2) / (1.0 + factor_2)
 
         # ─────────────────────────────────────────────────────────────
-        # 6.5. Calcium dynamics (Euler — bounded) — using i_ca_influx_v from ionic step
+        # 6.5. Calcium dynamics — Semi-implicit (Backward Euler, unconditionally stable)
+        #   d[Ca]/dt = B_Ca * I_Ca_influx - ([Ca] - [Ca]_rest) / tau_Ca
+        #   Rearranged: influx = B_Ca*I_Ca + Ca_rest/tau,  decay = 1/tau
+        #   [Ca]_{n+1} = ([Ca]_n + dt*influx) / (1 + dt*decay)
         # ─────────────────────────────────────────────────────────────
         if dyn_ca:
             for i in range(n_comp):
                 ca_val = y[off_ca + i]
                 tau_ca_safe = max(tau_ca, 1e-12)
-                dca = b_ca[i] * i_ca_influx_v[i] - (ca_val - ca_rest) / tau_ca_safe
-                dca = clamp_calcium_derivative(ca_val, dca)
-                y_new = ca_val + dt * dca
-                if y_new < CA_I_MIN_M_M:
-                    y_new = CA_I_MIN_M_M
-                elif y_new > CA_I_MAX_M_M:
-                    y_new = CA_I_MAX_M_M
-                y[off_ca + i] = y_new
+                influx = b_ca[i] * i_ca_influx_v[i] + ca_rest / tau_ca_safe
+                decay_rate = 1.0 / tau_ca_safe
+                y[off_ca + i] = (ca_val + dt * influx) / (1.0 + dt * decay_rate)
 
-        # ATP dynamics (simple Euler integration) — uses unified helper from rhs.py
+        # ATP/Na_i/K_o dynamics — uses unified helper from rhs.py
+        # ATP & Na_i: Forward Euler with soft bounds inside compute_metabolism_and_pump
+        # K_o: Semi-implicit for clearance decay (unconditionally stable)
         if dyn_atp:
             for i in range(n_comp):
                 atp_val = y[off_atp + i]
@@ -631,9 +629,14 @@ def run_native_loop(
                     i_ca_influx_v[i],
                 )
 
-                y[off_atp + i] = min(max(atp_val + datp * dt, ATP_MIN_M_M), ATP_MAX_M_M)
-                y[off_na_i + i] = min(max(na_i_val + dnai * dt, NA_I_MIN_M_M), NA_I_MAX_M_M)
-                y[off_k_o + i] = min(max(k_o_val + dko * dt, K_O_MIN_M_M), K_O_MAX_M_M)
+                # ATP: Forward Euler (soft bounds enforced inside compute_metabolism_and_pump)
+                y[off_atp + i] = atp_val + datp * dt
+                # Na_i: Forward Euler (soft bounds enforced inside compute_metabolism_and_pump)
+                y[off_na_i + i] = na_i_val + dnai * dt
+                # K_o: Semi-implicit for clearance decay term
+                #   dko = flux_term - (k_o - k_o_rest)/tau  =>  k_o_new = k_o + dt*dko/(1 + dt/tau)
+                k_o_clearance_tau_safe = max(k_o_clearance_tau_ms, 1e-12)
+                y[off_k_o + i] = k_o_val + dt * dko / (1.0 + dt / k_o_clearance_tau_safe)
 
         t += dt
 

@@ -29,6 +29,8 @@ from core.errors import SimulationParameterError
 from core.presets import get_preset_names, apply_synaptic_stimulus
 from core.validation import validate_simulation_config, build_preset_mode_warnings
 from gui.widgets.form_generator import PydanticFormWidget
+from gui.widgets.unit_toggle_widget import UnitToggleWidget
+from gui.widgets.stim_form_with_units import StimFormWithUnits
 from gui.plots import OscilloscopeWidget
 from gui.analytics import AnalyticsWidget
 from gui.topology import TopologyWidget
@@ -172,7 +174,7 @@ class MainWindow(QMainWindow):
         self._live_custom_bounds: dict[int, tuple[float, float]] = {}  # Cache bounds for custom parameters
         self._live_timer = QTimer(self)
         self._live_timer.setSingleShot(True)
-        self._live_timer.setInterval(30)
+        self._live_timer.setInterval(350)
         self._live_timer.timeout.connect(self._on_live_timer_fired)
 
         central = QWidget()
@@ -614,11 +616,10 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(6)
         left_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.form_stim = PydanticFormWidget(
+        self.form_stim = StimFormWithUnits(
             self.config_manager.config.stim,
-            "Primary Stimulus",
+            self.config_manager.config.morphology.d_soma,
             on_change=self._on_stim_field_changed,
-            hidden_fields={"Iext_absolute_nA"},
         )
         self.form_stim_loc = PydanticFormWidget(
             self.config_manager.config.stim_location,
@@ -899,11 +900,10 @@ class MainWindow(QMainWindow):
         c_layout.setSpacing(8)
 
         # Forms
-        self.form_stim = PydanticFormWidget(
+        self.form_stim = StimFormWithUnits(
             self.config_manager.config.stim,
-            "Stimulation",
+            self.config_manager.config.morphology.d_soma,
             on_change=self._on_stim_field_changed,
-            hidden_fields={"Iext_absolute_nA"},
         )
         self.form_stim_loc = PydanticFormWidget(
             self.config_manager.config.stim_location,
@@ -1400,6 +1400,9 @@ class MainWindow(QMainWindow):
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
         # Always refresh hint so absolute current (nA) reflects updated geometry.
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
+        # Update soma diameter in stim form if d_soma changed
+        if field_name == 'd_soma' and hasattr(self.form_stim, 'update_soma_diameter'):
+            self.form_stim.update_soma_diameter(self.config_manager.config.morphology.d_soma)
         self._refresh_topology_preview()
         self._update_stim_preview()
 
@@ -1561,6 +1564,9 @@ class MainWindow(QMainWindow):
                      self.form_calcium, self.form_metabolism, self.form_stim, self.form_stim_loc,
                      self.form_dfilter, self.form_ana, self.form_preset_modes):
             form.refresh()
+        # Update soma diameter in stim form after refresh in case morphology changed
+        if hasattr(self.form_stim, 'update_soma_diameter'):
+            self.form_stim.update_soma_diameter(self.config_manager.config.morphology.d_soma)
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._sync_stim_type_controls()
         self._sync_preset_mode_controls()

@@ -24,18 +24,7 @@ from core.models import FullModelConfig
 from core.presets import apply_preset
 from core.rhs import nernst_ca_ion
 from core.solver import NeuronSolver
-
-
-def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.ndarray:
-    idx = np.where((v[:-1] < threshold) & (v[1:] >= threshold))[0] + 1
-    if len(idx) == 0:
-        return np.array([], dtype=float)
-    st = t[idx]
-    keep = [0]
-    for i in range(1, len(st)):
-        if st[i] - st[keep[-1]] >= 1.0:
-            keep.append(i)
-    return st[keep]
+from tests.shared_utils import _spike_times
 
 
 def _build_cfg(preset_key: str, *, t_celsius: float, i_scale: float) -> FullModelConfig:

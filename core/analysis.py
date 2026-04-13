@@ -585,7 +585,7 @@ def compute_optional_equilibrium(V_range: np.ndarray,
 # ─────────────────────────────────────────────────────────────────────
 
 def compute_nullclines(V_range: np.ndarray, config,
-                        I_stim: float = None) -> tuple:
+                        I_stim: float = None, ENa_eff: float = None, EK_eff: float = None) -> tuple:
     """
     V-nullcline (dV/dt = 0) and n-nullcline (dn/dt = 0).
 
@@ -603,6 +603,10 @@ def compute_nullclines(V_range: np.ndarray, config,
     if I_stim is None:
         I_stim = config.stim.Iext if config.stim.stim_type == 'const' else 0.0
 
+    # Use effective reversal potentials if provided, otherwise fall back to channel constants
+    ENa = ENa_eff if ENa_eff is not None else ch.ENa
+    EK = EK_eff if EK_eff is not None else ch.EK
+
     am_v = am(V_range);  bm_v = bm(V_range)
     ah_v = ah(V_range);  bh_v = bh(V_range)
     an_v = an(V_range);  bn_v = bn(V_range)
@@ -611,11 +615,11 @@ def compute_nullclines(V_range: np.ndarray, config,
     h_inf = ah_v / (ah_v + bh_v)
     n_inf = an_v / (an_v + bn_v)
 
-    I_Na = ch.gNa_max * (m_inf ** 3) * h_inf * (V_range - ch.ENa)
+    I_Na = ch.gNa_max * (m_inf ** 3) * h_inf * (V_range - ENa)
     I_L  = ch.gL * (V_range - ch.EL)
 
     numerator   = I_stim - I_Na - I_L
-    denominator = ch.gK_max * (V_range - ch.EK)
+    denominator = ch.gK_max * (V_range - EK)
 
     n_V_null = np.full_like(V_range, np.nan)
     with np.errstate(divide='ignore', invalid='ignore'):

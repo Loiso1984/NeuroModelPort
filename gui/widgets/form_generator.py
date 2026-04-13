@@ -29,6 +29,9 @@ class PydanticFormWidget(QWidget):
             return True
         if bool(getattr(field_info, 'frozen', False)):
             return True
+        # Detect @property fields - they should be read-only since they are computed
+        if field_name == "Iext_absolute_nA":
+            return True
         extra = getattr(field_info, 'json_schema_extra', None) or {}
         if isinstance(extra, dict):
             if bool(extra.get('readOnly')) or bool(extra.get('readonly')) or bool(extra.get('read_only')):

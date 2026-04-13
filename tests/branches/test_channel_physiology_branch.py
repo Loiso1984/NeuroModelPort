@@ -21,6 +21,7 @@ from core.kinetics import ar_Ih, br_Ih
 from core.rhs import nernst_ca_ion
 from core.solver import NeuronSolver
 from core.analysis import detect_spikes
+from tests.shared_utils import _spike_times
 
 
 def _build_hcn_pulse_config(enable_hcn: bool) -> FullModelConfig:
@@ -118,18 +119,6 @@ def _estimate_rin(v: np.ndarray, t: np.ndarray, pulse_start: float, pulse_end: f
     v_steady = float(np.mean(v[steady_mask]))
     dv = v_steady - v_baseline
     return abs(dv / iext)
-
-
-def _spike_times(v: np.ndarray, t: np.ndarray, threshold: float = -20.0) -> np.ndarray:
-    idx = np.where((v[:-1] < threshold) & (v[1:] >= threshold))[0] + 1
-    if len(idx) == 0:
-        return np.array([], dtype=float)
-    st = t[idx]
-    keep = [0]
-    for i in range(1, len(st)):
-        if st[i] - st[keep[-1]] >= 1.0:
-            keep.append(i)
-    return st[keep]
 
 
 def test_optional_conductances_propagate_to_morphology():
