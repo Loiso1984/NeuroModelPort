@@ -1355,6 +1355,9 @@ class MainWindow(QMainWindow):
         """Auto-run after debounce if HINES is active."""
         if not self.btn_hines.isChecked():
             return
+        # Prevent thread race: don't start new simulation if one is already running
+        if not self.btn_run.isEnabled():
+            return
         try:
             self.sim_controller.run_single(
                 self.config_manager.config,
@@ -1449,6 +1452,7 @@ class MainWindow(QMainWindow):
     def _on_stim_field_changed(self, field_name: str, value):
         if field_name == "stim_type":
             stype = str(value)
+            cfg = self.config_manager.config
             syn_map = {
                 "AMPA": "SYN: AMPA-receptor (Fast Excitation, 1-3 ms)",
                 "NMDA": "SYN: NMDA-receptor (Slow Excitation, 50-100 ms)",
@@ -1459,7 +1463,30 @@ class MainWindow(QMainWindow):
             }
             syn_name = syn_map.get(stype)
             if syn_name is not None:
-                apply_synaptic_stimulus(self.config_manager.config, syn_name)
+                apply_synaptic_stimulus(cfg, syn_name)
+            
+            # Auto-set appropriate defaults based on stimulus type (v10.3)
+            if stype == "zap":
+                # ZAP/impedance stimulus: set reasonable frequency sweep defaults
+                if cfg.stim.zap_f0_hz < 0.1:
+                    cfg.stim.zap_f0_hz = 0.5  # Start at 0.5 Hz
+                if cfg.stim.zap_f1_hz < cfg.stim.zap_f0_hz:
+                    cfg.stim.zap_f1_hz = 40.0  # End at 40 Hz
+                if cfg.stim.zap_rise_ms == 0:
+                    cfg.stim.zap_rise_ms = 5.0  # Smooth ramp to avoid spectral leakage
+                # Longer pulse for frequency sweep
+                if cfg.stim.pulse_dur < 50:
+                    cfg.stim.pulse_dur = 100.0  # 100ms for full sweep
+            elif stype in ("const", "pulse"):
+                # Classical stimulation: reset ZAP-specific parameters
+                cfg.stim.zap_f0_hz = 0.5
+                cfg.stim.zap_f1_hz = 40.0
+                cfg.stim.zap_rise_ms = 0.0  # No Tukey window for simple pulses
+            elif stype in syn_map:
+                # Synaptic stimulation: set appropriate pulse duration
+                if cfg.stim.pulse_dur < 1:
+                    cfg.stim.pulse_dur = 50.0  # Standard synaptic input duration
+            
             self._sync_stim_type_controls()
             self.form_stim.refresh()
         if field_name in {"Iext", "stim_type"}:
@@ -1505,7 +1532,7 @@ class MainWindow(QMainWindow):
             mode_str = "DC"
         
         # Calculate propagation delay
-        velocity = dfilter.conduction_velocity_um_ms
+        velocity = getattr(dfilter, 'conduction_velocity_um_ms', 250.0)
         delay_ms = distance / max(velocity, 1e-12)
         
         # Bilingual hint with attenuation and delay info
@@ -1744,7 +1771,7 @@ class MainWindow(QMainWindow):
         minimum I_ext required to trigger a single spike.
         Includes convergence visualization and search tree display.
         """
-        from core.solver import run_hh_simulation
+        from core.solver import SimulationController
         from core.analysis import detect_spikes
         from copy import deepcopy
         import numpy as np
@@ -1769,12 +1796,15 @@ class MainWindow(QMainWindow):
         for attempt in range(max_attempts):
             cfg.stim.Iext = I_high
             try:
-                result = run_hh_simulation(cfg)
+                solver = SimulationController(cfg)
+                result = solver.run_single()
                 pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
                 if len(spike_times) > 0:
                     search_history.append((0.0, I_high, I_high, True))
                     break
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Rheobase search exception: {e}")
                 pass
             I_high *= 2.0
             search_history.append((0.0, I_high, I_high, False))
@@ -1794,10 +1824,13 @@ class MainWindow(QMainWindow):
             cfg.stim.Iext = I_mid
 
             try:
-                result = run_hh_simulation(cfg)
+                solver = SimulationController(cfg)
+                result = solver.run_single()
                 pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
                 has_spike = len(spike_times) > 0
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Rheobase iteration exception: {e}")
                 has_spike = False
 
             search_history.append((I_low, I_high, I_mid, has_spike))
@@ -1838,8 +1871,8 @@ class MainWindow(QMainWindow):
             return ""
 
         # ASCII tree visualization
-        lines = ["Search Tree (I_ext in µA/cm²):"]
-        lines.append("─" * 40)
+        lines = ["Search Tree (I_ext in uA/cm2):"]
+        lines.append("-" * 40)
 
         # Find bounds for scaling
         all_values = [h[2] for h in history]
@@ -1849,12 +1882,12 @@ class MainWindow(QMainWindow):
         for i, (I_low, I_high, I_mid, has_spike) in enumerate(history[-10:]):  # Last 10 iterations
             # Scale to 30 chars
             bar_len = int(30 * I_mid / max_val) if max_val > 0 else 0
-            bar = "█" * bar_len + "░" * (30 - bar_len)
-            marker = "●" if has_spike else "○"
+            bar = "#" * bar_len + "-" * (30 - bar_len)
+            marker = "+" if has_spike else "-"
             lines.append(f"  {i+1:2d}: [{bar}] {I_mid:6.2f} {marker}")
 
-        lines.append("─" * 40)
-        lines.append(f"  ● = spike detected  ○ = no spike")
+        lines.append("-" * 40)
+        lines.append(f"  + = spike detected  - = no spike")
         lines.append(f"  Final: {final_value:.2f} µA/cm²")
 
         return "\n".join(lines)

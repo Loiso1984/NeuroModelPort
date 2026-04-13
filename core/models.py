@@ -320,6 +320,7 @@ class SimulationParams(BaseModel):
     # ZAP (impedance) stimulus parameters
     zap_f0_hz: float = Field(default=0.5, ge=0.01, description="ZAP/chirp start frequency (Hz)")
     zap_f1_hz: float = Field(default=40.0, ge=0.01, description="ZAP/chirp end frequency (Hz)")
+    zap_rise_ms: float = Field(default=5.0, ge=0.0, le=100.0, description="ZAP rise/fall time (ms). Smooth ramp reduces spectral leakage and numerical artifacts. Default: 5ms (5% of 100ms pulse)")
     
     stim_comp:   int    = Field(default=0,           description="Compartment index to inject current")
     # Event-driven synaptic queue (Stage 6.3, preparation for network connectivity)

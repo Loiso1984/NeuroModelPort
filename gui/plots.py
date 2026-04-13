@@ -115,6 +115,7 @@ PLOT_THEMES = {
         "spike": "#F38BA8",
         "stim_input": "#F5C2E7",
         "stim_filtered": "#89B4FA",
+        "custom": "#CBA6F7",  # Purple for custom compartment
     },
     "High Contrast": {
         "soma": "#00D1FF",
@@ -124,6 +125,7 @@ PLOT_THEMES = {
         "spike": "#FF66CC",
         "stim_input": "#FFC0CB",
         "stim_filtered": "#8EC5FF",
+        "custom": "#E0A0FF",  # Bright purple
     },
     "Colorblind Friendly": {
         "soma": "#0072B2",
@@ -133,6 +135,7 @@ PLOT_THEMES = {
         "spike": "#CC79A7",
         "stim_input": "#E69F00",
         "stim_filtered": "#56B4E9",
+        "custom": "#AA4499",  # Purple distinguishable for colorblind
     },
 }
 
@@ -1401,7 +1404,7 @@ class OscilloscopeWidget(QWidget):
                 rms_errors.append(rms)
 
                 # Only show individual metrics for visible currents
-                if self._cb_i.get(name, QCheckBox()).isChecked():
+                if name in self._cb_i and self._cb_i[name].isChecked():
                     metrics_lines.append(f"{name:6s}: r={corr:5.2f}  RMS={rms:5.1f}%")
             except Exception:
                 continue

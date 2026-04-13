@@ -8,6 +8,7 @@ Ports and improves all analysis functions from Scilab hh_utils.sce:
 """
 import numpy as np
 import hashlib
+import functools
 from numba import njit
 from scipy.signal import butter, find_peaks, hilbert, sosfiltfilt
 from scipy.spatial import cKDTree
@@ -1235,50 +1236,84 @@ def reconstruct_stimulus_trace(result) -> np.ndarray:
     return _reconstruct_stimulus_proxy(result)
 
 
-def compute_csd(v_all: np.ndarray, dx: float) -> np.ndarray:
+@functools.lru_cache(maxsize=16)
+def _get_cached_laplacian(L_data_tuple, L_indices_tuple, L_indptr_tuple, N_comp):
     """
-    Compute Current-Source Density (CSD) from spatial voltage profile.
+    Build and cache sparse Laplacian matrix for CSD computation.
+    
+    Caching eliminates redundant CSR matrix construction when morphology
+    doesn't change between simulation runs (common case). Uses tuples as
+    hashable keys since numpy arrays are not hashable.
+    
+    Parameters
+    ----------
+    L_data_tuple, L_indices_tuple, L_indptr_tuple : tuple
+        Laplacian CSR format data as hashable tuples
+    N_comp : int
+        Number of compartments (matrix shape)
+    
+    Returns
+    -------
+    L : scipy.sparse.csr_matrix
+        Cached Laplacian matrix (negative semi-definite)
+    """
+    import scipy.sparse
+    L_data = np.array(L_data_tuple)
+    L_indices = np.array(L_indices_tuple)
+    L_indptr = np.array(L_indptr_tuple)
+    return scipy.sparse.csr_matrix(
+        (L_data, L_indices, L_indptr),
+        shape=(N_comp, N_comp)
+    )
 
-    Math: CSD_i = -(V_{i-1} - 2V_i + V_{i+1}) / dx^2
 
-    This approximates the second spatial derivative of membrane potential,
-    revealing where ions enter (current sinks, negative CSD) or leave
-    (current sources, positive CSD) the neuron.
+def compute_csd(v_all: np.ndarray, morph: dict) -> np.ndarray:
+    """
+    Compute Current-Source Density (CSD) using the graph Laplacian.
+
+    True CSD for branched morphologies: CSD = -L @ V
+    where L is the weighted graph Laplacian from the cable equation.
+
+    The graph Laplacian L encodes the tree structure (soma, AIS, trunk, branches),
+    correctly handling bifurcations unlike naive second derivatives.
+
+    Physics:
+    - CSD > 0: Current source (ions leaving compartment, depolarizing neighbors)
+    - CSD < 0: Current sink (ions entering compartment, hyperpolarizing)
+    - Zero at boundaries (no axial current beyond ends)
+    
+    Performance: Laplacian matrix is cached via LRU cache when morphology
+    is unchanged between runs (common case), avoiding repeated CSR construction.
 
     Parameters
     ----------
     v_all : np.ndarray
         2D array of shape (n_comp, n_time) with membrane potentials (mV)
-    dx : float
-        Spatial step size between compartments (cm)
+    morph : dict
+        Morphology dictionary with keys 'L_data', 'L_indices', 'L_indptr', 'N_comp'
+        from MorphologyBuilder. L is the weighted Laplacian (negative semi-definite).
 
     Returns
     -------
     csd : np.ndarray
         2D array of shape (n_comp, n_time) with CSD values (mV/cm²)
-        First and last compartments are padded with zeros (boundary condition)
     """
     v_all = np.asarray(v_all, dtype=float)
     if v_all.ndim != 2:
         raise ValueError(f"v_all must be 2D, got shape {v_all.shape}")
 
-    n_comp, n_time = v_all.shape
-    if n_comp < 3:
-        # Cannot compute second derivative with fewer than 3 points
-        return np.zeros_like(v_all)
+    # Cache key: convert numpy arrays to hashable tuples
+    L_data_tuple = tuple(morph["L_data"])
+    L_indices_tuple = tuple(morph["L_indices"])
+    L_indptr_tuple = tuple(morph["L_indptr"])
+    N_comp = int(morph["N_comp"])
 
-    csd = np.zeros_like(v_all)
-    dx2 = dx * dx
+    # Retrieve cached Laplacian or build new one
+    L = _get_cached_laplacian(L_data_tuple, L_indices_tuple, L_indptr_tuple, N_comp)
 
-    # Central difference for interior points
-    # CSD_i = -(V_{i-1} - 2V_i + V_{i+1}) / dx^2 = (2V_i - V_{i-1} - V_{i+1}) / dx^2
-    for i in range(1, n_comp - 1):
-        csd[i, :] = (2.0 * v_all[i, :] - v_all[i - 1, :] - v_all[i + 1, :]) / dx2
-
-    # Boundary conditions: Neumann (zero derivative at boundaries)
-    # Forward/backward difference at boundaries
-    csd[0, :] = (v_all[1, :] - v_all[0, :]) / dx2
-    csd[-1, :] = (v_all[-1, :] - v_all[-2, :]) / dx2
+    # True CSD = -L @ V (negative sign because L is negative semi-definite)
+    # This is equivalent to the divergence of axial currents in the cable equation
+    csd = -(L @ v_all)
 
     return csd
 

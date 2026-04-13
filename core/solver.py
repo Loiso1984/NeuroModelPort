@@ -336,6 +336,7 @@ class NeuronSolver:
         primary_atau = cfg.stim.alpha_tau
         primary_zap_f0 = cfg.stim.zap_f0_hz
         primary_zap_f1 = cfg.stim.zap_f1_hz
+        primary_zap_rise = getattr(cfg.stim, 'zap_rise_ms', 5.0)  # Tukey window rise time
         primary_stim_comp = cfg.stim.stim_comp
         primary_location = cfg.stim_location.location
 
@@ -356,21 +357,30 @@ class NeuronSolver:
         if use_dfilter_primary == 1:
             y0 = np.concatenate([y0, np.array([0.0])])
 
-        dfilter_attenuation = 1.0
-        if stim_mode == 2 and cfg.dendritic_filter.space_constant_um > 0:
-            dfilter_attenuation = np.exp(
-                -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
-            )
+        # Dynamic AC attenuation parameters (v10.3) - for real-time frequency-dependent calculation
+        dfilter_distance_um = cfg.dendritic_filter.distance_um if stim_mode == 2 else 0.0
+        dfilter_lambda_um = cfg.dendritic_filter.space_constant_um if stim_mode == 2 else 1.0
         dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
+        dfilter_input_freq_hz = getattr(cfg.dendritic_filter, 'input_frequency', 100.0)
+        # filter_mode: 0=DC (classic), 1=AC (physiological)
+        dfilter_filter_mode = 1 if (stim_mode == 2 and 
+                                   getattr(cfg.dendritic_filter, 'filter_mode', 'Classic (DC)') == "Physiological (AC)") else 0
+        # Legacy: pre-computed DC attenuation (used as fallback)
+        dfilter_attenuation = 1.0
+        if stim_mode == 2 and dfilter_lambda_um > 0:
+            dfilter_attenuation = np.exp(-dfilter_distance_um / dfilter_lambda_um)
 
         # Secondary stimulus defaults.
         # Keep secondary defaults physically valid even when dual stimulation is disabled.
         # This protects against stricter external validators and stale serialized configs.
         stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
-        zap_f0_2, zap_f1_2 = primary_zap_f0, primary_zap_f1
+        zap_f0_2, zap_f1_2, zap_rise_2 = primary_zap_f0, primary_zap_f1, primary_zap_rise
         stim_comp_2, stim_mode_2 = 0, 0
         use_dfilter_secondary = 0
-        dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
+        # Dynamic AC attenuation for secondary (dual) - defaults
+        dfilter_distance_um_2, dfilter_lambda_um_2 = 0.0, 1.0
+        dfilter_tau_ms_2, dfilter_input_freq_hz_2 = 0.0, 100.0
+        dfilter_filter_mode_2, dfilter_attenuation_2 = 0, 1.0
 
         if dual_stim_enabled == 1:
             stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
@@ -382,14 +392,19 @@ class NeuronSolver:
             stim_mode_2 = stim_mode_map.get(dual_cfg.secondary_location, 0)
             zap_f0_2 = getattr(dual_cfg, "secondary_zap_f0_hz", zap_f0_2)
             zap_f1_2 = getattr(dual_cfg, "secondary_zap_f1_hz", zap_f1_2)
+            zap_rise_2 = getattr(dual_cfg, "secondary_zap_rise_ms", zap_rise_2)
             dfilter_tau_ms_2 = dual_cfg.secondary_tau_dendritic_ms
             use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
             if use_dfilter_secondary == 1:
                 y0 = np.concatenate([y0, np.array([0.0])])
-            if stim_mode_2 == 2 and dual_cfg.secondary_space_constant_um > 0:
-                dfilter_attenuation_2 = np.exp(
-                    -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
-                )
+            # Dynamic AC parameters for secondary stimulus
+            dfilter_distance_um_2 = dual_cfg.secondary_distance_um if stim_mode_2 == 2 else 0.0
+            dfilter_lambda_um_2 = dual_cfg.secondary_space_constant_um if stim_mode_2 == 2 else 1.0
+            dfilter_input_freq_hz_2 = getattr(dual_cfg, 'secondary_input_frequency', 100.0)
+            dfilter_filter_mode_2 = 1 if (stim_mode_2 == 2 and 
+                                          getattr(dual_cfg, 'secondary_filter_mode', 'Classic (DC)') == "Physiological (AC)") else 0
+            if stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
+                dfilter_attenuation_2 = np.exp(-dfilter_distance_um_2 / dfilter_lambda_um_2)
 
         # Generate ephemeral primary train
         # Create a stable seed based on the parameters
@@ -499,11 +514,16 @@ class NeuronSolver:
             "atau": primary_atau,
             "zap_f0_hz": primary_zap_f0,
             "zap_f1_hz": primary_zap_f1,
+            "zap_rise_ms": primary_zap_rise,
             "stim_comp": primary_stim_comp,
             "stim_mode": stim_mode,
             "use_dfilter_primary": use_dfilter_primary,
-            "dfilter_attenuation": dfilter_attenuation,
+            "dfilter_distance_um": dfilter_distance_um,
+            "dfilter_lambda_um": dfilter_lambda_um,
             "dfilter_tau_ms": dfilter_tau_ms,
+            "dfilter_input_freq_hz": dfilter_input_freq_hz,
+            "dfilter_filter_mode": dfilter_filter_mode,
+            "dfilter_attenuation": dfilter_attenuation,
             "event_times_arr": eff_event_times_1,
             "n_events": int(len(eff_event_times_1)),
             "event_times_arr_2": eff_event_times_2,
@@ -520,11 +540,16 @@ class NeuronSolver:
             "atau_2": atau_2,
             "zap_f0_hz_2": zap_f0_2,
             "zap_f1_hz_2": zap_f1_2,
+            "zap_rise_ms_2": zap_rise_2,
             "stim_comp_2": stim_comp_2,
             "stim_mode_2": stim_mode_2,
             "use_dfilter_secondary": use_dfilter_secondary,
-            "dfilter_attenuation_2": dfilter_attenuation_2,
+            "dfilter_distance_um_2": dfilter_distance_um_2,
+            "dfilter_lambda_um_2": dfilter_lambda_um_2,
             "dfilter_tau_ms_2": dfilter_tau_ms_2,
+            "dfilter_input_freq_hz_2": dfilter_input_freq_hz_2,
+            "dfilter_filter_mode_2": dfilter_filter_mode_2,
+            "dfilter_attenuation_2": dfilter_attenuation_2,
         }
         # Create structured PhysicsParams container
         physics_params = create_physics_params(**rhs_values)
@@ -917,6 +942,7 @@ class NeuronSolver:
         stim_comp = cfg.stim.stim_comp
         zap_f0 = cfg.stim.zap_f0_hz
         zap_f1 = cfg.stim.zap_f1_hz
+        zap_rise = getattr(cfg.stim, 'zap_rise_ms', 5.0)  # Tukey window rise time
         use_dfilter_primary = int(
             stim_mode == 2
             and cfg.dendritic_filter.enabled
@@ -924,18 +950,26 @@ class NeuronSolver:
         )
         if use_dfilter_primary == 1:
             y0 = np.concatenate([y0, np.array([0.0])])
-        dfilter_attenuation = 1.0
-        if stim_mode == 2 and cfg.dendritic_filter.space_constant_um > 0:
-            dfilter_attenuation = np.exp(
-                -cfg.dendritic_filter.distance_um / cfg.dendritic_filter.space_constant_um
-            )
+        # Dynamic AC attenuation parameters for native solver (v10.3)
+        dfilter_distance_um = cfg.dendritic_filter.distance_um if stim_mode == 2 else 0.0
+        dfilter_lambda_um = cfg.dendritic_filter.space_constant_um if stim_mode == 2 else 150.0
         dfilter_tau_ms = cfg.dendritic_filter.tau_dendritic_ms
+        dfilter_input_freq_hz = getattr(cfg.dendritic_filter, 'input_frequency', 100.0)
+        dfilter_filter_mode = 1 if (stim_mode == 2 and 
+                                    getattr(cfg.dendritic_filter, 'filter_mode', 'Classic (DC)') == "Physiological (AC)") else 0
+        
+        dfilter_attenuation = 1.0
+        if stim_mode == 2 and dfilter_lambda_um > 0:
+            dfilter_attenuation = np.exp(-dfilter_distance_um / dfilter_lambda_um)
 
         stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
-        zap_f0_2, zap_f1_2 = zap_f0, zap_f1
+        zap_f0_2, zap_f1_2, zap_rise_2 = zap_f0, zap_f1, zap_rise
         stim_comp_2, stim_mode_2 = 0, 0
         use_dfilter_secondary = 0
-        dfilter_attenuation_2, dfilter_tau_ms_2 = 1.0, 0.0
+        # Secondary AC filter defaults (disabled when no dual stim)
+        dfilter_distance_um_2, dfilter_lambda_um_2 = 0.0, 150.0
+        dfilter_tau_ms_2, dfilter_input_freq_hz_2 = 0.0, 100.0
+        dfilter_filter_mode_2, dfilter_attenuation_2 = 0, 1.0
         if dual_stim_enabled == 1:
             stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
             iext_2 = dual_cfg.secondary_Iext
@@ -945,14 +979,19 @@ class NeuronSolver:
             stim_mode_2 = stim_mode_map.get(dual_cfg.secondary_location, 0)
             zap_f0_2 = getattr(dual_cfg, "secondary_zap_f0_hz", zap_f0_2)
             zap_f1_2 = getattr(dual_cfg, "secondary_zap_f1_hz", zap_f1_2)
+            zap_rise_2 = getattr(dual_cfg, "secondary_zap_rise_ms", zap_rise_2)
+            # Secondary AC filter parameters (dual stimulus)
+            dfilter_distance_um_2 = dual_cfg.secondary_distance_um if stim_mode_2 == 2 else 0.0
+            dfilter_lambda_um_2 = dual_cfg.secondary_space_constant_um if stim_mode_2 == 2 else 150.0
             dfilter_tau_ms_2 = dual_cfg.secondary_tau_dendritic_ms
+            dfilter_input_freq_hz_2 = getattr(dual_cfg, 'secondary_input_frequency', 100.0)
+            dfilter_filter_mode_2 = 1 if (stim_mode_2 == 2 and 
+                                        getattr(dual_cfg, 'secondary_filter_mode', 'Classic (DC)') == "Physiological (AC)") else 0
             use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
             if use_dfilter_secondary == 1:
                 y0 = np.concatenate([y0, np.array([0.0])])
-            if stim_mode_2 == 2 and dual_cfg.secondary_space_constant_um > 0:
-                dfilter_attenuation_2 = np.exp(
-                    -dual_cfg.secondary_distance_um / dual_cfg.secondary_space_constant_um
-                )
+            if stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
+                dfilter_attenuation_2 = np.exp(-dfilter_distance_um_2 / dfilter_lambda_um_2)
             # Generate event times for secondary stimulus (synaptic train)
             event_times_arr_2 = np.zeros(0, dtype=np.float64)
             if stype_2 >= 4:  # Conductance-based synapse
@@ -1142,15 +1181,20 @@ class NeuronSolver:
             atau                = float(atau),
             zap_f0_hz           = float(zap_f0),
             zap_f1_hz           = float(zap_f1),
+            zap_rise_ms         = float(zap_rise),
             event_times_arr     = event_times_arr,
             n_events            = np.int32(len(event_times_arr)),
             event_times_arr_2   = event_times_arr_2,
             n_events_2          = np.int32(len(event_times_arr_2)),
             stim_comp           = np.int32(stim_comp),
             stim_mode           = np.int32(stim_mode),
-            use_dfilter_primary = np.int32(use_dfilter_primary),
-            dfilter_attenuation = float(dfilter_attenuation),
-            dfilter_tau_ms      = float(dfilter_tau_ms),
+            use_dfilter_primary   = np.int32(use_dfilter_primary),
+            dfilter_distance_um   = float(dfilter_distance_um),
+            dfilter_lambda_um     = float(dfilter_lambda_um),
+            dfilter_tau_ms        = float(dfilter_tau_ms),
+            dfilter_input_freq_hz = float(dfilter_input_freq_hz),
+            dfilter_filter_mode   = np.int32(dfilter_filter_mode),
+            dfilter_attenuation   = float(dfilter_attenuation),
             dual_stim_enabled   = np.int32(dual_stim_enabled),
             stype_2             = np.int32(stype_2),
             iext_2              = float(iext_2),
@@ -1159,11 +1203,16 @@ class NeuronSolver:
             atau_2              = float(atau_2),
             zap_f0_hz_2         = float(zap_f0_2),
             zap_f1_hz_2         = float(zap_f1_2),
+            zap_rise_ms_2       = float(zap_rise_2),
             stim_comp_2         = np.int32(stim_comp_2),
             stim_mode_2         = np.int32(stim_mode_2),
-            use_dfilter_secondary   = np.int32(use_dfilter_secondary),
-            dfilter_attenuation_2   = float(dfilter_attenuation_2),
-            dfilter_tau_ms_2        = float(dfilter_tau_ms_2),
+            use_dfilter_secondary     = np.int32(use_dfilter_secondary),
+            dfilter_distance_um_2     = float(dfilter_distance_um_2),
+            dfilter_lambda_um_2       = float(dfilter_lambda_um_2),
+            dfilter_tau_ms_2          = float(dfilter_tau_ms_2),
+            dfilter_input_freq_hz_2   = float(dfilter_input_freq_hz_2),
+            dfilter_filter_mode_2     = np.int32(dfilter_filter_mode_2),
+            dfilter_attenuation_2     = float(dfilter_attenuation_2),
             stoch_gating       = stoch_gating,
             noise_sigma       = noise_sigma,
             gna_max           = gna_max,

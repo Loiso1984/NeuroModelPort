@@ -413,9 +413,11 @@ class FullscreenPlotViewer(QMainWindow):
             h_line.set_visible(False)
             self.crosshair_lines.append((ax, v_line, h_line))
         
-        # Connect mouse events
-        self.canvas.mpl_connect('motion_notify_event', self._on_mouse_move)
-        self.canvas.mpl_connect('button_press_event', self._on_click)
+        # Connect mouse events and store connection IDs for cleanup
+        self._crosshair_cids = [
+            self.canvas.mpl_connect('motion_notify_event', self._on_mouse_move),
+            self.canvas.mpl_connect('button_press_event', self._on_click),
+        ]
         
     def _on_mouse_move(self, event):
         """Handle mouse movement for crosshair display."""
@@ -459,8 +461,13 @@ class FullscreenPlotViewer(QMainWindow):
             
     def closeEvent(self, event):
         """Cleanup on close."""
-        self.canvas.mpl_disconnect('motion_notify_event')
-        self.canvas.mpl_disconnect('button_press_event')
+        # Disconnect using stored connection IDs
+        if hasattr(self, '_crosshair_cids'):
+            for cid in self._crosshair_cids:
+                try:
+                    self.canvas.mpl_disconnect(cid)
+                except Exception:
+                    pass  # Ignore if already disconnected
         super().closeEvent(event)
 
 
@@ -1777,12 +1784,29 @@ class AnalyticsWidget(QTabWidget):
 
         main_layout.addWidget(cvs, stretch=1)
 
-        return _tab_with_toolbar(
-            container,
-            fullscreen_callback=lambda: self._open_fullscreen_plot('CSD'),
-            scroll_canvas=True,
-            min_canvas_height=920,
-        )
+        # Add toolbar directly (container is not a canvas, can't use _tab_with_toolbar)
+        from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavToolbar
+        toolbar = NavToolbar(cvs, container)
+        main_layout.insertWidget(1, toolbar)  # Insert after controls, before canvas
+
+        cvs.setMinimumHeight(920)
+        cvs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        # Add fullscreen button to toolbar
+        btn_fullscreen = QPushButton("Fullscreen")
+        btn_fullscreen.setToolTip("Open plot in fullscreen window")
+        btn_fullscreen.setMaximumWidth(120)
+        btn_fullscreen.clicked.connect(lambda: self._open_fullscreen_plot('CSD'))
+        toolbar.addWidget(btn_fullscreen)
+
+        # Wrap in scroll area like _tab_with_toolbar does
+        scroll = QScrollArea()
+        scroll.setWidget(container)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        return scroll
 
     def _build_tab_debug(self) -> QWidget:
         """Build the Debug LTE (Local Truncation Error) Monitor tab."""
@@ -3219,8 +3243,30 @@ class AnalyticsWidget(QTabWidget):
 
         title_suffix = f' ({self._phase_time_label.text()})' if hasattr(self, '_phase_time_label') and self._phase_time_label.text() != 'All' else ''
         ax.set_title(f'Phase Plane Trajectory{title_suffix}', fontsize=12, fontweight='bold')
-        ax.set_xlim(-100, 60)
-        ax.set_ylim(-0.05, 1.05)
+        
+        # Autoscale to fit data (handles non-standard projections with Ca, Ih, etc.)
+        # Only apply hard limits if data stays within classic HH bounds
+        ax.relim()
+        ax.autoscale_view()
+        
+        # Apply classic HH limits as defaults, but allow expansion for non-standard gates
+        x_min, x_max = ax.get_xlim()
+        y_min, y_max = ax.get_ylim()
+        
+        # V typically -100 to 60 mV for HH, but allow expansion
+        if x_min >= -100 and x_max <= 60:
+            ax.set_xlim(-100, 60)
+        else:
+            # Expand limits with 10% padding for non-standard ranges
+            ax.set_xlim(x_min - 0.1*(x_max-x_min), x_max + 0.1*(x_max-x_min))
+            
+        # Gate typically 0 to 1 for HH gating variables, but allow expansion for Ca, etc.
+        if y_min >= -0.05 and y_max <= 1.05:
+            ax.set_ylim(-0.05, 1.05)
+        else:
+            # Expand limits with 10% padding for non-standard ranges (e.g., [Ca] in µM)
+            ax.set_ylim(y_min - 0.1*(y_max-y_min), y_max + 0.1*(y_max-y_min))
+        
         ax.grid(alpha=0.3)
         ax.legend(fontsize=9)
 
@@ -3688,19 +3734,32 @@ class AnalyticsWidget(QTabWidget):
         n_selected = len(spikes)
         color_by_index = self._spike_shape_color_by_index.isChecked()
 
+        # Build LineCollection for performance (much faster than looped ax.plot)
+        # Each spike becomes a line segment in the collection
+        from matplotlib.collections import LineCollection
+        
+        segments = []
+        for spike_t, spike_v in spikes:
+            # Create segment as array of (x, y) points
+            segment = np.column_stack([spike_t, spike_v])
+            segments.append(segment)
+        
         if color_by_index:
             # Color by absolute spike index (shows evolution)
             colors = plt.cm.viridis(np.linspace(0, 1, n_sp))
-            for i, (spike_t, spike_v) in enumerate(spikes):
-                abs_idx = spike_indices[i] - 1
-                line = ax.plot(spike_t, spike_v, color=colors[abs_idx], lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')[0]
-                self._spike_shape_dynamic_artists.append(line)
+            line_colors = [colors[spike_indices[i] - 1] for i in range(len(spikes))]
         else:
             # Single color for all selected spikes
             soma_color = PLOT_THEMES.get("Default", PLOT_THEMES["Default"]).get("soma", "#4080FF")
-            for i, (spike_t, spike_v) in enumerate(spikes):
-                line = ax.plot(spike_t, spike_v, color=soma_color, lw=1.5, alpha=0.7, label=f'Spike {spike_indices[i]}')[0]
-                self._spike_shape_dynamic_artists.append(line)
+            line_colors = [soma_color] * len(spikes)
+        
+        # Create LineCollection - single artist for all spikes
+        lc = LineCollection(segments, colors=line_colors, linewidths=1.5, alpha=0.7)
+        ax.add_collection(lc)
+        self._spike_shape_dynamic_artists.append(lc)
+        
+        # Autoscale view to fit all spike segments (LineCollection doesn't auto-update limits)
+        ax.autoscale_view()
 
         _configure_ax_interactive(
             ax,
@@ -3846,14 +3905,15 @@ class AnalyticsWidget(QTabWidget):
         std_isi = np.std(isi)
         cv_isi = std_isi / mean_isi if mean_isi > 0 else 0
 
-        # Shannon entropy
-        if len(isi) >= 3:
-            entropy_bits = shannon_entropy_isi(spike_times, bins=min(20, len(isi)))
+        # Shannon entropy (need at least 5 ISIs for meaningful calculation)
+        n_bins = max(2, min(20, len(isi) // 2)) if len(isi) >= 5 else 2
+        if len(isi) >= 5:
+            entropy_bits = shannon_entropy_isi(spike_times, bins=n_bins)
         else:
-            entropy_bits = 0.0
+            entropy_bits = 0.0  # Not enough data for meaningful entropy
 
         # Max entropy for comparison (uniform distribution)
-        max_entropy = np.log2(bins) if bins > 0 else 0
+        max_entropy = np.log2(n_bins) if n_bins > 0 else 0
         entropy_ratio = entropy_bits / max_entropy if max_entropy > 0 else 0
 
         # Regularity metrics
@@ -4388,6 +4448,14 @@ class AnalyticsWidget(QTabWidget):
         if result.v_all.shape[0] < 3:
             return  # Need at least 3 compartments for CSD
 
+        # Stop any running animation when new result arrives
+        if hasattr(self, '_csd_play_timer') and self._csd_play_timer is not None:
+            if self._csd_play_timer.isActive():
+                self._csd_play_timer.stop()
+            self._csd_play_timer = None
+        if hasattr(self, '_btn_csd_play'):
+            self._btn_csd_play.setText("▶ Play")
+
         from core.analysis import compute_csd
 
         # Store result for animation and export
@@ -4396,9 +4464,8 @@ class AnalyticsWidget(QTabWidget):
         ax_csd, ax_vm = self._csd_axes
         ax_profile = self._csd_profile_ax
 
-        # Compute CSD
-        dx = getattr(result.config.morphology, 'dx', 0.001)  # Default 10 µm in cm
-        csd = compute_csd(result.v_all, dx)
+        # Compute CSD using graph Laplacian for correct branched morphology
+        csd = compute_csd(result.v_all, result.morph)
 
         t = result.t
         n_comp = csd.shape[0]
@@ -4432,7 +4499,10 @@ class AnalyticsWidget(QTabWidget):
         ax_vm.set_title('Membrane Potential (Vm)')
 
         # Add vertical line on heatmaps showing current time position
-        slider_pos = self._csd_time_slider.value() / 100.0
+        if hasattr(self, '_csd_time_slider'):
+            slider_pos = self._csd_time_slider.value() / 100.0
+        else:
+            slider_pos = 0.5  # Default to middle
         time_idx = int(slider_pos * (len(t) - 1))
         current_t = t[time_idx]
 
@@ -4505,11 +4575,15 @@ class AnalyticsWidget(QTabWidget):
 
         if self._csd_current_result is None:
             return
+        if not hasattr(self, '_csd_time_slider'):
+            return
 
         # Start animation
         self._btn_csd_play.setText("⏸ Pause")
 
         def advance_frame():
+            if not hasattr(self, '_csd_time_slider'):
+                return
             current = self._csd_time_slider.value()
             if current >= 100:
                 self._csd_time_slider.setValue(0)
@@ -4527,6 +4601,8 @@ class AnalyticsWidget(QTabWidget):
 
         if self._csd_current_result is None:
             return
+        if not hasattr(self, '_csd_time_slider'):
+            return
 
         # Get current time index
         slider_pos = self._csd_time_slider.value() / 100.0
@@ -4534,10 +4610,9 @@ class AnalyticsWidget(QTabWidget):
         time_idx = int(slider_pos * (len(t) - 1))
         current_t = t[time_idx]
 
-        # Compute CSD
+        # Compute CSD using graph Laplacian
         from core.analysis import compute_csd
-        dx = getattr(self._csd_current_result.config.morphology, 'dx', 0.001)
-        csd = compute_csd(self._csd_current_result.v_all, dx)
+        csd = compute_csd(self._csd_current_result.v_all, self._csd_current_result.morph)
 
         # Prepare data
         n_comp = csd.shape[0]

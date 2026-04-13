@@ -596,10 +596,12 @@ def pump_current(na_i_mM, k_o_mM, atp_mM):
     na_safe = na_i_mM if na_i_mM > 1e-9 else 1e-9
     k_safe = k_o_mM if k_o_mM > 1e-9 else 1e-9
     
-    # ATP availability factor (linear scaling, saturates at 1.0)
-    atp_factor = atp_mM / ATP_HALF if atp_mM < ATP_HALF else 1.0
-    if atp_factor < 0.0:
-        atp_factor = 0.0
+    # ATP availability factor - Michaelis-Menten kinetics (smooth, C1 continuous)
+    # Previously: piecewise linear with kink at ATP_HALF (caused numerical ringing)
+    # Now: smooth hyperbolic saturation, eliminates derivative discontinuity
+    # Physics: ATP binding to pump follows enzyme saturation kinetics
+    # Pathology: ATP depletion (ischemia) gradually reduces pump activity
+    atp_factor = atp_mM / (atp_mM + ATP_HALF)  # K_m = ATP_HALF for smooth transition
     
     # Hill kinetics: (1 + Km/[S])^(-n)
     na_factor = 1.0 / (1.0 + KM_NA / na_safe)

@@ -51,6 +51,15 @@ class DualStimulationConfig(BaseModel):
     secondary_space_constant_um: float = 150.0
     secondary_tau_dendritic_ms: float = 10.0
     
+    # Secondary ZAP/chirp parameters (v10.3)
+    secondary_zap_f0_hz: float = Field(default=0.5, ge=0.01, description="Secondary ZAP start frequency (Hz)")
+    secondary_zap_f1_hz: float = Field(default=40.0, ge=0.01, description="Secondary ZAP end frequency (Hz)")
+    secondary_zap_rise_ms: float = Field(default=5.0, ge=0.0, le=100.0, description="Secondary ZAP Tukey rise time (ms)")
+    
+    # Secondary AC filter parameters (v10.3) - for frequency-dependent attenuation
+    secondary_input_frequency: float = Field(default=100.0, ge=1.0, le=1000.0, description="Input frequency for AC attenuation (Hz)")
+    secondary_filter_mode: str = Field(default='Classic (DC)', description="Secondary filter mode: 'Classic (DC)' or 'Physiological (AC)'")
+    
     # Enable/disable
     enabled: bool = False
     

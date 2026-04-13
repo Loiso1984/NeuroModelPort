@@ -326,6 +326,7 @@ class PhysicsParams(NamedTuple):
     atau: float64
     zap_f0_hz: float64
     zap_f1_hz: float64
+    zap_rise_ms: float64  # Tukey window rise/fall time for ZAP (0 = no window, abrupt)
     event_times_arr: np.ndarray
     n_events: int32
     event_times_arr_2: np.ndarray
@@ -333,8 +334,27 @@ class PhysicsParams(NamedTuple):
     stim_comp: int32
     stim_mode: int32
     use_dfilter_primary: int32
-    dfilter_attenuation: float64
+    # Dynamic AC attenuation parameters (v10.3) - for real-time frequency-dependent calculation
+    # Distance: 0 µm = soma (no attenuation), 150-300 µm = distal synapses (high attenuation)
+    # Physics: Used in AC attenuation formula |A| = exp(-x/λ · Re(√(1+jωτ)))
+    # Pathology: Ischemia causes dendritic beading → increased attenuation (smaller effective λ)
+    dfilter_distance_um: float64
+    # Space constant λ: 150 µm typical for pyramidal L5, 50-100 µm for thin dendrites
+    # Physics: λ = √(a/(4·ρ_m·g_m)), where a=radius, ρ_m=membrane resistivity
+    # Pathology: Channelopathies, edema, or demyelination alter λ
+    dfilter_lambda_um: float64
+    # Membrane time constant τ: 10-20 ms typical for pyramidal neurons
+    # Physics: τ = C_m / g_m, determines high-frequency attenuation strength
     dfilter_tau_ms: float64
+    # Input frequency: 100 Hz typical for AMPA synaptic inputs, 5-50 Hz for dendritic spikes
+    # Physics: Higher f → stronger AC attenuation (membrane capacitance shunts high frequencies)
+    dfilter_input_freq_hz: float64
+    # Filter mode: 0=DC (classic exponential, steady-state), 1=AC (frequency-dependent)
+    # Physics: AC mode captures frequency-dependent attenuation; DC mode is steady-state limit
+    # Usage: AC mode for fast synaptic inputs (AMPA), DC mode for slow currents (NMDA, Ca²⁺)
+    dfilter_filter_mode: int32
+    # Legacy: pre-computed attenuation (used as fallback when real-time calc disabled)
+    dfilter_attenuation: float64
     
     # Secondary stimulation (dual)
     dual_stim_enabled: int32
@@ -345,11 +365,25 @@ class PhysicsParams(NamedTuple):
     atau_2: float64
     zap_f0_hz_2: float64
     zap_f1_hz_2: float64
+    zap_rise_ms_2: float64
     stim_comp_2: int32
     stim_mode_2: int32
     use_dfilter_secondary: int32
-    dfilter_attenuation_2: float64
+    # Dynamic AC attenuation parameters for secondary stimulus (dual)
+    # Same physics as primary, allows independent control of dual stimulation
+    # Usage: Model convergent inputs with different dendritic locations/frequencies
+    dfilter_distance_um_2: float64
+    # Space constant λ for secondary pathway - independent of primary
+    dfilter_lambda_um_2: float64
+    # Time constant τ for secondary - can differ if different dendrite type
     dfilter_tau_ms_2: float64
+    # Input frequency for secondary - allows modeling different synaptic types
+    # e.g., primary=AMPA (100Hz), secondary=NMDA (5Hz) with different attenuation
+    dfilter_input_freq_hz_2: float64
+    # Filter mode for secondary: 0=DC, 1=AC (independent control)
+    dfilter_filter_mode_2: int32
+    # Legacy pre-computed attenuation for secondary
+    dfilter_attenuation_2: float64
     
     # Stochastic parameters
     stoch_gating: boolean  # Enable Langevin gate noise
@@ -365,7 +399,10 @@ def create_physics_params(**kwargs) -> PhysicsParams:
     Create a PhysicsParams instance from keyword arguments, supplying sensible defaults for optional fields.
     
     Parameters:
-        kwargs (mapping): Keyword arguments corresponding to PhysicsParams fields. Any omitted optional fields (stochastic settings, ATP/metabolism fields, secondary-stimulus fields, and new synaptic reversal potentials `e_rev_syn_primary` and `e_rev_syn_secondary`) are filled with library defaults.
+        kwargs (mapping): Keyword arguments corresponding to PhysicsParams fields. Any omitted optional fields
+        (stochastic settings, ATP/metabolism fields, secondary-stimulus fields, synaptic reversal potentials,
+        and dynamic AC attenuation parameters `dfilter_distance_um`, `dfilter_lambda_um`, etc.) are filled
+        with library defaults.
     
     Returns:
         PhysicsParams: A fully populated PhysicsParams NamedTuple built from the provided and defaulted values.
@@ -393,6 +430,30 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'e_rev_syn_primary': 0.0,      # Default: 0 mV (excitatory)
         'e_rev_syn_secondary': -75.0,  # Default: -75 mV (inhibitory)
         'im_speed_multiplier': 1.0,
+        # Dynamic AC attenuation defaults (v10.3) - for frequency-dependent dendritic filtering
+        # Distance: 0 µm = soma (no attenuation), 150-300 µm = distal synapses (high attenuation)
+        # Used in: AC attenuation formula |A| = exp(-x/λ · Re(√(1+jωτ)))
+        'dfilter_distance_um': 0.0,
+        # Space constant λ: 150 µm typical for pyramidal L5, 50-100 µm for thin dendrites
+        # Pathology: Shrinkage in ischemia increases attenuation (smaller λ)
+        'dfilter_lambda_um': 150.0,
+        # Input frequency: 100 Hz typical for synaptic inputs, 5-50 Hz for dendritic spikes
+        # Higher frequencies → stronger attenuation due to membrane capacitance
+        'dfilter_input_freq_hz': 100.0,
+        # Filter mode: 0=DC (classic exponential, steady-state), 1=AC (frequency-dependent)
+        # AC mode: More accurate for fast synaptic inputs (AMPA), preserves frequency content
+        # DC mode: Valid for slow currents (NMDA, calcium), computationally simpler
+        'dfilter_filter_mode': 0,
+        # ZAP stimulus Tukey window defaults - smooth ramp reduces spectral leakage
+        # Rise time: 5ms (5% of 100ms pulse), 0 = abrupt (no window)
+        # Physics: Cosine-tapered window eliminates discontinuities at stimulus edges
+        'zap_rise_ms': 5.0,
+        'zap_rise_ms_2': 5.0,
+        # Secondary (dual) stimulus - same parameters for independent control
+        'dfilter_distance_um_2': 0.0,
+        'dfilter_lambda_um_2': 150.0,
+        'dfilter_input_freq_hz_2': 100.0,
+        'dfilter_filter_mode_2': 0,
     }
     for k, v in defaults.items():
         if k not in kwargs:
