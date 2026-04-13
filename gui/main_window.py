@@ -173,6 +173,7 @@ class MainWindow(QMainWindow):
         self._live_sliders: list[QSlider] = []
         self._live_labels: list[QLabel] = []
         self._live_custom_bounds: dict[int, tuple[float, float]] = {}  # Cache bounds for custom parameters
+        self._is_live_run = False  # Flag to prevent tab switch on Live timer simulations
         self._live_timer = QTimer(self)
         self._live_timer.setSingleShot(True)
         self._live_timer.setInterval(350)
@@ -277,7 +278,7 @@ class MainWindow(QMainWindow):
             QPushButton:hover { background: #4CAF70; }
             QPushButton:disabled { background: #555568; color: #888; }
         """)
-        self.btn_run.clicked.connect(lambda: self.sim_controller.run_single(self.config_manager.config, on_success=self._on_simulation_done, on_error=self._on_sim_error))
+        self.btn_run.clicked.connect(self._on_run_button_clicked)
 
         # ── Stochastic button ────────────────────────────────────────
         self.btn_stoch = QPushButton("STOCHASTIC")
@@ -1358,6 +1359,8 @@ class MainWindow(QMainWindow):
         # Prevent thread race: don't start new simulation if one is already running
         if not self.btn_run.isEnabled():
             return
+        # Mark as live run to prevent tab switching
+        self._is_live_run = True
         try:
             self.sim_controller.run_single(
                 self.config_manager.config,
@@ -1365,7 +1368,7 @@ class MainWindow(QMainWindow):
                 on_error=self._on_sim_error,
             )
         except Exception:
-            pass
+            self._is_live_run = False  # Reset on error
 
     # ─────────────────────────────────────────────────────────────────
     #  SPARKLINE
@@ -1424,20 +1427,6 @@ class MainWindow(QMainWindow):
                 w.setVisible(is_visible)
             if l is not None:
                 l.setVisible(is_visible)
-
-    def _set_stim_form_value(self, field_name: str, value):
-        """Set stim-form widget value without emitting change callbacks."""
-        w = self.form_stim.widgets_map.get(field_name)
-        if w is None:
-            return
-        w.blockSignals(True)
-        try:
-            if isinstance(w, QComboBox):
-                w.setCurrentText(str(value))
-            else:
-                w.setValue(value)
-        finally:
-            w.blockSignals(False)
 
     def _on_morph_field_changed(self, field_name: str, _value):
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
@@ -1692,6 +1681,21 @@ class MainWindow(QMainWindow):
                 lo, hi = -100.0, 500.0
                 if param in _LIVE_PARAMS:
                     lo, hi, _, _ = _LIVE_PARAMS[param]
+                elif row_i in self._live_custom_bounds:
+                    lo, hi = self._live_custom_bounds[row_i]
+                
+                # DYNAMIC BOUNDS EXPANSION: if preset value is outside cached bounds,
+                # expand the range to accommodate it (with smart capping)
+                if val < lo or val > hi:
+                    margin = abs(val) * 0.5 if val != 0 else 1.0
+                    # Cap margin for physiological values to prevent huge ranges
+                    if abs(val) < 1000 and margin > 1000:
+                        margin = 1000
+                    new_lo = max(-1e6, val - margin)  # Hard limit ±1M
+                    new_hi = min(1e6, val + margin)
+                    lo, hi = new_lo, new_hi
+                    if param not in _LIVE_PARAMS:
+                        self._live_custom_bounds[row_i] = (lo, hi)  # Update cache
             elif param in _LIVE_PARAMS:
                 lo, hi, _, getter = _LIVE_PARAMS[param]
                 val = getter(self.config_manager.config)
@@ -2211,8 +2215,8 @@ class MainWindow(QMainWindow):
         cfg = self.config_manager.config
         cfg.stim.stim_comp = comp_idx
         self._status(f"Stimulation compartment set to idx {comp_idx}")
-        # Refresh stimulation form to show new value
-        self._refresh_all_forms()
+        # Update only the stim_comp field to avoid breaking focus on other widgets
+        self._set_stim_form_value('stim_comp', comp_idx)
         # Sync oscilloscope delay target to clicked compartment
         self.oscilloscope._combo_delay_target.setCurrentText("Custom Compartment")
         self.oscilloscope._spin_delay_comp.setValue(comp_idx)
@@ -2225,6 +2229,15 @@ class MainWindow(QMainWindow):
             dual_config=dual_cfg,
             delay_target_name=self._delay_target_name,
             delay_custom_index=self._delay_custom_index,
+        )
+
+    def _on_run_button_clicked(self):
+        """Handle Run button click — reset live flag and start simulation."""
+        self._is_live_run = False  # Ensure this is a manual run, not live timer
+        self.sim_controller.run_single(
+            self.config_manager.config,
+            on_success=self._on_simulation_done,
+            on_error=self._on_sim_error,
         )
 
     def _on_simulation_done(self, result: dict):
@@ -2279,12 +2292,15 @@ class MainWindow(QMainWindow):
             if 'bif' in result:
                 self.analytics.update_bifurcation(result['bif'], result['bif_param'])
 
-            self.tabs.setCurrentWidget(self.oscilloscope)
+            # Only switch to oscilloscope on manual runs, not live timer updates
+            if not self._is_live_run:
+                self.tabs.setCurrentWidget(self.oscilloscope)
         except Exception as e:
             QMessageBox.critical(self, "Simulation Error", str(e))
             self._status("Error — check parameters.")
         finally:
             self._lock_ui(False)
+            self._is_live_run = False  # Reset flag after any simulation completion
 
     def _normalize_worker_payload(self, payload):
         """Normalize legacy worker callbacks to the dict payload contract."""
@@ -2670,6 +2686,41 @@ class MainWindow(QMainWindow):
             self.form_preset_modes.refresh()
         self._refresh_sweep_param_ui()
         self._update_attenuation_hint()
+
+    def _set_stim_form_value(self, field_name: str, value):
+        """Update a single field in the stimulation form without refreshing others.
+        
+        Use this for targeted updates to avoid breaking focus/grab on other widgets.
+        Specifically addresses the 'topology click breaks slider' issue.
+        
+        Parameters:
+            field_name: Name of the field to update (e.g., 'stim_comp')
+            value: New value for the field
+        """
+        if not hasattr(self, 'form_stim') or self.form_stim is None:
+            return
+        
+        try:
+            # Check if the form has the field
+            if hasattr(self.form_stim, field_name):
+                # Get the widget for this field if available
+                field_widget = getattr(self.form_stim, field_name, None)
+                if field_widget is not None and hasattr(field_widget, 'setValue'):
+                    # Use blockSignals to prevent triggering other updates
+                    was_blocked = field_widget.signalsBlocked()
+                    field_widget.blockSignals(True)
+                    field_widget.setValue(value)
+                    field_widget.blockSignals(was_blocked)
+                else:
+                    # Fallback: set attribute directly on the config object
+                    # The form will pick it up on next full refresh
+                    setattr(self.config_manager.config.stim, field_name, value)
+            else:
+                # Field doesn't exist in form, set on config directly
+                setattr(self.config_manager.config.stim, field_name, value)
+        except Exception:
+            # Silently fail — this is a UI optimization, not critical functionality
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────

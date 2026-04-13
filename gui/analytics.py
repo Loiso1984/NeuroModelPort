@@ -1587,7 +1587,9 @@ class AnalyticsWidget(QTabWidget):
         self._chaos_selected_pair = 0
         self._chaos_analysis = None
         self._chaos_texts: dict[str, object] = {}
-        self._chaos_dynamic_artists: list[object] = []
+        # PERSISTENT ARTISTS: Create once, update data (avoids memory fragmentation)
+        self._chaos_persistent_artists: dict[str, object] = {}
+        self._create_chaos_persistent_artists()
         self._chaos_click_cid = self.cvs_chaos.mpl_connect('button_press_event', self._on_chaos_plot_clicked)
 
         from PySide6.QtWidgets import QWidget, QGridLayout, QLabel, QSpinBox, QDoubleSpinBox, QComboBox
@@ -1686,6 +1688,72 @@ class AnalyticsWidget(QTabWidget):
             fontsize=13, color='#F38BA8', alpha=0.28, rotation=18, visible=False,
         )
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
+
+    def _create_chaos_persistent_artists(self):
+        """Create persistent matplotlib artists for Chaos tab to avoid memory fragmentation.
+        
+        All artists are created once during tab initialization and updated via set_data()
+        methods instead of being removed and recreated on each update.
+        """
+        if not hasattr(self, 'ax_chaos') or len(self.ax_chaos) < 3:
+            return
+            
+        ax_div, ax_attr, ax_trace = self.ax_chaos
+        
+        # Divergence plot (ax_div)
+        self._chaos_persistent_artists['div_line'] = ax_div.plot(
+            [], [], color='#89B4FA', lw=2.0, label='Trajectory divergence'
+        )[0]
+        self._chaos_persistent_artists['div_scatter'] = ax_div.scatter(
+            [], [], color='#F9E2AF', s=60, zorder=5, label='Selected horizon'
+        )
+        self._chaos_persistent_artists['fit_span'] = ax_div.axvspan(
+            0, 0, color='#A6E3A1', alpha=0.12, label='Fit window', visible=False
+        )
+        self._chaos_persistent_artists['fit_line'] = ax_div.plot(
+            [], [], '--', color='#F38BA8', lw=2.0, label='Linear trend'
+        )[0]
+        self._chaos_persistent_artists['summary_text'] = ax_div.text(
+            0.02, 0.96, "", transform=ax_div.transAxes, ha='left', va='top', fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4'
+        )
+        self._chaos_persistent_artists['stoch_text'] = ax_div.text(
+            0.5, 0.46, "", ha='center', va='center', fontsize=11,
+            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4'
+        )
+        
+        # Attractor plot (ax_attr)
+        self._chaos_persistent_artists['emb_line'] = ax_attr.plot(
+            [], [], color='#6C7086', alpha=0.4, lw=1.0, label='Embedded attractor'
+        )[0]
+        self._chaos_persistent_artists['emb_ref'] = ax_attr.plot(
+            [], [], color='#89B4FA', lw=2.5, label='Reference segment'
+        )[0]
+        self._chaos_persistent_artists['emb_ref_start'] = ax_attr.scatter(
+            [], [], color='#89B4FA', s=50
+        )
+        self._chaos_persistent_artists['emb_neighbor'] = ax_attr.plot(
+            [], [], color='#F38BA8', lw=2.5, label='Neighbor segment'
+        )[0]
+        self._chaos_persistent_artists['emb_neighbor_start'] = ax_attr.scatter(
+            [], [], color='#F38BA8', s=50
+        )
+        
+        # Trace plot (ax_trace)
+        self._chaos_persistent_artists['trace_line'] = ax_trace.plot(
+            [], [], color='#89B4FA', lw=1.4, label='V_soma'
+        )[0]
+        self._chaos_persistent_artists['trace_ref'] = ax_trace.axvspan(
+            0, 0, color='#89B4FA', alpha=0.18, label='Reference source', visible=False
+        )
+        self._chaos_persistent_artists['trace_neighbor'] = ax_trace.axvspan(
+            0, 0, color='#F38BA8', alpha=0.18, label='Neighbor source', visible=False
+        )
+        
+        # Initially hide all artists until data is available
+        for artist in self._chaos_persistent_artists.values():
+            if hasattr(artist, 'set_visible'):
+                artist.set_visible(False)
 
     def _build_tab_fingerprint(self) -> QWidget:
         """Build the Radar Chart (Biophysical Fingerprint) tab."""
@@ -2605,15 +2673,20 @@ class AnalyticsWidget(QTabWidget):
         return len(pair_i) // 2
 
     def _clear_chaos_axes(self, message: str):
+        """Clear chaos axes by hiding persistent artists and showing message."""
         if not hasattr(self, 'ax_chaos'):
             return
         titles = ['Trajectory divergence', 'Delay-embedded attractor', 'Source trace']
-        for artist in getattr(self, '_chaos_dynamic_artists', []):
+        
+        # Hide all persistent artists
+        for artist in getattr(self, '_chaos_persistent_artists', {}).values():
             try:
-                artist.remove()
+                if hasattr(artist, 'set_visible'):
+                    artist.set_visible(False)
             except Exception:
                 pass
-        self._chaos_dynamic_artists = []
+        
+        # Show message on each axis
         for ax, title in zip(self.ax_chaos, titles):
             _axis_message(ax, self._chaos_texts, f"msg_{title}", message, title=title)
         self.cvs_chaos.draw_idle()
@@ -2649,12 +2722,8 @@ class AnalyticsWidget(QTabWidget):
             return
 
         ax_div, ax_attr, ax_trace = self.ax_chaos
-        for artist in getattr(self, '_chaos_dynamic_artists', []):
-            try:
-                artist.remove()
-            except Exception:
-                pass
-        self._chaos_dynamic_artists = []
+        
+        # Hide any error messages from previous runs
         for key in ('msg_Trajectory divergence', 'msg_Delay-embedded attractor', 'msg_Source trace'):
             _hide_axis_message(self._chaos_texts, key)
 
@@ -2664,14 +2733,37 @@ class AnalyticsWidget(QTabWidget):
         k = self._chaos_selected_k
         pair_span = min(k + 1, max(1, emb.shape[0] - max(pair_i[selected_pair], pair_j[selected_pair])))
 
-        self._chaos_dynamic_artists.append(ax_div.plot(t_div, div, color='#89B4FA', lw=2.0, label='Trajectory divergence')[0])
-        self._chaos_dynamic_artists.append(ax_div.scatter([t_div[k]], [div[k]], color='#F9E2AF', s=60, zorder=5, label='Selected horizon'))
-        fit_start = params['fit_start_ms']; fit_end = params['fit_end_ms']
-        self._chaos_dynamic_artists.append(ax_div.axvspan(fit_start, fit_end, color='#A6E3A1', alpha=0.12, label='Fit window'))
+        # Update persistent divergence line
+        div_line = self._chaos_persistent_artists.get('div_line')
+        if div_line is not None:
+            div_line.set_data(t_div, div)
+            div_line.set_visible(True)
+        
+        # Update persistent selected point scatter
+        div_scatter = self._chaos_persistent_artists.get('div_scatter')
+        if div_scatter is not None:
+            div_scatter.set_offsets([[t_div[k], div[k]]])
+            div_scatter.set_visible(True)
+        
+        # Update persistent fit span
+        fit_start = params['fit_start_ms']
+        fit_end = params['fit_end_ms']
+        fit_span = self._chaos_persistent_artists.get('fit_span')
+        if fit_span is not None:
+            fit_span.set_xy([[fit_start, 0], [fit_end, 0], [fit_end, 1], [fit_start, 1]])
+            fit_span.set_visible(True)
+        # Update persistent fit line
         fit_mask = (t_div >= fit_start) & (t_div <= fit_end)
-        if np.sum(fit_mask) >= 2 and np.isfinite(analysis.get('lle_per_ms', np.nan)):
-            coeffs = np.polyfit(t_div[fit_mask], div[fit_mask], 1)
-            self._chaos_dynamic_artists.append(ax_div.plot(t_div[fit_mask], np.polyval(coeffs, t_div[fit_mask]), '--', color='#F38BA8', lw=2.0, label='Linear trend')[0])
+        fit_line = self._chaos_persistent_artists.get('fit_line')
+        if fit_line is not None:
+            if np.sum(fit_mask) >= 2 and np.isfinite(analysis.get('lle_per_ms', np.nan)):
+                coeffs = np.polyfit(t_div[fit_mask], div[fit_mask], 1)
+                fit_line.set_data(t_div[fit_mask], np.polyval(coeffs, t_div[fit_mask]))
+                fit_line.set_visible(True)
+            else:
+                fit_line.set_visible(False)
+        
+        # Update persistent summary text
         summary = (
             f"class = {analysis.get('classification', stats.get('lyapunov_class', 'n/a'))}\n"
             f"LLE = {analysis.get('lle_per_s', np.nan):+.3f} 1/s\n"
@@ -2679,50 +2771,89 @@ class AnalyticsWidget(QTabWidget):
             f"selected k = {k}\n"
             f"mode = {analysis.get('preprocess_mode', 'standard')}"
         )
-        self._chaos_dynamic_artists.append(
-            ax_div.text(0.02, 0.96, summary, transform=ax_div.transAxes, ha='left', va='top', fontsize=10,
-                        bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4')
-        )
-        if analysis.get('is_stochastic', False):
-            self._chaos_dynamic_artists.append(
-                ax_div.text(
-                    0.5, 0.46,
-                    'STOCHASTIC INPUT: LLE mainly reflects noise entropy.',
-                    transform=ax_div.transAxes,
-                    ha='center', va='center',
-                    fontsize=12, color='#F38BA8', alpha=0.42,
-                    bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.65, edgecolor='#F38BA8'),
-                )
-            )
+        summary_text = self._chaos_persistent_artists.get('summary_text')
+        if summary_text is not None:
+            summary_text.set_text(summary)
+            summary_text.set_visible(True)
+        
+        # Update persistent stochastic warning text
+        stoch_text = self._chaos_persistent_artists.get('stoch_text')
+        if stoch_text is not None:
+            if analysis.get('is_stochastic', False):
+                stoch_text.set_text('STOCHASTIC INPUT: LLE mainly reflects noise entropy.')
+                stoch_text.set_visible(True)
+            else:
+                stoch_text.set_visible(False)
         _configure_ax_interactive(ax_div, title='Lyapunov Exponent (Trajectory Separation)', xlabel='Time (ms)', ylabel='Log divergence ln(d)', show_legend=True)
 
+        # Update persistent attractor plot
         dims = emb.shape[1]
         x_idx = 0
         y_idx = 1 if dims > 1 else 0
-        self._chaos_dynamic_artists.append(ax_attr.plot(emb[:, x_idx], emb[:, y_idx], color='#6C7086', alpha=0.4, lw=1.0, label='Embedded attractor')[0])
+        
+        emb_line = self._chaos_persistent_artists.get('emb_line')
+        if emb_line is not None:
+            emb_line.set_data(emb[:, x_idx], emb[:, y_idx])
+            emb_line.set_visible(True)
+        
         i0 = int(pair_i[selected_pair])
         j0 = int(pair_j[selected_pair])
         seg_i = emb[i0:i0 + pair_span]
         seg_j = emb[j0:j0 + pair_span]
-        if len(seg_i) > 0:
-            self._chaos_dynamic_artists.append(ax_attr.plot(seg_i[:, x_idx], seg_i[:, y_idx], color='#89B4FA', lw=2.5, label='Reference segment')[0])
-            self._chaos_dynamic_artists.append(ax_attr.scatter([seg_i[0, x_idx]], [seg_i[0, y_idx]], color='#89B4FA', s=50))
-        if len(seg_j) > 0:
-            self._chaos_dynamic_artists.append(ax_attr.plot(seg_j[:, x_idx], seg_j[:, y_idx], color='#F38BA8', lw=2.5, label='Neighbor segment')[0])
-            self._chaos_dynamic_artists.append(ax_attr.scatter([seg_j[0, x_idx]], [seg_j[0, y_idx]], color='#F38BA8', s=50))
+        
+        emb_ref = self._chaos_persistent_artists.get('emb_ref')
+        emb_ref_start = self._chaos_persistent_artists.get('emb_ref_start')
+        if emb_ref is not None and len(seg_i) > 0:
+            emb_ref.set_data(seg_i[:, x_idx], seg_i[:, y_idx])
+            emb_ref.set_visible(True)
+            if emb_ref_start is not None:
+                emb_ref_start.set_offsets([[seg_i[0, x_idx], seg_i[0, y_idx]]])
+                emb_ref_start.set_visible(True)
+        elif emb_ref is not None:
+            emb_ref.set_visible(False)
+            if emb_ref_start is not None:
+                emb_ref_start.set_visible(False)
+        
+        emb_neighbor = self._chaos_persistent_artists.get('emb_neighbor')
+        emb_neighbor_start = self._chaos_persistent_artists.get('emb_neighbor_start')
+        if emb_neighbor is not None and len(seg_j) > 0:
+            emb_neighbor.set_data(seg_j[:, x_idx], seg_j[:, y_idx])
+            emb_neighbor.set_visible(True)
+            if emb_neighbor_start is not None:
+                emb_neighbor_start.set_offsets([[seg_j[0, x_idx], seg_j[0, y_idx]]])
+                emb_neighbor_start.set_visible(True)
+        elif emb_neighbor is not None:
+            emb_neighbor.set_visible(False)
+            if emb_neighbor_start is not None:
+                emb_neighbor_start.set_visible(False)
         _configure_ax_interactive(ax_attr, title='Delay-embedded attractor and selected pair', xlabel='x(t)', ylabel='x(t + lag)', show_legend=True)
 
+        # Update persistent trace plot
         t_full = np.asarray(result.t, dtype=float)
         v_full = np.asarray(result.v_soma, dtype=float)
-        self._chaos_dynamic_artists.append(ax_trace.plot(t_full, v_full, color='#89B4FA', lw=1.4, label='V_soma')[0])
+        
+        trace_line = self._chaos_persistent_artists.get('trace_line')
+        if trace_line is not None:
+            trace_line.set_data(t_full, v_full)
+            trace_line.set_visible(True)
+        
         dt_ms = float(analysis.get('dt_ms', np.median(np.diff(t_full)) if len(t_full) > 1 else 0.1))
         span_ms = pair_span * dt_ms
         start_i_ms = t_full[min(i0, len(t_full) - 1)]
         start_j_ms = t_full[min(j0, len(t_full) - 1)]
-        self._chaos_dynamic_artists.append(ax_trace.axvspan(start_i_ms, start_i_ms + span_ms, color='#89B4FA', alpha=0.18, label='Reference source'))
-        self._chaos_dynamic_artists.append(ax_trace.axvspan(start_j_ms, start_j_ms + span_ms, color='#F38BA8', alpha=0.18, label='Neighbor source'))
-        self._chaos_dynamic_artists.append(ax_trace.axvline(start_i_ms + k * dt_ms, color='#89B4FA', ls='--', lw=1.3))
-        self._chaos_dynamic_artists.append(ax_trace.axvline(start_j_ms + k * dt_ms, color='#F38BA8', ls='--', lw=1.3))
+        
+        trace_ref = self._chaos_persistent_artists.get('trace_ref')
+        if trace_ref is not None:
+            trace_ref.set_xy([[start_i_ms, 0], [start_i_ms + span_ms, 0], 
+                              [start_i_ms + span_ms, 1], [start_i_ms, 1]])
+            trace_ref.set_visible(True)
+        
+        trace_neighbor = self._chaos_persistent_artists.get('trace_neighbor')
+        if trace_neighbor is not None:
+            trace_neighbor.set_xy([[start_j_ms, 0], [start_j_ms + span_ms, 0], 
+                                   [start_j_ms + span_ms, 1], [start_j_ms, 1]])
+            trace_neighbor.set_visible(True)
+        
         _configure_ax_interactive(ax_trace, title='Time-domain trace with selected divergence segment', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)
 
         self.cvs_chaos.draw_idle()

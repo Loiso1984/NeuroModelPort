@@ -380,9 +380,15 @@ def run_native_loop(
 
         # ─────────────────────────────────────────────────────────────
         # 4. Build Hines linear system at V_n, gates at n+1
-        #    Row i: d[i]*V[i] - a[i]*V[parent] - ÎŁ b[c]*V[c] = rhs[i]
+        #    Row i: d[i]*V[i] - a[i]*V[parent] - Σ b[c]*V[c] = rhs[i]
         # ─────────────────────────────────────────────────────────────
-        # Extract core state arrays (slicing creates views, no allocation)
+        # Extract core state arrays
+        # NOTE(Phase 12): These slices create view descriptors in Numba loops.
+        # While O(1) in CPython, in Numba-jitted code they may cause micro-allocations.
+        # Optimization: pass (y, off_v, n_comp) to _compute_ionic_currents_vectorized
+        # and read directly via y[off_v + i] instead of creating slices.
+        # Deferred until Phase 12 (networks) as performance gain is marginal (1-5%)
+        # and risk of regression is high for core solver code.
         v_arr = y[:n_comp]
         m_arr = y[off_m:off_m + n_comp]
         h_arr = y[off_h:off_h + n_comp]

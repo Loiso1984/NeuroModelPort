@@ -396,6 +396,10 @@ def compute_ionic_currents_scalar(
         i_ion += gih * ri * (vi - eih)
 
     if en_ica:
+        # TODO(Phase 12): Replace Ohmic with GHK equation for accurate calcium dynamics
+        # Current: Ohmic: I = g * (V - E_ca) - overestimates current at depolarized potentials
+        # Future: GHK: I = P * z² * F² * V/RT * (ci - co*exp(-zFV/RT)) / (1 - exp(-zFV/RT))
+        # GHK accounts for rectification at extreme concentration gradients
         i_ca_current = gca * (si * si) * ui * (vi - eca_i)
         i_ion += i_ca_current
         if i_ca_current < 0.0:

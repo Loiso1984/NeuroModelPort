@@ -418,6 +418,9 @@ class NeuronSolver:
             cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
             cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times, seed_hash=seed_hash
         )
+        # CRITICAL: Sort event times for early termination optimization in get_event_driven_conductance
+        # The break-on-future-event optimization requires strictly ascending order
+        eff_event_times_1 = np.sort(eff_event_times_1)
         
         # Generate ephemeral secondary train
         eff_event_times_2 = np.zeros(0, dtype=np.float64)
@@ -436,6 +439,8 @@ class NeuronSolver:
                 dual_cfg.secondary_event_times,
                 seed_hash=seed_hash_2
             )
+            # Sort secondary events as well
+            eff_event_times_2 = np.sort(eff_event_times_2)
 
         # ── Initialize RNG state for reproducibility ──
         from core.stochastic_rng import get_rng
@@ -1109,6 +1114,9 @@ class NeuronSolver:
             cfg.stim.synaptic_train_type, cfg.stim.synaptic_train_freq_hz,
             cfg.stim.synaptic_train_duration_ms, cfg.stim.pulse_start, cfg.stim.event_times, seed_hash=seed_hash
         )
+        # CRITICAL: Sort event times for early termination optimization in get_event_driven_conductance
+        # The break-on-future-event optimization requires strictly ascending order
+        event_times_arr = np.sort(event_times_arr)
         
         # Generate ephemeral secondary train
         event_times_arr_2 = np.zeros(0, dtype=np.float64)
@@ -1127,6 +1135,8 @@ class NeuronSolver:
                 dual_cfg.secondary_event_times,
                 seed_hash=seed_hash_2
             )
+            # Sort secondary events as well
+            event_times_arr_2 = np.sort(event_times_arr_2)
 
         na_i_rest_mM, k_o_rest_mM = _resolve_dynamic_atp_rest_values(cfg)
 
