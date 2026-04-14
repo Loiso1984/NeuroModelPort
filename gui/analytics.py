@@ -2182,6 +2182,82 @@ class AnalyticsWidget(QTabWidget):
             f'Baseline={atp_bl_s} nmol/cm^2',
             line_major,
         ]
+        
+        # ── EXPERT INSIGHTS (v11.5 bilingual) ──
+        try:
+            from core.expert_system import (
+                generate_expert_insights, 
+                get_quick_recommendations,
+                format_insights_markdown,
+                get_language,
+                set_language
+            )
+            
+            # Detect language from config or use default
+            # Note: When full app localization is ready, this will integrate with main locale system
+            current_lang = getattr(cfg, 'language', 'EN') or 'EN'
+            
+            # Bilingual headers
+            _HEADERS = {
+                'section': {
+                    'EN': 'EXPERT INSIGHTS & RECOMMENDATIONS',
+                    'RU': 'ЭКСПЕРТНЫЕ ИНСАЙТЫ И РЕКОМЕНДАЦИИ'
+                },
+                'insights': {
+                    'EN': '📋 Insights:',
+                    'RU': '📋 Инсайты:'
+                },
+                'recommendations': {
+                    'EN': '💡 Recommendations:',
+                    'RU': '💡 Рекомендации:'
+                }
+            }
+            
+            # Build comprehensive expert stats dictionary
+            expert_stats = {
+                'firing_rate_hz': (fi + fs) / 2 if ns > 0 else 0,
+                'atp_min_mM': stats.get('atp_min_mM', 2.0),
+                'lle_per_ms': stats.get('lle_per_ms', -1),
+                'adaptation_index': AI,
+                'cv_isi': cv_isi,
+                'ca_i_max_nM': stats.get('ca_i_max_nM', 0),
+                'threshold_rheobase_pA': stats.get('threshold_rheobase_pA', 100),
+                'burst_spike_ratio': stats.get('burst_spike_ratio', 0),
+                'n_spikes': ns,
+                'stim_amplitude_pA': cfg.stim.Iext,
+                'mean_v_mM': np.mean(result.v_soma) if len(result.v_soma) > 0 else -70,
+                'temperature_celsius': cfg.env.T_celsius,
+                'isi_mean_ms': isi_mean if ns > 1 else np.nan,
+                'isi_std_ms': isi_std if ns > 1 else np.nan,
+                'atp_decline_rate_mM_per_s': stats.get('atp_decline_rate_mM_per_s', 0),
+            }
+            
+            insights = generate_expert_insights(expert_stats, language=current_lang)
+            recommendations = get_quick_recommendations(expert_stats, language=current_lang)
+            
+            if insights or recommendations:
+                lines += [
+                    '',
+                    _HEADERS['section'][current_lang],
+                    line_minor,
+                ]
+                
+                if insights:
+                    lines.append(_HEADERS['insights'][current_lang])
+                    lines.extend(format_insights_markdown(insights, language=current_lang).split('\n\n'))
+                    lines.append('')
+                
+                if recommendations:
+                    lines.append(_HEADERS['recommendations'][current_lang])
+                    for rec in recommendations:
+                        lines.append(f"  {rec}")
+                    lines.append('')
+                
+                lines.append(line_major)
+        except Exception as e:
+            # Expert system is optional - fail silently in production
+            # Log error in debug mode if needed
+            pass
 
         self.passport_view.setPlainText("\n".join(lines))
 

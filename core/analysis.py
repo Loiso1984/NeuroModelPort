@@ -1301,6 +1301,19 @@ def compute_csd(v_all: np.ndarray, morph: dict) -> np.ndarray:
     v_all = np.asarray(v_all, dtype=float)
     if v_all.ndim != 2:
         raise ValueError(f"v_all must be 2D, got shape {v_all.shape}")
+    
+    # Validate morphology keys
+    required_keys = ['L_data', 'L_indices', 'L_indptr', 'N_comp']
+    missing = [k for k in required_keys if k not in morph]
+    if missing:
+        raise KeyError(f"Morphology dict missing keys: {missing}. "
+                      f"Available: {list(morph.keys())}")
+    
+    # Check shape consistency
+    n_comp, n_time = v_all.shape
+    if int(morph["N_comp"]) != n_comp:
+        raise ValueError(f"Shape mismatch: v_all has {n_comp} compartments, "
+                        f"but morph['N_comp'] = {morph['N_comp']}")
 
     # Cache key: convert numpy arrays to hashable tuples
     L_data_tuple = tuple(morph["L_data"])

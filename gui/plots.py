@@ -77,9 +77,30 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POI
     Min-Max Decimation ensures every spike peak is visible by capturing both
     min and max values within each chunk. For AP traces with 1ms peaks,
     this prevents aliasing that occurs with naive stride sampling [::step].
+    
+    Supports both 1D (single compartment) and 2D (all compartments) arrays.
+    For 2D, finds global min/max across ALL compartments for each time chunk,
+    ensuring distal compartment spikes are preserved.
     """
-    n = int(len(t))
-    if n <= max_points or max_points <= 0:
+    # Normalize inputs
+    t = np.asarray(t)
+    y = np.asarray(y)
+    n = t.shape[0]
+    
+    # Validate dimensions
+    if y.ndim > 2:
+        raise ValueError(f"_downsample_xy supports 1D or 2D arrays, got {y.ndim}D")
+    
+    is_2d = y.ndim == 2
+    
+    # Validate shape consistency for 2D (time must be axis=1)
+    if is_2d and y.shape[1] != n:
+        raise ValueError(f"Shape mismatch: t has {n} points, y has {y.shape[1]} time points (shape {y.shape})")
+    if not is_2d and y.shape[0] != n:
+        raise ValueError(f"Shape mismatch: t has {n} points, y has {y.shape[0]} points")
+    
+    # Handle empty or trivial cases (return normalized arrays)
+    if n == 0 or n <= max_points or max_points <= 0:
         return t, y
 
     # Each chunk contributes 2 points (min and max)
@@ -90,9 +111,22 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POI
     indices = []
     for i in range(0, n, chunk_size):
         end = min(i + chunk_size, n)
-        chunk = y[i:end]
-        min_idx = i + int(np.argmin(chunk))
-        max_idx = i + int(np.argmax(chunk))
+        if is_2d:
+            # 2D: (n_comp, n_time) - find global min/max across ALL compartments
+            chunk = y[:, i:end]  # Shape: (n_comp, chunk_time)
+            # Find where global min and max occur (across all compartments)
+            flat_min_idx = int(np.argmin(chunk))
+            flat_max_idx = int(np.argmax(chunk))
+            # Convert flat index to (compartment, time) and get time index
+            min_time_idx = flat_min_idx % chunk.shape[1]
+            max_time_idx = flat_max_idx % chunk.shape[1]
+            min_idx = i + min_time_idx
+            max_idx = i + max_time_idx
+        else:
+            # 1D: original logic
+            chunk = y[i:end]
+            min_idx = i + int(np.argmin(chunk))
+            max_idx = i + int(np.argmax(chunk))
         indices.append(min_idx)
         indices.append(max_idx)
 
@@ -103,7 +137,11 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POI
     if indices[-1] != n - 1:
         indices = np.concatenate([indices, np.array([n - 1])])
 
-    return t[indices], y[indices]
+    # Return appropriately sliced array
+    if is_2d:
+        return t[indices], y[:, indices]  # Keep all compartments, downsample time
+    else:
+        return t[indices], y[indices]
 
 
 PLOT_THEMES = {

@@ -218,13 +218,24 @@ def compute_metabolism_and_pump(
     if dyn_ca:
         pump_consumption += max(0.0, i_ca_influx) * _CA_PUMP_FACTOR
 
-    datp = atp_synthesis_rate * 0.001 - pump_consumption
-    if atp_i_val < ATP_PUMP_FAILURE_THRESHOLD:
-        datp *= atp_i_val / ATP_PUMP_FAILURE_THRESHOLD
-    if atp_i_val <= ATP_MIN_M_M and datp < 0.0:
-        datp = abs(datp) * 0.5
-    elif atp_i_val >= ATP_MAX_M_M and datp > 0.0:
-        datp = -abs(datp) * 0.5
+    # ── ATP CONSERVATION LAW (fixed v11.5) ──
+    # When ATP depleted, pumps MUST stop - no fuel = no work
+    # Previous bug: datp = abs(datp) * 0.5 created energy from nothing (physical ghost)
+    if atp_i_val <= ATP_MIN_M_M:
+        # Pumps fail without ATP - no consumption, only residual synthesis
+        pump_consumption = 0.0
+        datp = max(0.0, atp_synthesis_rate * 0.001)  # Only synthesis can occur
+    elif atp_i_val < ATP_PUMP_FAILURE_THRESHOLD:
+        # Gradual pump failure as ATP drops (linear scaling to threshold)
+        pump_consumption *= atp_i_val / ATP_PUMP_FAILURE_THRESHOLD
+        datp = atp_synthesis_rate * 0.001 - pump_consumption
+    else:
+        # Normal operation: synthesis - consumption
+        datp = atp_synthesis_rate * 0.001 - pump_consumption
+    
+    # Hard ceiling at ATP_MAX - excess synthesis is wasted/regulated
+    if atp_i_val >= ATP_MAX_M_M and datp > 0.0:
+        datp = 0.0  # Homeostatic regulation: stop synthesis at max
 
     # ── Na_i drift: inward Na load - pump efflux (3 Na+/cycle) ──
     dnai = ion_drift_gain * (max(0.0, -i_na_total) - 3.0 * max(0.0, i_pump))
@@ -356,6 +367,73 @@ def nmda_mg_block(V, Mg_ext, mg_block_mM=3.57):
     return 1.0 / (1.0 + (Mg_ext / max(mg_block_mM, 1e-12)) * np.exp(MG_BLOCK_VOLTAGE_FACTOR * V))
 
 
+@njit(float64(float64, float64, float64, float64, float64), cache=True)
+def ghk_current(v_mV, ci_mM, co_mM, z, T_kelvin):
+    """
+    Goldman-Hodgkin-Katz (GHK) equation for ionic current through membrane.
+    
+    Physics: Unlike Ohmic I=g(V-E), GHK accounts for rectification at extreme
+    concentration gradients (e.g., Ca2+ with 40,000x gradient).
+    
+    Formula:
+        I = P * z^2 * (V*F^2/RT) * (ci - co*exp(-zVF/RT)) / (1 - exp(-zVF/RT))
+    
+    Parameters
+    ----------
+    v_mV : float
+        Membrane potential (mV)
+    ci_mM : float
+        Intracellular concentration (mM)
+    co_mM : float
+        Extracellular concentration (mM)
+    z : float
+        Ion valence (e.g., +2 for Ca2+, -1 for Cl-)
+    T_kelvin : float
+        Temperature (Kelvin)
+    
+    Returns
+    -------
+    float
+        Current density (µA/cm²) - positive = outward
+    """
+    # Use global constants from module (avoid local redefinition for Numba cache efficiency)
+    # F_CONST = 96485.33, R_GAS = 8.314 defined at module level
+    
+    # Convert mV to V for dimensional consistency
+    V = v_mV * 1e-3
+    
+    # Precompute common terms
+    RT = R_GAS * T_kelvin
+    zF = z * F_CONST
+    zF_V_RT = zF * V / RT
+    
+    # Handle V → 0 limit using Taylor expansion to avoid numerical issues
+    # At V=0: GHK reduces to I = P * z^2 * F^2 * (ci - co) / RT
+    eps = 1e-10
+    if abs(V) < eps:
+        # Linear approximation near zero: derivative of exp(-x) at x=0 is -1
+        # I ≈ P * z^2 * F * (ci - co) * V / RT when V→0
+        # But we need consistent units: convert back
+        # At V→0: GHK simplifies to I = P*z^2*F^2*(ci-co)*V/RT
+        # Factor already computed: zF = z*F_CONST
+        return zF * (ci_mM - co_mM) * 1e-3 * (V / RT)  # mM·V→µA/cm² scaling
+    
+    # Full GHK equation
+    exp_term = np.exp(-zF_V_RT)
+    denominator = 1.0 - exp_term
+    
+    # Numerator: ci - co * exp(-zFV/RT)
+    numerator = ci_mM - co_mM * exp_term
+    
+    # GHK current (permeability factor P applied externally for unit consistency)
+    # Units: [P in cm/s] * [z^2] * [F^2/RT in C^2/(J·mol) = C/V·mol] * [V in V] * [concentration in mM]
+    # = cm/s * C/V·mol * V * mol/L = C/(s·cm²) * 10 = µA/cm² (with appropriate scaling)
+    ghk_factor = zF * zF / RT * V  # z^2 * F^2 / (RT) * V
+    
+    # Return with sign convention: positive = outward current
+    return ghk_factor * numerator / denominator
+
+
 @njit(cache=True)
 def compute_ionic_currents_scalar(
     vi, mi, hi, ni,
@@ -395,12 +473,18 @@ def compute_ionic_currents_scalar(
     if en_ih:
         i_ion += gih * ri * (vi - eih)
 
+    # ── Calcium currents (ICa, ITCa) with GHK when dynamic calcium enabled ──
+    # Precompute common permeability factor for unit consistency: z=2 for Ca2+
+    # P = g_max / (z^2 * F^2 / RT) = g_max * RT / (z^2 * F^2)
+    use_ghk = dyn_ca and ca_i_val > CA_I_MIN_M_M and t_kelvin > 0
+    _RT_over_z2F2 = (R_GAS * t_kelvin) / (4.0 * F_CONST * F_CONST) if use_ghk else 0.0
+    
     if en_ica:
-        # TODO(Phase 12): Replace Ohmic with GHK equation for accurate calcium dynamics
-        # Current: Ohmic: I = g * (V - E_ca) - overestimates current at depolarized potentials
-        # Future: GHK: I = P * z² * F² * V/RT * (ci - co*exp(-zFV/RT)) / (1 - exp(-zFV/RT))
-        # GHK accounts for rectification at extreme concentration gradients
-        i_ca_current = gca * (si * si) * ui * (vi - eca_i)
+        if use_ghk:
+            i_ca_current = gca * _RT_over_z2F2 * (si * si) * ui * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
+        else:
+            # Fallback to Ohmic when dynamic calcium disabled or [Ca] invalid
+            i_ca_current = gca * (si * si) * ui * (vi - eca_i)
         i_ion += i_ca_current
         if i_ca_current < 0.0:
             i_ca_influx += -i_ca_current
@@ -409,7 +493,10 @@ def compute_ionic_currents_scalar(
         i_ion += ga * ai * bi * (vi - ek)  # IA is a K+ channel, use ek
 
     if en_itca:
-        i_tca = gtca * (pi * pi) * qi * (vi - eca_i)
+        if use_ghk:
+            i_tca = gtca * _RT_over_z2F2 * (pi * pi) * qi * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
+        else:
+            i_tca = gtca * (pi * pi) * qi * (vi - eca_i)
         i_ion += i_tca
         if i_tca < 0.0:
             i_ca_influx += -i_tca
