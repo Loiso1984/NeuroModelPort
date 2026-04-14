@@ -523,7 +523,8 @@ class NeuronSolver:
             "ek": cfg.channels.EK,
             "el": cfg.channels.EL,
             "eih": cfg.channels.E_Ih,
-            "ea": cfg.channels.EK,  # A-current uses K reversal potential
+            "ea": cfg.channels.EK,      # A-current (IA) uses K reversal potential
+            "eca": cfg.channels.E_Ca,   # Static calcium reversal (used when dyn_ca=False)
             "cm_v": morph['Cm_v'],
             "l_data": morph['L_data'],
             "l_indices": morph['L_indices'],

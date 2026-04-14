@@ -888,7 +888,7 @@ def rhs_multicompartment(
     ek = physics_params.ek
     el = physics_params.el
     eih = physics_params.eih
-    eca = physics_params.ea  # Static calcium reversal potential (used when dyn_ca=False)
+    eca = physics_params.eca  # Static calcium reversal potential (used when dyn_ca=False)
     
     # Morphology and axial coupling
     cm_v = physics_params.cm_v

@@ -286,7 +286,8 @@ class PhysicsParams(NamedTuple):
     ek: float64
     el: float64
     eih: float64
-    ea: float64
+    ea: float64       # A-current (IA) reversal potential (typically = EK)
+    eca: float64      # Calcium reversal potential (static, used when dyn_ca=False)
     e_rev_syn_primary: float64   # Primary stimulus synaptic reversal (for pathology)
     e_rev_syn_secondary: float64  # Secondary stimulus synaptic reversal (for pathology)
     
@@ -448,6 +449,7 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'e_rev_syn_primary': 0.0,      # Default: 0 mV (excitatory)
         'e_rev_syn_secondary': -75.0,  # Default: -75 mV (inhibitory)
         'im_speed_multiplier': 1.0,
+        'eca': 120.0,                   # Default: +120 mV (Ca reversal)
         # Dynamic AC attenuation defaults (v10.3) - for frequency-dependent dendritic filtering
         # Distance: 0 µm = soma (no attenuation), 150-300 µm = distal synapses (high attenuation)
         # Used in: AC attenuation formula |A| = exp(-x/λ · Re(√(1+jωτ)))

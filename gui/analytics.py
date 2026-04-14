@@ -3044,7 +3044,9 @@ class AnalyticsWidget(QTabWidget):
         fit_end = params['fit_end_ms']
         fit_span = self._chaos_persistent_artists.get('fit_span')
         if fit_span is not None:
-            fit_span.set_bounds(fit_start, 0, fit_end - fit_start, 1)
+            # Use set_xy for Polygon (axvspan returns Polygon, not Rectangle)
+            rect = np.array([[fit_start, 0], [fit_end, 0], [fit_end, 1], [fit_start, 1], [fit_start, 0]])
+            fit_span.set_xy(rect)
             fit_span.set_visible(True)
         # Update persistent fit line
         fit_mask = (t_div >= fit_start) & (t_div <= fit_end)
@@ -3138,12 +3140,16 @@ class AnalyticsWidget(QTabWidget):
         
         trace_ref = self._chaos_persistent_artists.get('trace_ref')
         if trace_ref is not None:
-            trace_ref.set_bounds(start_i_ms, 0, span_ms, 1)
+            # Use set_xy for Polygon (axvspan returns Polygon, not Rectangle)
+            rect_ref = np.array([[start_i_ms, 0], [start_i_ms + span_ms, 0], [start_i_ms + span_ms, 1], [start_i_ms, 1], [start_i_ms, 0]])
+            trace_ref.set_xy(rect_ref)
             trace_ref.set_visible(True)
         
         trace_neighbor = self._chaos_persistent_artists.get('trace_neighbor')
         if trace_neighbor is not None:
-            trace_neighbor.set_bounds(start_j_ms, 0, span_ms, 1)
+            # Use set_xy for Polygon
+            rect_neighbor = np.array([[start_j_ms, 0], [start_j_ms + span_ms, 0], [start_j_ms + span_ms, 1], [start_j_ms, 1], [start_j_ms, 0]])
+            trace_neighbor.set_xy(rect_neighbor)
             trace_neighbor.set_visible(True)
         
         _configure_ax_interactive(ax_trace, title='Time-domain trace with selected divergence segment', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)

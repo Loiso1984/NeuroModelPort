@@ -289,7 +289,7 @@ def run_native_loop(
     ek  = physics.ek
     el  = physics.el
     eih = physics.eih
-    eca = physics.ea  # Static calcium reversal potential (used when dyn_ca=False)
+    eca = physics.eca  # Static calcium reversal potential (used when dyn_ca=False)
 
     # ── Calcium / SK / ATP environment pack ──
     (
