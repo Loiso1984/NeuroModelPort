@@ -21,6 +21,10 @@ from core.validation import estimate_simulation_runtime, validate_simulation_con
 
 logger = logging.getLogger(__name__)
 
+# LLE subspace mode mapping for native solver (Numba-compatible ints)
+# 0=v_only, 1=v_and_gates, 2=full_state, 3=custom
+_LLE_MODE_MAP = {"v_only": 0, "v_and_gates": 1, "full_state": 2, "custom": 3}
+
 
 def _precompute_zap_window(td_ms: float, rise_ms: float, res_ms: float = 0.1):
     """Precompute a Tukey (cosine-tapered) window lookup table for ZAP stimulus.
@@ -939,7 +943,10 @@ class NeuronSolver:
     # ─────────────────────────────────────────────────────────────────
     def run_native(self, custom_config: "FullModelConfig | None" = None,
                     calc_lle: bool = False, lle_delta: float = 1e-6,
-                    lle_t_evolve: float = 1.0) -> SimulationResult:
+                    lle_t_evolve: float = 1.0,
+                    lle_subspace_mode: str | int = "v_only",
+                    lle_custom_mask = None,
+                    lle_weights = None) -> SimulationResult:
         """
         Run the model simulation using the native Hines fixed-step solver.
         
@@ -1284,6 +1291,13 @@ class NeuronSolver:
             np.random.seed(seed)
             set_numba_random_seed(seed)
 
+        # Convert string mode to int for Numba compatibility
+        # 0=v_only, 1=v_and_gates, 2=full_state, 3=custom
+        if isinstance(lle_subspace_mode, str):
+            lle_subspace_mode_int = _LLE_MODE_MAP.get(lle_subspace_mode, 0)
+        else:
+            lle_subspace_mode_int = int(lle_subspace_mode)
+
         t_out, y_out, diverged, lle_arr = run_native_loop(
             y0.astype(np.float64),
             float(cfg.stim.t_sim),
@@ -1298,6 +1312,9 @@ class NeuronSolver:
             calc_lle,
             lle_delta,
             lle_t_evolve,
+            lle_subspace_mode_int,
+            lle_custom_mask,
+            lle_weights,
         )
 
         if diverged:

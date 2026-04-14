@@ -46,6 +46,175 @@ def set_numba_random_seed(seed: int) -> None:
     np.random.seed(seed)
 
 
+def make_lle_subspace_mask(
+    n_comp: int,
+    state_offsets,
+    include_v: bool = True,
+    include_gates: list | None = None,
+    include_ca: bool = False,
+    include_atp: bool = False,
+    include_nai: bool = False,
+    include_ko: bool = False,
+    include_ifilt: bool = False,
+) -> np.ndarray:
+    """Create boolean mask for LLE custom subspace analysis.
+
+    Parameters
+    ----------
+    n_comp : int
+        Number of compartments
+    state_offsets : StateOffsets or object with offset attributes
+        Offset indices for state variables (off_m, off_h, off_n, off_ca, etc.)
+    include_v : bool
+        Include voltage compartments (default: True)
+    include_gates : list[str] | None
+        List of gate names to include: ["m", "h", "n", "r", "s", "u", "a", "b",
+        "p", "q", "w", "x", "y", "j", "zsk"]. None = include all gates.
+    include_ca : bool
+        Include calcium concentration variables
+    include_atp : bool
+        Include ATP concentration variables
+    include_nai : bool
+        Include intracellular sodium variables
+    include_ko : bool
+        Include extracellular potassium variables
+    include_ifilt : bool
+        Include dendritic filter states
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask array of shape (n_state,) where True = include in LLE
+
+    Examples
+    --------
+    >>> # Analyze only voltage and sodium gates for Na+ sensitivity
+    >>> mask = make_lle_subspace_mask(
+    ...     n_comp=2,
+    ...     state_offsets=offsets,
+    ...     include_v=True,
+    ...     include_gates=["m", "h"],  # Na activation and inactivation
+    ... )
+    """
+    n_state = state_offsets.n_state
+    mask = np.zeros(n_state, dtype=np.bool_)
+
+    if include_v:
+        mask[:n_comp] = True  # Voltage compartments
+
+    # Helper to set gate range
+    def _set_gate_range(off_start, n_comp_val):
+        mask[off_start:off_start + n_comp_val] = True
+
+    # Determine which gates to include
+    all_gates = ["m", "h", "n", "r", "s", "u", "a", "b", "p", "q", "w", "x", "y", "j", "zsk"]
+    if include_gates is None:
+        include_gates = all_gates
+
+    # Map gate names to offsets
+    gate_map = {
+        "m": state_offsets.off_m,
+        "h": state_offsets.off_h,
+        "n": state_offsets.off_n,
+        "r": state_offsets.off_r,
+        "s": state_offsets.off_s,
+        "u": state_offsets.off_u,
+        "a": state_offsets.off_a,
+        "b": state_offsets.off_b,
+        "p": state_offsets.off_p,
+        "q": state_offsets.off_q,
+        "w": state_offsets.off_w,
+        "x": state_offsets.off_x,
+        "y": state_offsets.off_y,
+        "j": state_offsets.off_j,
+        "zsk": state_offsets.off_zsk,
+    }
+
+    for gate in include_gates:
+        if gate in gate_map and gate_map[gate] != -1:
+            _set_gate_range(gate_map[gate], n_comp)
+
+    # Metabolic and other variables
+    if include_ca and state_offsets.off_ca != -1:
+        _set_gate_range(state_offsets.off_ca, n_comp)
+    if include_atp and state_offsets.off_atp != -1:
+        _set_gate_range(state_offsets.off_atp, n_comp)
+    if include_nai and state_offsets.off_na_i != -1:
+        _set_gate_range(state_offsets.off_na_i, n_comp)
+    if include_ko and state_offsets.off_k_o != -1:
+        _set_gate_range(state_offsets.off_k_o, n_comp)
+    if include_ifilt:
+        if state_offsets.off_ifilt_primary != -1:
+            mask[state_offsets.off_ifilt_primary] = True
+        if state_offsets.off_ifilt_secondary != -1:
+            mask[state_offsets.off_ifilt_secondary] = True
+
+    return mask
+
+
+def make_lle_weights(mask: np.ndarray, n_comp: int, state_offsets) -> np.ndarray:
+    """Create auto-normalized weights for LLE custom subspace.
+
+    Automatically assigns weights based on typical value ranges:
+    - Voltage (~10 mV range): weight = 0.1
+    - Gates (0-1 range): weight = 1.0
+    - Calcium (~1e-5 mM range): weight = 1e5
+    - ATP (~1-5 mM range): weight = 0.2
+    - Na_i (~5-15 mM range): weight = 0.1
+    - K_o (~3-5 mM range): weight = 0.2
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Boolean mask from make_lle_subspace_mask()
+    n_comp : int
+        Number of compartments
+    state_offsets : StateOffsets
+        Offset indices
+
+    Returns
+    -------
+    np.ndarray
+        Float64 weights array (same shape as mask)
+    """
+    weights = np.ones(mask.shape[0], dtype=np.float64)
+
+    if not np.any(mask):
+        return weights
+
+    # Voltage compartments: normalize ~10 mV to ~1
+    v_range = np.arange(n_comp)
+    weights[v_range] = 0.1
+
+    # Gates: already 0-1, keep weight 1.0
+    # No change needed for gate ranges
+
+    # Calcium: normalize ~1e-5 mM to ~1
+    if state_offsets.off_ca != -1:
+        ca_range = np.arange(state_offsets.off_ca, state_offsets.off_ca + n_comp)
+        weights[ca_range] = 1e5
+
+    # ATP: normalize ~5 mM to ~1
+    if state_offsets.off_atp != -1:
+        atp_range = np.arange(state_offsets.off_atp, state_offsets.off_atp + n_comp)
+        weights[atp_range] = 0.2
+
+    # Na_i: normalize ~10 mM to ~1
+    if state_offsets.off_na_i != -1:
+        nai_range = np.arange(state_offsets.off_na_i, state_offsets.off_na_i + n_comp)
+        weights[nai_range] = 0.1
+
+    # K_o: normalize ~5 mM to ~1
+    if state_offsets.off_k_o != -1:
+        ko_range = np.arange(state_offsets.off_k_o, state_offsets.off_k_o + n_comp)
+        weights[ko_range] = 0.2
+
+    # Zero out weights for excluded variables
+    weights[~mask] = 0.0
+
+    return weights
+
+
 # NOTE: _compute_ionic_currents_vectorized REMOVED v11.6
 # Replaced by unified compute_ionic_conductances_scalar in rhs.py
 # Native loop now uses scalar indexing directly for zero-allocation performance
@@ -76,6 +245,9 @@ def run_native_loop(
     calc_lle=False,          # bool — enable dual-trajectory Lyapunov computation
     lle_delta=1e-6,          # float64 — perturbation amplitude for Benettin
     lle_t_evolve=1.0,        # float64 — re-orthonormalization interval (ms)
+    lle_subspace_mode=0,     # int — 0=v_only, 1=v_and_gates, 2=full_state, 3=custom (Numba-compatible)
+    lle_custom_mask=None,    # bool[N_state] or None — which variables to include (custom mode)
+    lle_weights=None,        # float64[N_state] or None — optional weighting factors
 ):
     """Fixed-step Backward-Euler Hines loop.  Returns (t_out, y_out).
 
@@ -223,8 +395,7 @@ def run_native_loop(
             t_out[out_idx] = t
             for s in range(n_state):
                 y_out[s, out_idx] = y[s]
-            if calc_lle and t > 0.0 and lle_count > 0:
-                lle_out[out_idx] = lle_accum / t
+            # Note: LLE is recorded only at final output section after all computations
             out_idx += 1
 
         # ─────────────────────────────────────────────────────────────
@@ -439,13 +610,15 @@ def run_native_loop(
 
             # ── 8. ATP/Na_i/K_o dynamics ──
             if dyn_atp:
+                # Reuse cached Nernst potentials from conductance loop (step 3)
                 for i in range(n_comp):
                     atp_val = y_active[off_atp + i]
                     na_i_val = y_active[off_na_i + i]
                     k_o_val = y_active[off_k_o + i]
                     vi = y_active[i]
-                    ena_i = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin)
-                    ek_i = nernst_k_ion(k_i_mM, k_o_val, t_kelvin)
+                    # Use cached Nernst potentials (computed in step 3) instead of recomputing
+                    ena_i = ena_arr_buf[i]
+                    ek_i = ek_arr_buf[i]
 
                     mi = y_active[off_m + i]
                     hi = y_active[off_h + i]
@@ -477,17 +650,85 @@ def run_native_loop(
         if diverged == 1:
             break
 
+        t += dt
+
         # ─────────────────────────────────────────────────────────────
         # 9. Benettin re-orthonormalization (periodic)
         # ─────────────────────────────────────────────────────────────
         if calc_lle and t >= lle_t_next_renorm:
             dist_sq = 0.0
-            for i in range(n_state):
-                delta = y_pert[i] - y[i]
-                dist_sq += delta * delta
+
+            # Subspace-aware distance calculation
+            # 0=v_only, 1=v_and_gates, 2=full_state, 3=custom
+            if lle_subspace_mode == 3 and lle_custom_mask is not None:
+                # Custom mode (3): use provided mask and optional weights
+                for i in range(n_state):
+                    if lle_custom_mask[i]:
+                        w = lle_weights[i] if lle_weights is not None else 1.0
+                        delta = (y_pert[i] - y[i]) * w
+                        dist_sq += delta * delta
+            elif lle_subspace_mode == 0:
+                # v_only (0): Voltage only - first n_comp compartments (fast, standard neurophysiology)
+                for i in range(n_comp):
+                    delta = y_pert[i] - y[i]
+                    dist_sq += delta * delta
+            elif lle_subspace_mode == 1:
+                # v_and_gates (1): Voltage + all gating variables (HH phase space)
+                # Includes: V, m, h, n, r, s, u, a, b, p, q, w, x, y, j, zsk
+                for i in range(n_comp):  # V compartments
+                    delta = y_pert[i] - y[i]
+                    dist_sq += delta * delta
+                # Gate offsets: m, h, n are always present
+                for off in (off_m, off_h, off_n):
+                    for i in range(n_comp):
+                        delta = y_pert[off + i] - y[off + i]
+                        dist_sq += delta * delta
+                # Optional gates based on channel flags
+                if en_ih:
+                    for i in range(n_comp):
+                        delta = y_pert[off_r + i] - y[off_r + i]
+                        dist_sq += delta * delta
+                if en_ica:
+                    for off in (off_s, off_u):
+                        for i in range(n_comp):
+                            delta = y_pert[off + i] - y[off + i]
+                            dist_sq += delta * delta
+                if en_ia:
+                    for off in (off_a, off_b):
+                        for i in range(n_comp):
+                            delta = y_pert[off + i] - y[off + i]
+                            dist_sq += delta * delta
+                if en_itca:
+                    for off in (off_p, off_q):
+                        for i in range(n_comp):
+                            delta = y_pert[off + i] - y[off + i]
+                            dist_sq += delta * delta
+                if en_im:
+                    for i in range(n_comp):
+                        delta = y_pert[off_w + i] - y[off_w + i]
+                        dist_sq += delta * delta
+                if en_nap:
+                    for i in range(n_comp):
+                        delta = y_pert[off_x + i] - y[off_x + i]
+                        dist_sq += delta * delta
+                if en_nar:
+                    for off in (off_y, off_j):
+                        for i in range(n_comp):
+                            delta = y_pert[off + i] - y[off + i]
+                            dist_sq += delta * delta
+                if en_sk:
+                    for i in range(n_comp):
+                        delta = y_pert[off_zsk + i] - y[off_zsk + i]
+                        dist_sq += delta * delta
+            else:  # mode 2 (full_state) or default
+                # Full state vector (all variables including Ca, ATP, etc.)
+                for i in range(n_state):
+                    delta = y_pert[i] - y[i]
+                    dist_sq += delta * delta
+
             dist = np.sqrt(dist_sq)
 
-            if dist > 1e-30:
+            if dist > 1e-12:  # More reasonable threshold than 1e-30
                 lle_accum += np.log(dist / lle_delta)
                 lle_count += 1
                 # Renormalize perturbation vector to lle_delta
@@ -495,9 +736,7 @@ def run_native_loop(
                 for i in range(n_state):
                     y_pert[i] = y[i] + (y_pert[i] - y[i]) * scale
 
-            lle_t_next_renorm += lle_t_evolve
-
-        t += dt
+            lle_t_next_renorm = t + lle_t_evolve  # Use absolute time, not incremental
 
     # ── Final sample ──
     if out_idx < n_out:
@@ -508,5 +747,7 @@ def run_native_loop(
             lle_out[out_idx] = lle_accum / t
         out_idx += 1
 
-    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_out[:out_idx]
+    # Return empty LLE array if not computed to avoid confusion with zero values
+    lle_result = lle_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
+    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_result
 

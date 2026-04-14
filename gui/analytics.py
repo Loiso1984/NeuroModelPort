@@ -2506,22 +2506,48 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_impedance.draw_idle()
 
     def _update_chaos(self, result, stats: dict):
-        """Update Lyapunov/Chaos tab with trajectory divergence plot."""
+        """Update Lyapunov/Chaos tab with trajectory divergence plot.
+
+        Uses native LLE (Benettin) from result.lle_convergence if available,
+        otherwise falls back to post-hoc Rosenstein method from stats.
+        """
         if not hasattr(self, 'fig_chaos'):
             return  # tab not yet visited
 
-        t = stats.get('ftle_time_ms', [])
-        div = stats.get('ftle_log_divergence', [])
-        duration_ms = float(result.t[-1] - result.t[0]) if len(result.t) > 1 else 0.0
-        valid_pairs = int(stats.get('lyapunov_valid_pairs', 0) or 0)
-        lyap_class = stats.get('lyapunov_class')
-        lle_per_s = stats.get('lle_per_s', np.nan)
+        # Check for native LLE data first (Benettin method from run_native)
+        native_lle = getattr(result, 'lle_convergence', None)
+        use_native = native_lle is not None and len(native_lle) > 0
+        div = None  # Initialize for fallback mode (Rosenstein)
 
-        # Handle disabled/empty state: only block when there is truly no data
-        _no_data = (len(t) == 0 or len(div) == 0
-                    or lyap_class in ('disabled', None))
-        if _no_data:
-            if lyap_class == 'disabled':
+        if use_native:
+            # Use native Benettin LLE convergence curve
+            t = result.t  # Use simulation time vector
+            lle_vals = native_lle
+            duration_ms = float(t[-1] - t[0]) if len(t) > 1 else 0.0
+            # Compute LLE from final value (traditional definition)
+            final_lle = lle_vals[-1] if len(lle_vals) > 0 else 0.0
+            lle_per_s = final_lle * 1000.0  # Convert to 1/s
+            lyap_class = 'chaotic' if final_lle > 0.01 else ('neutral' if abs(final_lle) < 0.01 else 'stable')
+            valid_pairs = len(lle_vals)  # Number of recorded points
+            method_label = "Native (Benettin)"
+        else:
+            # Fallback: post-hoc Rosenstein method from analysis
+            t = stats.get('ftle_time_ms', [])
+            div = stats.get('ftle_log_divergence', [])
+            duration_ms = float(result.t[-1] - result.t[0]) if len(result.t) > 1 else 0.0
+            valid_pairs = int(stats.get('lyapunov_valid_pairs', 0) or 0)
+            lyap_class = stats.get('lyapunov_class')
+            lle_per_s = stats.get('lle_per_s', np.nan)
+            lle_vals = None  # Will use div below
+            method_label = "Rosenstein (post-hoc)"
+
+        # Handle disabled/empty state
+        has_data = use_native or (len(t) > 0 and len(div if lle_vals is None else lle_vals) > 0
+                                  and lyap_class not in ('disabled', None))
+        if not has_data:
+            if use_native:
+                msg = "Native LLE computed. Computing class..."
+            elif lyap_class == 'disabled':
                 msg = "LLE not computed. Click 'Compute LLE' button."
             elif duration_ms < 1000.0:
                 msg = "Lyapunov analysis needs >=1000 ms of data after transients."
@@ -2555,7 +2581,13 @@ class AnalyticsWidget(QTabWidget):
 
         # Create persistent line if needed
         if 'div' not in self._chaos_lines:
-            self._chaos_lines['div'] = self.ax_chaos.plot([], [], color='#89B4FA', lw=2.5, label='Trajectory divergence')[0]
+            if use_native:
+                label = 'LLE convergence (Benettin)'
+                color = '#89B4FA'
+            else:
+                label = 'Trajectory divergence (Rosenstein)'
+                color = '#F9E2AF'  # Different color for fallback
+            self._chaos_lines['div'] = self.ax_chaos.plot([], [], color=color, lw=2.5, label=label)[0]
             self._chaos_lines['trend'] = self.ax_chaos.plot([], [], color='#F38BA8', lw=1.5, ls='--', label='Linear trend')[0]
         if 'summary' not in self._chaos_texts:
             self._chaos_texts['summary'] = self.ax_chaos.text(
@@ -2565,33 +2597,46 @@ class AnalyticsWidget(QTabWidget):
                 bbox=dict(boxstyle='round,pad=0.25', facecolor='#11111B', edgecolor='#45475A', alpha=0.88),
             )
 
-        # Plot trajectory divergence
-        div_safe = _ensure_shape_compatible(div, t, "div")
-        if div_safe is not None:
-            td, yd = _downsample_xy(np.asarray(t, dtype=float), np.asarray(div_safe, dtype=float), max_points=2500)
+        # Plot data
+        if use_native:
+            # Plot LLE convergence directly (already computed per time unit)
+            t_arr = np.asarray(t, dtype=float)
+            lle_arr = np.asarray(lle_vals, dtype=float)
+            td, yd = _downsample_xy(t_arr, lle_arr, max_points=2500)
             self._chaos_lines['div'].set_data(td, yd)
-        else:
-            self._chaos_lines['div'].set_data([], [])
-
-        # Add linear trend line
-        lle_per_ms = stats.get('lle_per_ms', np.nan)
-        if np.isfinite(lle_per_ms) and len(t) > 0 and div_safe is not None:
-            t_trend = np.array([t[0], t[-1]])
-            # Use the first point as intercept and lle_per_ms as slope
-            div_trend = div_safe[0] + lle_per_ms * (t_trend - t[0])
-            self._chaos_lines['trend'].set_data(t_trend, div_trend)
+            # For native LLE, "trend" is just the mean line
+            mean_lle = np.mean(lle_arr) if len(lle_arr) > 0 else 0.0
+            self._chaos_lines['trend'].set_data([t_arr[0], t_arr[-1]], [mean_lle, mean_lle])
             self._chaos_lines['trend'].set_visible(True)
+            ylabel = 'LLE (1/ms)'
         else:
-            self._chaos_lines['trend'].set_visible(False)
+            # Rosenstein method: plot log divergence
+            div_safe = _ensure_shape_compatible(div, t, "div")
+            if div_safe is not None:
+                td, yd = _downsample_xy(np.asarray(t, dtype=float), np.asarray(div_safe, dtype=float), max_points=2500)
+                self._chaos_lines['div'].set_data(td, yd)
+            else:
+                self._chaos_lines['div'].set_data([], [])
+            # Linear trend line for Rosenstein
+            lle_per_ms = stats.get('lle_per_ms', np.nan)
+            if np.isfinite(lle_per_ms) and len(t) > 0 and div_safe is not None:
+                t_trend = np.array([t[0], t[-1]])
+                div_trend = div_safe[0] + lle_per_ms * (t_trend - t[0])
+                self._chaos_lines['trend'].set_data(t_trend, div_trend)
+                self._chaos_lines['trend'].set_visible(True)
+            else:
+                self._chaos_lines['trend'].set_visible(False)
+            ylabel = 'Log Divergence ln(d)'
+
         self._chaos_texts['summary'].set_visible(True)
         self._chaos_texts['summary'].set_text(
-            f"class = {lyap_class}\nLLE = {lle_per_s:+.3f} 1/s\npairs = {valid_pairs}"
+            f"class = {lyap_class}\nLLE = {lle_per_s:+.3f} 1/s\npoints = {valid_pairs}\nmethod = {method_label}"
         )
 
         self.ax_chaos.relim()
         self.ax_chaos.autoscale_view()
         _configure_ax_interactive(self.ax_chaos, title='Lyapunov Exponent (Trajectory Separation)',
-                                    xlabel='Time (ms)', ylabel='Log Divergence ln(d)', show_legend=True)
+                                    xlabel='Time (ms)', ylabel=ylabel, show_legend=True)
         self.cvs_chaos.draw_idle()
 
     def _update_modulation(self, result, stats: dict):
