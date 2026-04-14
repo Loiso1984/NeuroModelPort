@@ -27,7 +27,7 @@ CA_MICRODOMAIN_SCALAR = 10.0
 ATP_MIN_M_M = 0.0
 ATP_MAX_M_M = 10.0
 ATP_ISCHEMIC_THRESHOLD = 0.5  # mM - K_ATP opens below this threshold
-ATP_PUMP_FAILURE_THRESHOLD = 0.2  # mM - pumps fail below this threshold
+# Note: ATP_PUMP_FAILURE_THRESHOLD removed v11.6 - MM kinetics uses smooth ATP dependence
 
 # Dimensional analysis for µA/cm² → mM/ms conversion:
 #   d[C]/dt = I_density / (z · F · d_shell)  [mol/(cm³·s)]
@@ -36,8 +36,6 @@ ATP_PUMP_FAILURE_THRESHOLD = 0.2  # mM - pumps fail below this threshold
 _METABOLIC_DEPTH_CM = 1.0e-4  # 1.0 µm
 _NA_PUMP_FACTOR = 1e-3 / (3.0 * F_CONST * _METABOLIC_DEPTH_CM)  # 1 ATP per 3 Na+
 _CA_PUMP_FACTOR = 1e-3 / (2.0 * F_CONST * _METABOLIC_DEPTH_CM)  # 1 ATP per Ca²⁺
-_PUMP_CURRENT_FRACTION = 0.05
-
 # Noise parameters
 OU_NOISE_AMPLITUDE = 0.1  # 10% noise amplitude
 OU_NOISE_FREQUENCY = 0.1  # Hz (period = 10 seconds)
@@ -126,26 +124,30 @@ def _validate_conductance(g: float64) -> float64:
     return g
 
 
-@njit(float64(float64), cache=True)
-def _pump_availability_from_atp(atp_val: float64) -> float64:
-    """ATP-dependent availability factor for Na/K pump current and ATP usage."""
-    if not np.isfinite(atp_val):
-        return 1.0
-    if atp_val <= ATP_MIN_M_M:
-        return 0.0
-    return min(1.0, max(0.0, atp_val / max(ATP_ISCHEMIC_THRESHOLD, 1e-12)))
-
-
-@njit(float64(float64, float64), cache=True)
-def compute_na_k_pump_drive(i_na_total: float64, atp_val: float64) -> float64:
-    """Na/K pump transport drive before conversion to electrogenic membrane current."""
-    return max(0.0, -i_na_total) * _pump_availability_from_atp(atp_val)
-
-
-@njit(float64(float64, float64), cache=True)
-def compute_na_k_pump_current(i_na_total: float64, atp_val: float64) -> float64:
-    """Electrogenic Na/K pump current estimated from inward Na load and ATP availability."""
-    return _PUMP_CURRENT_FRACTION * compute_na_k_pump_drive(i_na_total, atp_val)
+@njit(float64(float64, float64, float64), cache=True)
+def compute_na_k_pump_current(na_i_mM, k_o_mM, atp_mM):
+    """
+    Electrogenic Na+/K+ pump current using Michaelis-Menten kinetics.
+    
+    Replaces legacy 5% fraction model with physiological MM kinetics.
+    Pump saturates at high [Na+]i and [K+]o with Hill coefficients (3 and 2).
+    ATP dependence: smooth hyperbolic, not piecewise linear.
+    
+    Parameters
+    ----------
+    na_i_mM : float
+        Intracellular sodium [mM]
+    k_o_mM : float
+        Extracellular potassium [mM]  
+    atp_mM : float
+        ATP concentration [mM] (2.0 = healthy)
+        
+    Returns
+    -------
+    float
+        Pump current density [µA/cm²], positive = outward
+    """
+    return pump_current(na_i_mM, k_o_mM, atp_mM)
 
 
 @njit(float64(float64, float64), cache=True)
@@ -209,33 +211,33 @@ def compute_metabolism_and_pump(
     i_katp = g_katp * (vi - ek_i)
     i_k_total += i_katp
 
-    # ── Na/K pump current (electrogenic, outward-positive) ──
-    i_pump = compute_na_k_pump_current(i_na_total, atp_i_val)
-
-    # ── ATP ODE: d[ATP]/dt = synthesis - pump_consumption ──
-    pump_drive = compute_na_k_pump_drive(i_na_total, atp_i_val)
-    pump_consumption = pump_drive * _NA_PUMP_FACTOR
+    # ── Na/K pump current (Michaelis-Menten kinetics, C1-continuous) ──
+    # MM kinetics: saturates at high [Na+]i, [K+]o; smooth ATP dependence
+    i_pump = compute_na_k_pump_current(na_i_val, k_o_val, atp_i_val)
+    
+    # Pump consumption: 1 ATP per 3 Na+ pumped (Skou 1957)
+    # Derived from pump_current: consumption = pump_activity / (3*F*depth)
+    pump_activity = max(0.0, i_pump)  # Only outward pump current consumes ATP
+    pump_consumption = pump_activity * _NA_PUMP_FACTOR
     if dyn_ca:
         pump_consumption += max(0.0, i_ca_influx) * _CA_PUMP_FACTOR
 
-    # ── ATP CONSERVATION LAW (fixed v11.5) ──
-    # When ATP depleted, pumps MUST stop - no fuel = no work
-    # Previous bug: datp = abs(datp) * 0.5 created energy from nothing (physical ghost)
-    if atp_i_val <= ATP_MIN_M_M:
-        # Pumps fail without ATP - no consumption, only residual synthesis
-        pump_consumption = 0.0
-        datp = max(0.0, atp_synthesis_rate * 0.001)  # Only synthesis can occur
-    elif atp_i_val < ATP_PUMP_FAILURE_THRESHOLD:
-        # Gradual pump failure as ATP drops (linear scaling to threshold)
-        pump_consumption *= atp_i_val / ATP_PUMP_FAILURE_THRESHOLD
-        datp = atp_synthesis_rate * 0.001 - pump_consumption
-    else:
-        # Normal operation: synthesis - consumption
-        datp = atp_synthesis_rate * 0.001 - pump_consumption
+    # ── ATP SOFT BOUNDARY (v11.6) — C1-continuous for Lyapunov stability ──
+    # Substrate-limited synthesis: ADP availability = (ATP_max - ATP_current)
+    # Physiology: Mitochondria slow down as ATP pool fills (ADP becomes scarce)
+    adp_avail = max(0.0, ATP_MAX_M_M - atp_i_val)  # ADP proxy
+    synthesis_eff = atp_synthesis_rate * (adp_avail / ATP_MAX_M_M)  # Michaelis-style
+    datp = synthesis_eff * 0.001 - pump_consumption
     
-    # Hard ceiling at ATP_MAX - excess synthesis is wasted/regulated
+    # Soft boundary: prevent negative ATP without hard cut-off
+    # Linear ramp to zero derivative at boundary (prevents numerical chatter)
+    if atp_i_val < 0.02 and datp < 0:  # critically low, draining
+        soft_factor = max(0.0, atp_i_val / 0.02)
+        datp *= soft_factor
+    
+    # Hard ceiling at ATP_MAX - homeostatic regulation
     if atp_i_val >= ATP_MAX_M_M and datp > 0.0:
-        datp = 0.0  # Homeostatic regulation: stop synthesis at max
+        datp = 0.0
 
     # ── Na_i drift: inward Na load - pump efflux (3 Na+/cycle) ──
     dnai = ion_drift_gain * (max(0.0, -i_na_total) - 3.0 * max(0.0, i_pump))
@@ -448,16 +450,25 @@ def compute_ionic_currents_scalar(
     
     Calculates leak, sodium, potassium, and optional channel currents (Ih, high-voltage Ca, A-type K, T-type Ca, SK, M-current, persistent and resurgent Na) from the provided gating variables, conductances, and reversal potentials. When `dyn_ca` is True, the Ca reversal potential is computed from `ca_i_val` and `ca_ext` and any inward Ca current (negative current) is accumulated into the calcium influx return value.
     
+    GHK NOTE: When `dyn_ca=True`, calcium currents (ICa, ITCa) use the Goldman-Hodgkin-Katz
+    (GHK) equation instead of Ohmic I=g(V-E). In this mode, `gca` and `gtca` parameters are
+    interpreted as "Permeability Factors" [cm/s], not conductances [mS/cm²]. This is
+    physically correct: GHK current depends on permeability P, not conductance g.
+    The conversion factor P = g_max * RT/(z²F²) is applied internally for unit consistency.
+    
     Parameters:
         vi (float): Membrane voltage in millivolts.
         sk_gate (float): SK-channel activation variable (unitless, typically 0â€“1).
-        dyn_ca (bool): If True, compute Ca reversal from concentrations and accumulate Ca influx.
+        dyn_ca (bool): If True, use GHK calcium currents (gca as permeability factor).
         ca_i_val (float): Intracellular Ca concentration in mM; clamped to physiological bounds when used.
-        ca_ext (float): Extracellular Ca concentration in mM (used for Nernst calculation).
-        t_kelvin (float): Absolute temperature in Kelvin (used for Nernst calculation).
+        ca_ext (float): Extracellular Ca concentration in mM (used for Nernst/GHK calculation).
+        t_kelvin (float): Absolute temperature in Kelvin (used for Nernst/GHK calculation).
+        gca (float): L-type calcium conductance [mS/cm²] or permeability [cm/s] if dyn_ca=True.
+        gtca (float): T-type calcium conductance [mS/cm²] or permeability [cm/s] if dyn_ca=True.
     
     Returns:
-        tuple: `(i_ion, i_ca_influx)` where `i_ion` is the net ionic current (signed, same units as input conductances Ă— mV) and `i_ca_influx` is the positive magnitude of inward Ca current (0.0 if no inward Ca current).
+        tuple: `(i_ion, i_ca_influx)` where `i_ion` is the net ionic current (signed, µA/cm²) 
+        and `i_ca_influx` is the positive magnitude of inward Ca current (0.0 if none).
     """
     i_ion = gl * (vi - el)
     i_ion += gna * (mi * mi * mi) * hi * (vi - ena)
@@ -515,6 +526,122 @@ def compute_ionic_currents_scalar(
 
     return i_ion, i_ca_influx
 
+
+@njit(cache=True)
+def compute_ionic_conductances_scalar(
+    vi, mi, hi, ni,
+    ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
+    en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+    gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar,
+    ena, ek, el, eih,
+    ca_i_val, ca_ext, ca_rest, t_kelvin,
+):
+    """
+    Unified scalar ionic conductance calculator for Hines solver.
+    
+    Computes total membrane conductance (g_total), conductance-weighted
+    effective reversal (e_eff), and calcium influx for a single compartment.
+    This is the ONLY place where I=g(V-E) logic lives for the Hines path.
+    
+    Parameters match compute_ionic_currents_scalar for consistency.
+    
+    Returns:
+        tuple: (g_total, e_eff, i_ca_influx) where:
+        - g_total: total ionic conductance [mS/cm²]
+        - e_eff: weighted reversal potential [mV] = sum(g*E)/g_total
+        - i_ca_influx: positive inward Ca current [µA/cm²]
+    """
+    # ── Base conductances ──
+    g_tot = gl
+    e_eff_i = gl * el
+    
+    # Na current
+    g_na = gna * (mi ** 3) * hi
+    g_tot += g_na
+    e_eff_i += g_na * ena
+    
+    # K-DR current
+    g_k = gk * (ni ** 4)
+    g_tot += g_k
+    e_eff_i += g_k * ek
+    
+    i_ca_influx = 0.0
+    
+    # Calcium reversal (for non-GHK or Ohmic fallback)
+    if dyn_ca:
+        ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
+        eca_i = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
+    else:
+        eca_i = 120.0
+    
+    # GHK pre-factor (same as compute_ionic_currents_scalar)
+    use_ghk = dyn_ca and ca_i_val > CA_I_MIN_M_M and t_kelvin > 0
+    _RT_over_z2F2 = (R_GAS * t_kelvin) / (4.0 * F_CONST * F_CONST) if use_ghk else 0.0
+    
+    if en_ih:
+        g_ih = gih * ri
+        g_tot += g_ih
+        e_eff_i += g_ih * eih
+    
+    if en_ica:
+        g_ca = gca * (si ** 2) * ui
+        g_tot += g_ca
+        if use_ghk:
+            # For GHK: current is NOT ohmic, so we estimate effective E
+            # GHK current = P * GHK_factor; approximate g_eff = I/(V-E)
+            i_ca = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
+            # Approximate reversal contribution: if I=0 at E=ECa, use ECa
+            e_eff_i += g_ca * eca_i  # Best Ohmic approximation for Hines
+            if i_ca < 0.0:
+                i_ca_influx += -i_ca
+        else:
+            e_eff_i += g_ca * eca_i
+            i_ca = g_ca * (vi - eca_i)
+            if i_ca < 0.0:
+                i_ca_influx += -i_ca
+    
+    if en_ia:
+        g_ia = ga * ai * bi
+        g_tot += g_ia
+        e_eff_i += g_ia * ek  # IA is K+ channel
+    
+    if en_itca:
+        g_tca = gtca * (pi ** 2) * qi
+        g_tot += g_tca
+        if use_ghk:
+            i_tca = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
+            e_eff_i += g_tca * eca_i
+            if i_tca < 0.0:
+                i_ca_influx += -i_tca
+        else:
+            e_eff_i += g_tca * eca_i
+            i_tca = g_tca * (vi - eca_i)
+            if i_tca < 0.0:
+                i_ca_influx += -i_tca
+    
+    if en_sk:
+        g_sk = gsk * zi
+        g_tot += g_sk
+        e_eff_i += g_sk * ek
+    
+    if en_im:
+        g_im = gim * wi
+        g_tot += g_im
+        e_eff_i += g_im * ek
+    
+    if en_nap:
+        g_nap = gnap * xi
+        g_tot += g_nap
+        e_eff_i += g_nap * ena
+    
+    if en_nar:
+        g_nar = gnar * yi * ji
+        g_tot += g_nar
+        e_eff_i += g_nar * ena
+    
+    return g_tot, e_eff_i, i_ca_influx
+
+
 @njit(float64(int32, float64, float64), cache=True)
 def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
     """
@@ -539,7 +666,10 @@ def _get_syn_reversal(stype, e_rev_primary, e_rev_secondary):
         return E_GABA_B
     # Fallback for unknown synaptic code
     return e_rev_primary
-def get_event_driven_conductance(t: float64, stype: int32, iext: float64, 
+
+
+@njit(float64(float64, int32, float64, float64[:], int32, float64), cache=True)
+def get_event_driven_conductance(t: float64, stype: int32, iext: float64,
                                event_times: float64[:], n_events: int32, atau: float64) -> float64:
     """
     Compute total synaptic conductance at time t from an event-time queue using a normalized biexponential kernel.

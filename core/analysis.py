@@ -984,6 +984,7 @@ def _compute_stim_array(
     atau: float,
     zap_f0: float,
     zap_f1: float,
+    zap_rise_ms: float,
     event_times: np.ndarray,
     n_events: int,
     mode: int,  # 0=soma, 1=ais, 2=dendritic_filtered
@@ -1057,7 +1058,7 @@ def _compute_stim_array(
                 stim[i] = attenuation * current_val
         else:
             # Non-synaptic types
-            current_val = get_stim_current(ti, stype, iext, t0, td, atau, zap_f0, zap_f1)
+            current_val = get_stim_current(ti, stype, iext, t0, td, atau, zap_f0, zap_f1, zap_rise_ms)
             
             # Apply dendritic filtering
             if mode == 2 and tau_dend > 0:
@@ -1149,6 +1150,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             atau=float(cfg.stim.alpha_tau),
             zap_f0=float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
             zap_f1=float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+            zap_rise_ms=float(getattr(cfg.stim, "zap_rise_ms", 5.0)),
             event_times=event_times_arr,
             n_events=n_events,
             mode=mode,
@@ -1211,6 +1213,7 @@ def _reconstruct_stimulus_proxy(result) -> np.ndarray:
             atau=float(getattr(dual_cfg, "secondary_alpha_tau", 2.0)),
             zap_f0=float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5))),
             zap_f1=float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0))),
+            zap_rise_ms=float(getattr(dual_cfg, "secondary_zap_rise_ms", getattr(cfg.stim, "zap_rise_ms", 5.0))),
             event_times=event_times_arr_2,
             n_events=n_events_2,
             mode=mode_2,

@@ -615,6 +615,7 @@ class AnalyticsWidget(QTabWidget):
             18: {'builder': '_build_tab_fingerprint', 'updater': '_update_fingerprint',   'title': 'Fingerprint', 'needs_stats': True},
             19: {'builder': '_build_tab_csd',         'updater': '_update_csd',            'title': 'CSD', 'needs_morph': True},
             20: {'builder': '_build_tab_debug',       'updater': '_update_debug',          'title': 'Debug LTE'},
+            21: {'builder': '_build_tab_metabolic',   'updater': '_update_metabolic',      'title': 'Metabolic', 'needs_stats': True},
         }
         self._tab_specs = self._all_tab_specs.copy()  # Current visible tabs
         for idx, spec in self._tab_specs.items():
@@ -1892,6 +1893,141 @@ class AnalyticsWidget(QTabWidget):
             min_canvas_height=920,
         )
 
+    def _build_tab_metabolic(self) -> QWidget:
+        """Build Metabolic Trajectory tab showing [Na+]i, [K+]o, and ATP dynamics."""
+        import matplotlib.gridspec as gridspec
+        self.fig_metabolic, cvs = _mpl_fig(1, 1, figsize=(10.5, 10), tight=False)
+        gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 1],
+                               figure=self.fig_metabolic, hspace=0.40)
+        self.ax_metabolic = [
+            self.fig_metabolic.add_subplot(gs[0, 0]),  # [Na+]i
+            self.fig_metabolic.add_subplot(gs[1, 0]),  # [K+]o
+            self.fig_metabolic.add_subplot(gs[2, 0]),  # ATP
+        ]
+        self.cvs_metabolic = cvs
+        self._tab_figures['Metabolic'] = self.fig_metabolic
+        self._metabolic_lines: dict[str, object] = {}
+        
+        # Initialize threshold lines
+        ax1, ax2, ax3 = self.ax_metabolic
+        ax1.axhline(y=15.0, color='#F9E2AF', linestyle='--', lw=1.5, alpha=0.7, label='Healthy max')
+        ax2.axhline(y=5.0, color='#F9E2AF', linestyle='--', lw=1.5, alpha=0.7, label='Healthy max')
+        ax3.axhline(y=0.5, color='#F9E2AF', linestyle='--', lw=1.5, alpha=0.7, label='Warning')
+        ax3.axhline(y=0.2, color='#F38BA8', linestyle='-', lw=2, alpha=0.8, label='Critical')
+        
+        return _tab_with_toolbar(
+            cvs,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Metabolic'),
+            scroll_canvas=True,
+            min_canvas_height=960,
+        )
+
+    def _update_metabolic(self, result, stats):
+        """Update Metabolic Trajectory tab with ion concentrations and ATP."""
+        if not hasattr(self, 'fig_metabolic'):
+            return  # tab not yet visited
+        t = result.t
+        ax_na, ax_k, ax_atp = self.ax_metabolic
+        
+        # [Na+]i trajectory
+        na_data = None
+        if getattr(result, 'na_i', None) is not None:
+            na_arr = np.asarray(result.na_i, dtype=float)
+            if na_arr.ndim == 2:
+                na_data = na_arr[0, :] if na_arr.shape[0] > 0 else None
+            else:
+                na_data = na_arr.reshape(-1) if na_arr.size > 0 else None
+        
+        if na_data is not None and na_data.size == t.size:
+            if 'na_i' not in self._metabolic_lines:
+                self._metabolic_lines['na_i'] = ax_na.plot([], [], color='#F38BA8', lw=2, label='[Na⁺]ᵢ')[0]
+            _set_line_data(self._metabolic_lines['na_i'], t, na_data, name='na_i')
+            na_min, na_max = np.min(na_data), np.max(na_data)
+            ax_na.set_ylim(max(0, na_min * 0.9), na_max * 1.1)
+            status_na = f"min={na_min:.1f}, max={na_max:.1f} mM"
+        else:
+            if 'na_i' in self._metabolic_lines:
+                _set_line_data(self._metabolic_lines['na_i'])
+            status_na = "No [Na⁺]ᵢ data (enable dynamic metabolism)"
+        
+        ax_na.set_ylabel('[Na⁺]ᵢ (mM)')
+        ax_na.set_title(f'Intracellular Sodium — {status_na}')
+        ax_na.legend(fontsize=8, loc='upper left')
+        ax_na.grid(alpha=0.3)
+        ax_na.tick_params(labelbottom=False)
+        ax_na.relim()
+        ax_na.autoscale_view()
+        
+        # [K+]o trajectory
+        k_data = None
+        if getattr(result, 'k_o', None) is not None:
+            k_arr = np.asarray(result.k_o, dtype=float)
+            if k_arr.ndim == 2:
+                k_data = k_arr[0, :] if k_arr.shape[0] > 0 else None
+            else:
+                k_data = k_arr.reshape(-1) if k_arr.size > 0 else None
+        
+        if k_data is not None and k_data.size == t.size:
+            if 'k_o' not in self._metabolic_lines:
+                self._metabolic_lines['k_o'] = ax_k.plot([], [], color='#89B4FA', lw=2, label='[K⁺]ₒ')[0]
+            _set_line_data(self._metabolic_lines['k_o'], t, k_data, name='k_o')
+            k_min, k_max = np.min(k_data), np.max(k_data)
+            ax_k.set_ylim(max(0, k_min * 0.9), k_max * 1.1)
+            status_k = f"min={k_min:.1f}, max={k_max:.1f} mM"
+        else:
+            if 'k_o' in self._metabolic_lines:
+                _set_line_data(self._metabolic_lines['k_o'])
+            status_k = "No [K⁺]ₒ data (enable dynamic metabolism)"
+        
+        ax_k.set_ylabel('[K⁺]ₒ (mM)')
+        ax_k.set_title(f'Extracellular Potassium — {status_k}')
+        ax_k.legend(fontsize=8, loc='upper left')
+        ax_k.grid(alpha=0.3)
+        ax_k.tick_params(labelbottom=False)
+        ax_k.relim()
+        ax_k.autoscale_view()
+        
+        # ATP trajectory
+        atp_data = None
+        if getattr(result, 'atp_level', None) is not None:
+            atp_arr = np.asarray(result.atp_level, dtype=float)
+            if atp_arr.ndim == 2:
+                atp_data = atp_arr[0, :] if atp_arr.shape[0] > 0 else None
+            else:
+                atp_data = atp_arr.reshape(-1) if atp_arr.size > 0 else None
+        
+        if atp_data is not None and atp_data.size == t.size:
+            if 'atp' not in self._metabolic_lines:
+                self._metabolic_lines['atp'] = ax_atp.plot([], [], color='#A6E3A1', lw=2, label='[ATP]ᵢ')[0]
+            _set_line_data(self._metabolic_lines['atp'], t, atp_data, name='atp')
+            atp_min = np.min(atp_data)
+            if atp_min < 0.2:
+                color = '#F38BA8'
+                suffix = "🔴 CRITICAL"
+            elif atp_min < 0.5:
+                color = '#F9E2AF'
+                suffix = "🟠 WARNING"
+            else:
+                color = '#A6E3A1'
+                suffix = "✓ Healthy"
+            self._metabolic_lines['atp'].set_color(color)
+            ax_atp.set_ylim(0, max(3.0, np.max(atp_data) * 1.1))
+            status_atp = f"min={atp_min:.2f} mM — {suffix}"
+        else:
+            if 'atp' in self._metabolic_lines:
+                _set_line_data(self._metabolic_lines['atp'])
+            status_atp = "No ATP data (enable dynamic metabolism)"
+        
+        ax_atp.set_ylabel('[ATP]ᵢ (mM)')
+        ax_atp.set_xlabel('Time (ms)')
+        ax_atp.set_title(f'Intracellular ATP — {status_atp}')
+        ax_atp.legend(fontsize=8, loc='upper right')
+        ax_atp.grid(alpha=0.3)
+        ax_atp.relim()
+        ax_atp.autoscale_view()
+        
+        self.cvs_metabolic.draw_idle()
+
     # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
     # ─────────────────────────────────────────────────────────────────
@@ -1933,6 +2069,7 @@ class AnalyticsWidget(QTabWidget):
         self._update_spike_shape(result, stats)
         self._update_poincare(result, stats)
         self._update_isi_dist(result, stats)
+        self._update_metabolic(result, stats)
 
 
     def _compute_lle_now(self):
@@ -2083,8 +2220,24 @@ class AnalyticsWidget(QTabWidget):
             if en
         )
 
-        lines = [
-            'NEURON PASSPORT v11.3',
+        # ── METABOLIC CRISIS WARNING (v11.6) ──
+        atp_min_mM = stats.get('atp_min_mM', 2.0)
+        crisis_lines = []
+        if atp_min_mM < 0.2:
+            crisis_lines = [
+                '🔴 CRITICAL: ATP < 0.2 mM — PUMPS FAILING — IMPENDING CELL DEATH',
+                '🔴 КРИТИЧЕСКИЙ: АТФ < 0.2 мМ — НАСОСЫ ОСТАНАВЛИВАЮТСЯ — ГИБЕЛЬ КЛЕТКИ',
+                line_major,
+            ]
+        elif atp_min_mM < 0.5:
+            crisis_lines = [
+                '🟠 WARNING: ATP < 0.5 mM — METABOLIC CRISIS — REDUCED PUMP ACTIVITY',
+                '🟠 ВНИМАНИЕ: АТФ < 0.5 мМ — МЕТАБОЛИЧЕСКИЙ КРИЗИС — СНИЖЕННАЯ АКТИВНОСТЬ НАСОСОВ',
+                line_major,
+            ]
+        
+        lines = crisis_lines + [
+            'NEURON PASSPORT v11.6',
             line_major,
             f'Preset class: {cfg.channels.__class__.__name__}',
             f'Temperature: {cfg.env.T_celsius:.1f} C | phi: {cfg.env.phi:.3f}',
@@ -2180,8 +2333,23 @@ class AnalyticsWidget(QTabWidget):
             f'Na+ pump={atp_na_s} nmol/cm^2',
             f'Ca2+ pump={atp_ca_s} nmol/cm^2',
             f'Baseline={atp_bl_s} nmol/cm^2',
-            line_major,
         ]
+
+        # ── METABOLIC STATUS (v11.6) ──
+        atp_min_mM = stats.get('atp_min_mM', 2.0)
+        atp_decline = stats.get('atp_decline_rate_mM_per_s', 0.0)
+        na_min = stats.get('na_i_min_mM', np.nan)
+        k_max = stats.get('k_o_max_mM', np.nan)
+        
+        lines += [
+            line_minor,
+            'METABOLIC STATUS',
+            f'ATP min={atp_min_mM:.3f} mM | decline={atp_decline:.4f} mM/s',
+        ]
+        if np.isfinite(na_min):
+            lines.append(f'[Na+]i min={na_min:.2f} mM | [K+]o max={k_max:.2f} mM' if np.isfinite(k_max) else f'[Na+]i min={na_min:.2f} mM')
+        
+        lines.append(line_major)
         
         # ── EXPERT INSIGHTS (v11.5 bilingual) ──
         try:
@@ -2216,6 +2384,8 @@ class AnalyticsWidget(QTabWidget):
             # Build comprehensive expert stats dictionary
             expert_stats = {
                 'firing_rate_hz': (fi + fs) / 2 if ns > 0 else 0,
+                'f_initial_hz': fi,
+                'f_steady_hz': fs,
                 'atp_min_mM': stats.get('atp_min_mM', 2.0),
                 'lle_per_ms': stats.get('lle_per_ms', -1),
                 'adaptation_index': AI,
@@ -3770,22 +3940,50 @@ class AnalyticsWidget(QTabWidget):
             else:
                 atp_data = atp_arr.reshape(-1)
 
+        # ── Row 4: ATP Pool Time Series (v11.6 Enhanced) ─────────────────
+        # ATP pool from pre-extracted SimulationResult state
+        atp_data = None
+        if getattr(result, 'atp_level', None) is not None:
+            atp_arr = np.asarray(result.atp_level, dtype=float)
+            if atp_arr.ndim == 2:
+                atp_data = atp_arr[0, :] if atp_arr.shape[0] > 1 else atp_arr[0, :]
+            else:
+                atp_data = atp_arr.reshape(-1)
+
         if atp_data is not None:
             _hide_axis_message(self._energy_texts, "atp_disabled")
             if self._atp_line is None:
                 self._atp_line = ax4.plot([], [], color='#A6E3A1', lw=2, label='[ATP]i')[0]
+            # v11.6: Dual threshold system for metabolic crisis visualization
             if self._atp_threshold_line is None:
-                self._atp_threshold_line = ax4.axhline(y=0.5, color='#FF6B6B', linestyle='--', lw=1.5, label='Ischemic Threshold')
+                self._atp_threshold_line = ax4.axhline(y=0.5, color='#F9E2AF', linestyle='--', lw=1.5, label='Warning (0.5)')
+                self._atp_critical_line = ax4.axhline(y=0.2, color='#F38BA8', linestyle='-', lw=2, label='Critical (0.2)')
+                # Fill zones
+                ax4.axhspan(0, 0.2, alpha=0.15, color='#F38BA8')  # Critical zone
+                ax4.axhspan(0.2, 0.5, alpha=0.10, color='#F9E2AF')  # Warning zone
 
             atp_data_safe = _ensure_shape_compatible(atp_data, t, "atp_data")
             if atp_data_safe is not None:
                 _set_line_data(self._atp_line, t, atp_data_safe, name="atp_level")
+                # Color based on minimum ATP level
+                atp_min = np.min(atp_data_safe)
+                if atp_min < 0.2:
+                    self._atp_line.set_color('#F38BA8')  # Red for critical
+                    title_suffix = "🔴 CRITICAL ATP DEPLETION"
+                elif atp_min < 0.5:
+                    self._atp_line.set_color('#F9E2AF')  # Yellow for warning
+                    title_suffix = "🟠 METABOLIC CRISIS"
+                else:
+                    self._atp_line.set_color('#A6E3A1')  # Green for healthy
+                    title_suffix = "✓ Healthy"
                 ax4.set_ylim(0, max(3.0, np.max(atp_data_safe) * 1.1))
             else:
                 _set_line_data(self._atp_line)
+                title_suffix = ""
             ax4.set_ylabel('[ATP]i (mM)')
             ax4.set_xlabel('Time (ms)')
-            ax4.set_title('Intracellular ATP Pool (Dynamic Metabolic State)')
+            atp_mode = "dynamic ATP state" if getattr(result, 'atp_level', None) is not None else "pump-cost proxy only"
+            ax4.set_title(f'Intracellular ATP Pool — {title_suffix} [{atp_mode}]')
             ax4.legend(fontsize=8, loc='upper right')
             ax4.grid(alpha=0.3)
             ax4.relim()

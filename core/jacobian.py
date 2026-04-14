@@ -34,7 +34,6 @@ from .kinetics import (
     by_NaR,
 )
 from .rhs import (
-    ATP_PUMP_FAILURE_THRESHOLD,
     CA_I_MAX_M_M,
     CA_I_MIN_M_M,
     F_CONST,
@@ -821,7 +820,8 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
             if dyn_atp and idx["atp"] is not None:
                 atp_row = idx["atp"].start + i
-                _set(atp_row, atp_row, -1.0 / max(ATP_PUMP_FAILURE_THRESHOLD, 1e-12))
+                # ATP relaxation time constant ~100 ms (v11.6: removed ATP_PUMP_FAILURE_THRESHOLD dependency)
+                _set(atp_row, atp_row, -1.0 / 100.0)
             if dyn_atp and idx["na_i"] is not None:
                 na_row = idx["na_i"].start + i
                 _set(na_row, na_row, -max(ion_drift_gain, 1e-9))

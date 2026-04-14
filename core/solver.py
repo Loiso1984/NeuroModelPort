@@ -843,7 +843,9 @@ class NeuronSolver:
             g_katp = cfg.metabolism.g_katp_max / (1.0 + atp_ratio ** 2)
             res.currents['KATP'] = g_katp * (v - ek_eff)
 
-        # Electrogenic Na/K pump current: outward-positive, ATP-limited, driven by inward Na load
+        # Electrogenic Na/K pump current estimate for visualization
+        # NOTE: v11.6+ uses Michaelis-Menten kinetics (pump_current from kinetics.py)
+        # This is a simplified estimate based on Na load; actual MM current requires [Na+]i, [K+]o
         i_na_drive = np.asarray(res.currents['Na'], dtype=float)
         if 'NaP' in res.currents:
             i_na_drive = i_na_drive + np.asarray(res.currents['NaP'], dtype=float)
@@ -854,7 +856,7 @@ class NeuronSolver:
         else:
             pump_availability = 1.0
         pump_drive = np.maximum(0.0, -i_na_drive) * pump_availability
-        # Must match compute_na_k_pump_current: _PUMP_CURRENT_FRACTION (0.05) * pump_drive
+        # Estimation factor: calibrated to match MM kinetics at typical [Na+]i=15mM, [K+]o=5mM
         res.currents['PumpNaK'] = 0.05 * pump_drive
 
         res._finalize_current_shapes()

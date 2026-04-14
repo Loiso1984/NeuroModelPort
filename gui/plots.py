@@ -117,9 +117,9 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POI
             # Find where global min and max occur (across all compartments)
             flat_min_idx = int(np.argmin(chunk))
             flat_max_idx = int(np.argmax(chunk))
-            # Convert flat index to (compartment, time) and get time index
-            min_time_idx = flat_min_idx % chunk.shape[1]
-            max_time_idx = flat_max_idx % chunk.shape[1]
+            # Convert flat index to (compartment, time) - safe for any memory order
+            min_time_idx = np.unravel_index(flat_min_idx, chunk.shape)[1]
+            max_time_idx = np.unravel_index(flat_max_idx, chunk.shape)[1]
             min_idx = i + min_time_idx
             max_idx = i + max_time_idx
         else:

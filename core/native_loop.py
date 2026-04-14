@@ -31,6 +31,7 @@ from .rhs import (
     CA_I_MIN_M_M, CA_I_MAX_M_M,
     compute_na_k_pump_current,
     compute_metabolism_and_pump,
+    compute_ionic_conductances_scalar,
 )
 from .dual_stimulation import distributed_stimulus_current_for_comp
 from .hines import hines_solve, update_gates_analytic
@@ -45,124 +46,15 @@ def set_numba_random_seed(seed: int) -> None:
     np.random.seed(seed)
 
 
-@njit(fastmath=True, cache=True)
-def _compute_ionic_currents_vectorized(
-    v_arr, m_arr, h_arr, n_arr,
-    r_arr, s_arr, u_arr, a_arr, b_arr, p_arr, q_arr, w_arr, x_arr, y_arr, j_arr, z_arr,
-    ca_arr,
-    gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-    ena_arr, ek_arr, el, eih,
-    en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
-    ca_ext, t_kelvin, ca_rest,
-    n_comp,
-):
-    """
-    Compute per-compartment total membrane conductance, conductance-weighted effective reversal, and calcium influx contributions.
-    
-    For each compartment, returns:
-    - g_total: sum of all active and passive ionic conductances.
-    - e_eff: conductance-weighted effective reversal potential (ÎŁ g_ch * E_ch).
-    - i_ca_influx: nonnegative calcium influx contributions (accumulated inward currents from calcium-permeable channels and ITCa).
-    
-    Notes:
-    - When `dyn_ca` is enabled, the calcium reversal potential is computed from the Nernst equation using a clamped intracellular calcium concentration; otherwise a constant calcium reversal is used.
-    - The IA current is treated as a potassium-like channel and contributes with the potassium reversal (`ek`).
-    """
-    g_total = np.empty(n_comp, dtype=np.float64)
-    e_eff = np.empty(n_comp, dtype=np.float64)
-    i_ca_influx = np.zeros(n_comp, dtype=np.float64)
-    
-    for i in range(n_comp):
-        vi = v_arr[i]
-        mi = m_arr[i]
-        hi = h_arr[i]
-        ni = n_arr[i]
-        ri = r_arr[i] if en_ih else 0.0
-        si = s_arr[i] if en_ica else 0.0
-        ui = u_arr[i] if en_ica else 0.0
-        ai = a_arr[i] if en_ia else 0.0
-        bi = b_arr[i] if en_ia else 0.0
-        pi = p_arr[i] if en_itca else 0.0
-        qi = q_arr[i] if en_itca else 0.0
-        wi = w_arr[i] if en_im else 0.0
-        xi = x_arr[i] if en_nap else 0.0
-        yi = y_arr[i] if en_nar else 0.0
-        ji = j_arr[i] if en_nar else 0.0
-        zi = z_arr[i] if en_sk else 0.0
-        ca_i_val = ca_arr[i] if dyn_ca else ca_rest
-        
-        # Compute Nernst potential for calcium if dynamic
-        if dyn_ca:
-            ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
-            eca_i = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
-        else:
-            eca_i = 120.0
-        
-        # Conductance-weighted sum: g_total and e_eff = ÎŁ g_ch * E_ch
-        ena_i = ena_arr[i]
-        ek_i = ek_arr[i]
+# NOTE: _compute_ionic_currents_vectorized REMOVED v11.6
+# Replaced by unified compute_ionic_conductances_scalar in rhs.py
+# Native loop now uses scalar indexing directly for zero-allocation performance
 
-        g_tot = gl_v[i]
-        e_eff_i = gl_v[i] * el
-        
-        g_na = gna_v[i] * (mi ** 3) * hi
-        g_tot += g_na
-        e_eff_i += g_na * ena_i
-        
-        g_k_dr = gk_v[i] * (ni ** 4)
-        g_tot += g_k_dr
-        e_eff_i += g_k_dr * ek_i
-        
-        if en_ih:
-            g_ih = gih_v[i] * ri
-            g_tot += g_ih
-            e_eff_i += g_ih * eih
-        
-        if en_ica:
-            g_ca = gca_v[i] * (si ** 2) * ui
-            g_tot += g_ca
-            e_eff_i += g_ca * eca_i
-            i_ca = g_ca * (vi - eca_i)
-            if i_ca < 0.0:
-                i_ca_influx[i] += -i_ca
-        
-        if en_ia:
-            g_ia = ga_v[i] * ai * bi
-            g_tot += g_ia
-            e_eff_i += g_ia * ek_i  # IA is a K+ channel, use ek
-        
-        if en_itca:
-            g_tca = gtca_v[i] * (pi ** 2) * qi
-            g_tot += g_tca
-            e_eff_i += g_tca * eca_i
-            i_tca = g_tca * (vi - eca_i)
-            if i_tca < 0.0:
-                i_ca_influx[i] += -i_tca
-        
-        if en_sk:
-            g_sk = gsk_v[i] * zi
-            g_tot += g_sk
-            e_eff_i += g_sk * ek_i
-        
-        if en_im:
-            g_im = gim_v[i] * wi
-            g_tot += g_im
-            e_eff_i += g_im * ek_i
-        
-        if en_nap:
-            g_nap = gnap_v[i] * xi
-            g_tot += g_nap
-            e_eff_i += g_nap * ena_i
-        
-        if en_nar:
-            g_nar = gnar_v[i] * yi * ji
-            g_tot += g_nar
-            e_eff_i += g_nar * ena_i
-        
-        g_total[i] = g_tot
-        e_eff[i] = e_eff_i
-    
-    return g_total, e_eff, i_ca_influx
+
+@njit(cache=True)
+def _extract_gate_scalars(y, i, off_m, off_h, off_n):
+    """Extract HH gate scalars from state vector - zero-slice indexing."""
+    return y[off_m + i], y[off_h + i], y[off_n + i]
 
 
 @njit(fastmath=True, cache=True)
@@ -287,25 +179,12 @@ def run_native_loop(
     rhs   = np.empty(n_comp, dtype=np.float64)
     v_new = np.empty(n_comp, dtype=np.float64)
     i_ca_influx_v = np.zeros(n_comp, dtype=np.float64)
-    i_ca_dummy_v = np.zeros(n_comp, dtype=np.float64)
-    
-    # ── Gate array buffers for vectorized computation (pre-allocated, reused every step) ──
-    r_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    s_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    u_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    a_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    b_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    p_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    q_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    w_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    x_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    y_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    j_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    z_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    ca_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    atp_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    na_i_arr_buf = np.zeros(n_comp, dtype=np.float64)
-    k_o_arr_buf = np.zeros(n_comp, dtype=np.float64)
+    i_ca_dummy_v = np.zeros(n_comp, dtype=np.float64)  # Required by update_gates_analytic
+    # v11.6: Ionic conductance buffers for unified scalar helper
+    g_total_arr = np.empty(n_comp, dtype=np.float64)  # Total membrane conductance per compartment
+    e_eff_arr = np.empty(n_comp, dtype=np.float64)    # Conductance-weighted reversal potential
+    # NOTE: v11.6 - removed gate array buffers, using scalar indexing directly
+    # Minimal buffers for Nernst potentials (avoid recomputing in second loop)
     ena_arr_buf = np.empty(n_comp, dtype=np.float64)
     ek_arr_buf = np.empty(n_comp, dtype=np.float64)
 
@@ -382,80 +261,55 @@ def run_native_loop(
         # 4. Build Hines linear system at V_n, gates at n+1
         #    Row i: d[i]*V[i] - a[i]*V[parent] - Σ b[c]*V[c] = rhs[i]
         # ─────────────────────────────────────────────────────────────
-        # Extract core state arrays
-        # NOTE(Phase 12): These slices create view descriptors in Numba loops.
-        # While O(1) in CPython, in Numba-jitted code they may cause micro-allocations.
-        # Optimization: pass (y, off_v, n_comp) to _compute_ionic_currents_vectorized
-        # and read directly via y[off_v + i] instead of creating slices.
-        # Deferred until Phase 12 (networks) as performance gain is marginal (1-5%)
-        # and risk of regression is high for core solver code.
-        v_arr = y[:n_comp]
-        m_arr = y[off_m:off_m + n_comp]
-        h_arr = y[off_h:off_h + n_comp]
-        n_arr = y[off_n:off_n + n_comp]
+        # v11.6: Zero-slice optimization - use scalar indexing directly
+        # All ionic conductances computed per-compartment using unified helper
+        # This eliminates array buffer allocations and guarantees physics consistency
+        # with the SciPy BDF solver path (both use compute_ionic_conductances_scalar)
 
-        # Re-fill gate buffers with updated gate values (after analytic update)
-        if en_ih:
-            for i in range(n_comp):
-                r_arr_buf[i] = y[off_r + i]
-        if en_ica:
-            for i in range(n_comp):
-                s_arr_buf[i] = y[off_s + i]
-                u_arr_buf[i] = y[off_u + i]
-        if en_ia:
-            for i in range(n_comp):
-                a_arr_buf[i] = y[off_a + i]
-                b_arr_buf[i] = y[off_b + i]
-        if en_itca:
-            for i in range(n_comp):
-                p_arr_buf[i] = y[off_p + i]
-                q_arr_buf[i] = y[off_q + i]
-        if en_im:
-            for i in range(n_comp):
-                w_arr_buf[i] = y[off_w + i]
-        if en_nap:
-            for i in range(n_comp):
-                x_arr_buf[i] = y[off_x + i]
-        if en_nar:
-            for i in range(n_comp):
-                y_arr_buf[i] = y[off_y + i]
-                j_arr_buf[i] = y[off_j + i]
-        if en_sk:
-            for i in range(n_comp):
-                z_arr_buf[i] = y[off_zsk + i]
-        if dyn_ca:
-            for i in range(n_comp):
-                ca_arr_buf[i] = y[off_ca + i]
-        else:
-            for i in range(n_comp):
-                ca_arr_buf[i] = ca_rest
-        if dyn_atp:
-            for i in range(n_comp):
-                atp_arr_buf[i] = y[off_atp + i]
-                na_i_arr_buf[i] = y[off_na_i + i]
-                k_o_arr_buf[i] = y[off_k_o + i]
-                ena_arr_buf[i] = nernst_na_ion(na_i_arr_buf[i], na_ext_mM, t_kelvin)
-                ek_arr_buf[i] = nernst_k_ion(k_i_mM, k_o_arr_buf[i], t_kelvin)
-        else:
-            for i in range(n_comp):
-                atp_arr_buf[i] = atp_max_mM
-                na_i_arr_buf[i] = na_i_rest_mM
-                k_o_arr_buf[i] = k_o_rest_mM
-                ena_arr_buf[i] = ena
-                ek_arr_buf[i] = ek
-
-        # Compute g_total and e_eff using vectorized function
-        g_total_arr, e_eff_arr, i_ca_influx_v = _compute_ionic_currents_vectorized(
-            v_arr, m_arr, h_arr, n_arr,
-            r_arr_buf, s_arr_buf, u_arr_buf, a_arr_buf, b_arr_buf, p_arr_buf, q_arr_buf,
-            w_arr_buf, x_arr_buf, y_arr_buf, j_arr_buf, z_arr_buf,
-            ca_arr_buf,
-            gna_v, gk_v, gl_v, gih_v, gca_v, ga_v, gsk_v, gtca_v, gim_v, gnap_v, gnar_v,
-            ena_arr_buf, ek_arr_buf, el, eih,
-            en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
-            ca_ext, t_kelvin, ca_rest,
-            n_comp,
-        )
+        # Compute g_total, e_eff, i_ca_influx per compartment using unified scalar helper
+        for i in range(n_comp):
+            # Extract all gate scalars directly from state vector (NO SLICES)
+            vi = y[i]
+            mi = y[off_m + i]
+            hi = y[off_h + i]
+            ni = y[off_n + i]
+            ri = y[off_r + i] if en_ih else 0.0
+            si = y[off_s + i] if en_ica else 0.0
+            ui = y[off_u + i] if en_ica else 0.0
+            ai = y[off_a + i] if en_ia else 0.0
+            bi = y[off_b + i] if en_ia else 0.0
+            pi = y[off_p + i] if en_itca else 0.0
+            qi = y[off_q + i] if en_itca else 0.0
+            wi = y[off_w + i] if en_im else 0.0
+            xi = y[off_x + i] if en_nap else 0.0
+            yi = y[off_y + i] if en_nar else 0.0
+            ji = y[off_j + i] if en_nar else 0.0
+            zi = y[off_zsk + i] if en_sk else 0.0
+            ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
+            
+            # Compute Nernst potentials if dynamic metabolism
+            if dyn_atp:
+                na_i_val = y[off_na_i + i]
+                k_o_val = y[off_k_o + i]
+                ena_i = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin)
+                ek_i = nernst_k_ion(k_i_mM, k_o_val, t_kelvin)
+            else:
+                ena_i = ena
+                ek_i = ek
+            
+            # Store for second loop (Hines RHS building)
+            ena_arr_buf[i] = ena_i
+            ek_arr_buf[i] = ek_i
+            
+            # Unified scalar conductance computation (SINGLE SOURCE OF TRUTH)
+            g_total_arr[i], e_eff_arr[i], i_ca_influx_v[i] = compute_ionic_conductances_scalar(
+                vi, mi, hi, ni,
+                ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
+                en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+                gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i], gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
+                ena_i, ek_i, el, eih,
+                ca_i_val, ca_ext, ca_rest, t_kelvin,
+            )
 
         # ─────────────────────────────────────────────────────────────
         # 3. Compute stimulus currents at time t
@@ -468,7 +322,7 @@ def run_native_loop(
             base_current = get_stim_current(
                 t, physics.stype, physics.iext,
                 physics.t0, physics.td, physics.atau,
-                physics.zap_f0_hz, physics.zap_f1_hz)
+                physics.zap_f0_hz, physics.zap_f1_hz, physics.zap_rise_ms)
 
         base_current_2 = 0.0
         if physics.dual_stim_enabled == 1:
@@ -480,7 +334,7 @@ def run_native_loop(
                 base_current_2 = get_stim_current(
                     t, physics.stype_2, physics.iext_2,
                     physics.t0_2, physics.td_2, physics.atau_2,
-                    physics.zap_f0_hz_2, physics.zap_f1_hz_2)
+                    physics.zap_f0_hz_2, physics.zap_f1_hz_2, physics.zap_rise_ms_2)
 
         i_filt   = y[off_ifilt_primary]   if physics.use_dfilter_primary   == 1 else 0.0
         i_filt_2 = y[off_ifilt_secondary] if physics.use_dfilter_secondary == 1 else 0.0
@@ -539,18 +393,17 @@ def run_native_loop(
 
             katp_rhs = 0.0
             if dyn_atp:
-                atp_ratio = atp_arr_buf[i] / max(katp_kd_atp_mM, 1e-12)
+                atp_val = y[off_atp + i]
+                atp_ratio = atp_val / max(katp_kd_atp_mM, 1e-12)
                 g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
                 d[i] += g_katp
                 katp_rhs = g_katp * ek_i
 
-            i_na_total = gna_v[i] * (y[off_m + i] ** 3) * y[off_h + i] * (vi - ena_i)
-            if physics.en_nap:
-                i_na_total += gnap_v[i] * y[off_x + i] * (vi - ena_i)
-            if physics.en_nar:
-                i_na_total += gnar_v[i] * y[off_y + i] * y[off_j + i] * (vi - ena_i)
+            # Na/K pump current (MM kinetics) - uses [Na+]i, [K+]o, [ATP]
             pump_atp_val = y[off_atp + i] if dyn_atp else atp_max_mM
-            i_pump = compute_na_k_pump_current(i_na_total, pump_atp_val)
+            na_i_val = y[off_na_i + i] if dyn_atp else na_i_rest_mM
+            k_o_val = y[off_k_o + i] if dyn_atp else k_o_rest_mM
+            i_pump = compute_na_k_pump_current(na_i_val, k_o_val, pump_atp_val)
 
             rhs[i] = cm_over_dt * vi + e_eff_arr[i] + katp_rhs + i_stim_eff - i_pump
 
