@@ -607,11 +607,11 @@ def pump_current(na_i_mM, k_o_mM, atp_mM, pump_max_capacity, km_na):
     # Pathology: ATP depletion (ischemia) gradually reduces pump activity
     atp_factor = atp_mM / (atp_mM + ATP_HALF)  # K_m = ATP_HALF for smooth transition
     
-    # Hill kinetics: (1 + Km/[S])^(-n)
-    na_factor = 1.0 / (1.0 + km_na_safe / na_safe)
-    na_factor = na_factor * na_factor * na_factor  # Hill coeff = 3
+    # Hill kinetics: 1/(1 + (Km/[S])^n)
+    km_ratio_na = km_na_safe / na_safe
+    na_factor = 1.0 / (1.0 + km_ratio_na * km_ratio_na * km_ratio_na)  # Hill coeff = 3
     
-    k_factor = 1.0 / (1.0 + KM_K / k_safe)
-    k_factor = k_factor * k_factor                   # Hill coeff = 2
+    km_ratio_k = KM_K / k_safe
+    k_factor = 1.0 / (1.0 + km_ratio_k * km_ratio_k)                   # Hill coeff = 2
     
     return pump_max_safe * na_factor * k_factor * atp_factor

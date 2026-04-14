@@ -1052,7 +1052,11 @@ class NeuronSolver:
                                     getattr(cfg.dendritic_filter, 'filter_mode', 'Classic (DC)') == "Physiological (AC)") else 0
         
         dfilter_attenuation = 1.0
-        if stim_mode == 2 and dfilter_lambda_um > 0:
+        if dfilter_filter_mode == 1 and dfilter_lambda_um > 0:
+            dfilter_attenuation = get_ac_attenuation(
+                dfilter_distance_um, dfilter_lambda_um, dfilter_tau_ms, dfilter_input_freq_hz
+            )
+        elif stim_mode == 2 and dfilter_lambda_um > 0:
             dfilter_attenuation = np.exp(-dfilter_distance_um / dfilter_lambda_um)
 
         stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
@@ -1083,7 +1087,12 @@ class NeuronSolver:
             use_dfilter_secondary = int(stim_mode_2 == 2 and dfilter_tau_ms_2 > 0.0)
             if use_dfilter_secondary == 1:
                 y0 = np.concatenate([y0, np.array([0.0])])
-            if stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
+            # Dynamic AC attenuation for secondary (mirrors primary logic)
+            if dfilter_filter_mode_2 == 1 and dfilter_lambda_um_2 > 0:
+                dfilter_attenuation_2 = get_ac_attenuation(
+                    dfilter_distance_um_2, dfilter_lambda_um_2, dfilter_tau_ms_2, dfilter_input_freq_hz_2
+                )
+            elif stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
                 dfilter_attenuation_2 = np.exp(-dfilter_distance_um_2 / dfilter_lambda_um_2)
             # Generate event times for secondary stimulus (synaptic train)
             event_times_arr_2 = np.zeros(0, dtype=np.float64)

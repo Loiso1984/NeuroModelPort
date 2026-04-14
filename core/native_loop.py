@@ -289,6 +289,7 @@ def run_native_loop(
     ek  = physics.ek
     el  = physics.el
     eih = physics.eih
+    eca = physics.ea  # Static calcium reversal potential (used when dyn_ca=False)
 
     # ── Calcium / SK / ATP environment pack ──
     (
@@ -433,6 +434,21 @@ def run_native_loop(
                     physics.zap_win_t_2, physics.zap_win_g_2, physics.zap_win_size_2)
 
         # ─────────────────────────────────────────────────────────────
+        # PRECOMPUTE Nernst potentials (Variant A: use start-of-step values)
+        # Concentrations are identical for both trajectories at step start
+        # ─────────────────────────────────────────────────────────────
+        if dyn_atp:
+            for i in range(n_comp):
+                na_i_val = y[off_na_i + i]  # Main trajectory values at step start
+                k_o_val = y[off_k_o + i]
+                ena_arr_buf[i] = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin)
+                ek_arr_buf[i] = nernst_k_ion(k_i_mM, k_o_val, t_kelvin)
+        else:
+            for i in range(n_comp):
+                ena_arr_buf[i] = ena
+                ek_arr_buf[i] = ek
+
+        # ─────────────────────────────────────────────────────────────
         # DUAL TRAJECTORY LOOP — traj 0 = main, traj 1 = perturbed (LLE)
         # ─────────────────────────────────────────────────────────────
         for traj_idx in range(n_traj):
@@ -506,24 +522,16 @@ def run_native_loop(
                 zi = y_active[off_zsk + i] if en_sk else 0.0
                 ca_i_val = y_active[off_ca + i] if dyn_ca else ca_rest
 
-                if dyn_atp:
-                    na_i_val = y_active[off_na_i + i]
-                    k_o_val = y_active[off_k_o + i]
-                    ena_i = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin)
-                    ek_i = nernst_k_ion(k_i_mM, k_o_val, t_kelvin)
-                else:
-                    ena_i = ena
-                    ek_i = ek
-
-                ena_arr_buf[i] = ena_i
-                ek_arr_buf[i] = ek_i
+                # Use precomputed Nernst potentials (optimized, same for both trajectories)
+                ena_i = ena_arr_buf[i]
+                ek_i = ek_arr_buf[i]
 
                 g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[traj_idx, i] = compute_ionic_conductances_scalar(
                     vi, mi, hi, ni,
                     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
                     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
                     gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i], gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
-                    ena_i, ek_i, el, eih,
+                    ena_i, ek_i, el, eih, eca,
                     ca_i_val, ca_ext, ca_rest, t_kelvin,
                 )
 

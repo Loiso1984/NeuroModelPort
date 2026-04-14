@@ -513,7 +513,7 @@ def compute_ionic_currents_scalar(
     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, sk_gate,
     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
     gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar,
-    ena, ek, el, eih,
+    ena, ek, el, eih, eca,
     ca_i_val, ca_ext, ca_rest, t_kelvin,
 ):
     """
@@ -550,7 +550,7 @@ def compute_ionic_currents_scalar(
         ca_i_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
         eca_i = nernst_ca_ion(ca_i_safe, ca_ext, t_kelvin)
     else:
-        eca_i = 120.0
+        eca_i = eca  # Use parameter from PhysicsParams (SSoT), not hardcoded value
 
     if en_ih:
         i_ion += gih * ri * (vi - eih)
@@ -604,7 +604,7 @@ def compute_ionic_conductances_scalar(
     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
     gna, gk, gl, gih, gca, ga, gsk, gtca, gim, gnap, gnar,
-    ena, ek, el, eih,
+    ena, ek, el, eih, eca,
     ca_i_val, ca_ext, ca_rest, t_kelvin,
 ):
     """
@@ -643,7 +643,7 @@ def compute_ionic_conductances_scalar(
         ca_safe = min(max(ca_i_val, CA_I_MIN_M_M), CA_I_MAX_M_M)
         eca_i = nernst_ca_ion(ca_safe, ca_ext, t_kelvin)
     else:
-        eca_i = 120.0
+        eca_i = eca  # Use parameter from PhysicsParams (SSoT), not hardcoded value
     
     # GHK pre-factor (same as compute_ionic_currents_scalar)
     use_ghk = dyn_ca and ca_i_val > CA_I_MIN_M_M and t_kelvin > 0
@@ -888,6 +888,7 @@ def rhs_multicompartment(
     ek = physics_params.ek
     el = physics_params.el
     eih = physics_params.eih
+    eca = physics_params.ea  # Static calcium reversal potential (used when dyn_ca=False)
     
     # Morphology and axial coupling
     cm_v = physics_params.cm_v
@@ -1071,7 +1072,7 @@ def rhs_multicompartment(
             ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
             en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
             gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i], gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
-            ena_i, ek_i, el, eih,
+            ena_i, ek_i, el, eih, eca,
             ca_i_val, ca_ext, ca_rest, t_kelvin,
         )
 
