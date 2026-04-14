@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from numba import njit, float64, int32
 from .kinetics import *
 from .dual_stimulation import (
@@ -39,6 +39,10 @@ _CA_PUMP_FACTOR = 1e-3 / (2.0 * F_CONST * _METABOLIC_DEPTH_CM)  # 1 ATP per Ca²
 # Noise parameters
 OU_NOISE_AMPLITUDE = 0.1  # 10% noise amplitude
 OU_NOISE_FREQUENCY = 0.1  # Hz (period = 10 seconds)
+
+# Empty window arrays for callers without precomputed ZAP windows
+_EMPTY_WIN_T = np.zeros(0, dtype=np.float64)
+_EMPTY_WIN_G = np.zeros(0, dtype=np.float64)
 
 # Synaptic time constants
 TAU_RISE_RATIO = 5.0  # tau_rise = tau_decay / TAU_RISE_RATIO
@@ -288,8 +292,38 @@ def _calculate_syn_tau(stype, atau_mult):
         return 0.0, 0.0
 
 
-@njit(float64(float64, int32, float64, float64, float64, float64, float64, float64, float64), cache=True)
-def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, zap_rise_ms):
+@njit(fastmath=True, cache=True)
+def _interp_window(t_offset, win_t, win_g, win_size):
+    """Fast linear interpolation on a precomputed Tukey window table.
+
+    Binary search O(log N) replaces the transcendental np.cos call
+    in the ZAP stimulus hot path.  Returns 1.0 when win_size == 0
+    (no precomputed table — caller should fall back to direct computation).
+    """
+    if win_size <= 0:
+        return 1.0
+    if t_offset <= win_t[0]:
+        return win_g[0]
+    if t_offset >= win_t[win_size - 1]:
+        return win_g[win_size - 1]
+    lo = 0
+    hi = win_size - 1
+    while hi - lo > 1:
+        mid = (lo + hi) >> 1
+        if win_t[mid] <= t_offset:
+            lo = mid
+        else:
+            hi = mid
+    span = win_t[hi] - win_t[lo]
+    if span < 1e-30:
+        return win_g[lo]
+    frac = (t_offset - win_t[lo]) / span
+    return win_g[lo] + frac * (win_g[hi] - win_g[lo])
+
+
+@njit(cache=True)
+def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, zap_rise_ms,
+                     win_t, win_g, win_size):
     """Return stimulus current at time t for various stimulus types.
 
     For stype >= 4, iext is a conductance amplitude [mS/cmÂ˛] and must be
@@ -337,21 +371,21 @@ def get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, zap_ris
         dt = t - t0  # in ms
         dt_sec = dt / 1000.0  # Convert to seconds for frequency math
         td_sec = td / 1000.0
-        
-        # Tukey window (cosine-tapered) to eliminate discontinuity at start/end
-        # Reduces spectral leakage and numerical artifacts from abrupt current changes
-        # Use configured rise time, fallback to 5% of duration if not specified
-        rise_ms = max(0.0, zap_rise_ms) if zap_rise_ms > 0.0 else 0.05 * td
-        if rise_ms > 0.0 and dt < rise_ms:
-            # Rising phase: 0.5 * (1 - cos(π * t / t_rise))
-            window = 0.5 * (1.0 - np.cos(np.pi * dt / rise_ms))
-        elif rise_ms > 0.0 and dt > (td - rise_ms):
-            # Falling phase: symmetric
-            fall_dt = td - dt
-            window = 0.5 * (1.0 - np.cos(np.pi * fall_dt / rise_ms))
+
+        # Tukey window — use precomputed LUT when available (eliminates np.cos)
+        if win_size > 0:
+            window = _interp_window(dt, win_t, win_g, win_size)
         else:
-            window = 1.0
-        
+            # Fallback: direct computation (analysis paths without precomputed tables)
+            rise_ms = max(0.0, zap_rise_ms) if zap_rise_ms > 0.0 else 0.05 * td
+            if rise_ms > 0.0 and dt < rise_ms:
+                window = 0.5 * (1.0 - np.cos(np.pi * dt / rise_ms))
+            elif rise_ms > 0.0 and dt > (td - rise_ms):
+                fall_dt = td - dt
+                window = 0.5 * (1.0 - np.cos(np.pi * fall_dt / rise_ms))
+            else:
+                window = 1.0
+
         # Phase = 2*pi * integral(f0 + k*t) dt = 2*pi * (f0*t + 0.5*k*t^2)
         k_hz_per_sec = (zap_f1_hz - zap_f0_hz) / td_sec
         phase = 2.0 * np.pi * (zap_f0_hz * dt_sec + 0.5 * k_hz_per_sec * dt_sec * dt_sec)
@@ -921,7 +955,8 @@ def rhs_multicompartment(
     if n_events > 0 and is_conductance_based:
         base_current = get_event_driven_conductance(t, stype, iext, event_times_arr, n_events, atau)
     else:
-        base_current = get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, zap_rise_ms)
+        base_current = get_stim_current(t, stype, iext, t0, td, atau, zap_f0_hz, zap_f1_hz, zap_rise_ms,
+                                        physics_params.zap_win_t, physics_params.zap_win_g, physics_params.zap_win_size)
     e_syn = _get_syn_reversal(stype, physics_params.e_rev_syn_primary, physics_params.e_rev_syn_secondary) if is_conductance_based else 0.0
     is_nmda = (stype == 5)
 
@@ -954,7 +989,8 @@ def rhs_multicompartment(
         if n_events_2 > 0 and is_cond_2:
             base_current_2 = get_event_driven_conductance(t, stype_2, iext_2, event_times_arr_2, n_events_2, atau_2)
         else:
-            base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, zap_rise_ms_2)
+            base_current_2 = get_stim_current(t, stype_2, iext_2, t0_2, td_2, atau_2, zap_f0_hz_2, zap_f1_hz_2, zap_rise_ms_2,
+                                             physics_params.zap_win_t_2, physics_params.zap_win_g_2, physics_params.zap_win_size_2)
         if stim_mode_2 == 2 and use_dfilter_secondary == 1 and dfilter_tau_ms_2 > 1e-12:
             attenuated_current_2 = dfilter_attenuation_2 * base_current_2
             d_ifiltered_dt_secondary = (attenuated_current_2 - i_filtered_secondary) / dfilter_tau_ms_2

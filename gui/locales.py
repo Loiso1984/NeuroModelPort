@@ -170,6 +170,42 @@ class Translator:
             'func_an': 'K activation (n). Slow repolarizing current.',
             'func_bn': 'K deactivation (n).',
             'class_channel_registry': 'OOP registry of channels for GUI interaction and state vector assembly.',
+
+            # ── Favorites widget ───────────────────────────────────────
+            'favorites_label': 'Favorites:',
+            'favorites_manage': 'Manage favorites',
+            'favorites_add_current': 'Add current preset',
+            'favorites_edit': 'Edit favorites...',
+            'favorites_reset': 'Reset to defaults',
+            'favorites_add': 'Add...',
+            'favorites_remove': 'Remove',
+            'favorites_add_title': 'Add Favorite',
+            'favorites_add_prompt': 'Enter preset name:',
+            'favorites_edit_title': 'Edit Favorites',
+            'favorites_edit_hint': 'Drag to reorder. Double-click to edit.',
+            'dialog_ok': 'OK',
+            'dialog_cancel': 'Cancel',
+
+            # ── Quick Stats widget ───────────────────────────────────
+            'stat_spikes': 'Spikes:',
+            'stat_rate': 'Rate:',
+            'stat_vmin': 'Vmin:',
+            'stat_vmax': 'Vmax:',
+            'stat_atp': 'ATP:',
+            'stat_ready': 'Ready',
+            'stat_active': 'Active',
+            'stat_silent': 'Silent',
+            'btn_quick_export': 'Quick Export',
+            'tt_quick_export': 'Export current results to CSV',
+            'tt_stat_spikes': 'Total spike count',
+            'tt_stat_rate': 'Initial/steady firing rate',
+            'tt_stat_vmin': 'Minimum membrane potential',
+            'tt_stat_vmax': 'Maximum membrane potential',
+            'tt_stat_atp': 'Minimum ATP concentration',
+
+            # ── Keyboard shortcuts ───────────────────────────────────
+            'shortcuts_title': 'Keyboard Shortcuts',
+            'menu_help_shortcuts': 'Keyboard Shortcuts...',
         },
 
         # ─────────────────────────────────────────────────────────────
@@ -330,6 +366,42 @@ class Translator:
             'func_an': 'Активация K (n). Медленный ток реполяризации.',
             'func_bn': 'Деактивация K (n).',
             'class_channel_registry': 'ООП-реестр каналов для взаимодействия с GUI и сборки вектора состояний.',
+
+            # ── Favorites widget ───────────────────────────────────────
+            'favorites_label': 'Избранное:',
+            'favorites_manage': 'Управление избранным',
+            'favorites_add_current': 'Добавить текущий пресет',
+            'favorites_edit': 'Редактировать избранное...',
+            'favorites_reset': 'Сбросить на стандартные',
+            'favorites_add': 'Добавить...',
+            'favorites_remove': 'Удалить',
+            'favorites_add_title': 'Добавить в избранное',
+            'favorites_add_prompt': 'Введите имя пресета:',
+            'favorites_edit_title': 'Редактирование избранного',
+            'favorites_edit_hint': 'Перетаскивайте для изменения порядка. Двойной клик для редактирования.',
+            'dialog_ok': 'OK',
+            'dialog_cancel': 'Отмена',
+
+            # ── Quick Stats widget ───────────────────────────────────
+            'stat_spikes': 'Спайки:',
+            'stat_rate': 'Частота:',
+            'stat_vmin': 'Vmin:',
+            'stat_vmax': 'Vmax:',
+            'stat_atp': 'АТФ:',
+            'stat_ready': 'Готов',
+            'stat_active': 'Активен',
+            'stat_silent': 'Молчит',
+            'btn_quick_export': 'Быстрый экспорт',
+            'tt_quick_export': 'Экспортировать результаты в CSV',
+            'tt_stat_spikes': 'Общее число спайков',
+            'tt_stat_rate': 'Начальная/установившаяся частота',
+            'tt_stat_vmin': 'Минимальный мембранный потенциал',
+            'tt_stat_vmax': 'Максимальный мембранный потенциал',
+            'tt_stat_atp': 'Минимальная концентрация АТФ',
+
+            # ── Keyboard shortcuts ───────────────────────────────────
+            'shortcuts_title': 'Горячие клавиши',
+            'menu_help_shortcuts': 'Горячие клавиши...',
         },
     }
 

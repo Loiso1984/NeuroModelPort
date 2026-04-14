@@ -670,6 +670,7 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     # Stimulus current
     s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10}
     stype = s_map.get(cfg.stim.stim_type, 0)
+    _ew = np.zeros(0, dtype=np.float64)
     I_stim = np.array([
         get_stim_current(
             float(ti), stype,
@@ -677,6 +678,8 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
             cfg.stim.pulse_dur, cfg.stim.alpha_tau,
             float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
             float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+            float(getattr(cfg.stim, "zap_rise_ms", 5.0)),
+            _ew, _ew, 0,
         )
         for ti in t
     ])
@@ -1027,13 +1030,15 @@ def _compute_stim_array(
     """
     n = len(t)
     stim = np.zeros(n, dtype=np.float64)
-    
+    _ew_t = np.zeros(0, dtype=np.float64)  # empty window (no precomputed ZAP table)
+    _ew_g = np.zeros(0, dtype=np.float64)
+
     if n == 0:
         return stim
-    
+
     dt = t[1] - t[0] if n > 1 else 0.025
     v_fil = 0.0
-    
+
     for i in range(n):
         ti = t[i]
         
@@ -1058,7 +1063,8 @@ def _compute_stim_array(
                 stim[i] = attenuation * current_val
         else:
             # Non-synaptic types
-            current_val = get_stim_current(ti, stype, iext, t0, td, atau, zap_f0, zap_f1, zap_rise_ms)
+            current_val = get_stim_current(ti, stype, iext, t0, td, atau, zap_f0, zap_f1, zap_rise_ms,
+                                           _ew_t, _ew_g, 0)
             
             # Apply dendritic filtering
             if mode == 2 and tau_dend > 0:

@@ -22,6 +22,28 @@ from core.validation import estimate_simulation_runtime, validate_simulation_con
 logger = logging.getLogger(__name__)
 
 
+def _precompute_zap_window(td_ms: float, rise_ms: float, res_ms: float = 0.1):
+    """Precompute a Tukey (cosine-tapered) window lookup table for ZAP stimulus.
+
+    Returns (win_t, win_g, win_size) — arrays of time-offsets and gain values.
+    When rise_ms <= 0 or td_ms <= 0, returns empty arrays (rectangular window;
+    get_stim_current falls back to direct computation).
+    """
+    if td_ms <= 0.0 or rise_ms <= 0.0:
+        return np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0
+    n_pts = max(int(td_ms / res_ms) + 1, 3)
+    win_t = np.linspace(0.0, td_ms, n_pts)
+    win_g = np.ones(n_pts, dtype=np.float64)
+    for i in range(n_pts):
+        dt = win_t[i]
+        if dt < rise_ms:
+            win_g[i] = 0.5 * (1.0 - np.cos(np.pi * dt / rise_ms))
+        elif dt > (td_ms - rise_ms):
+            fall_dt = td_ms - dt
+            win_g[i] = 0.5 * (1.0 - np.cos(np.pi * fall_dt / rise_ms))
+    return win_t, win_g, n_pts
+
+
 def _stable_seed_from_values(*values) -> int:
     """Deterministic 32-bit seed from value tuple (stable across Python sessions)."""
     payload = "|".join(str(v) for v in values).encode("utf-8")
@@ -172,6 +194,9 @@ class SimulationResult:
 
         # Morphology dict stored for post-analysis (current balance, etc.)
         self.morph: dict = {}
+
+        # LLE convergence array (populated when calc_lle=True in run_native)
+        self.lle_convergence: np.ndarray | None = None
 
     def _finalize_current_shapes(self):
         """Collapse single-compartment current matrices to 1-D time series."""
@@ -448,6 +473,10 @@ class NeuronSolver:
         rng_state = rng.get_state()['state'] if (cfg.stim.stoch_gating or cfg.stim.noise_sigma > 0) else None
         na_i_rest_mM, k_o_rest_mM = _resolve_dynamic_atp_rest_values(cfg)
 
+        # Precompute ZAP Tukey windows (primary & secondary)
+        _zw1_t, _zw1_g, _zw1_n = _precompute_zap_window(primary_td, primary_zap_rise) if stype == 10 else (np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0)
+        _zw2_t, _zw2_g, _zw2_n = _precompute_zap_window(td_2, zap_rise_2) if stype_2 == 10 else (np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0)
+
         rhs_values = {
             "n_comp": n_comp,
             "en_ih": cfg.channels.enable_Ih,
@@ -520,6 +549,9 @@ class NeuronSolver:
             "zap_f0_hz": primary_zap_f0,
             "zap_f1_hz": primary_zap_f1,
             "zap_rise_ms": primary_zap_rise,
+            "zap_win_t": _zw1_t,
+            "zap_win_g": _zw1_g,
+            "zap_win_size": np.int32(_zw1_n),
             "stim_comp": primary_stim_comp,
             "stim_mode": stim_mode,
             "use_dfilter_primary": use_dfilter_primary,
@@ -546,6 +578,9 @@ class NeuronSolver:
             "zap_f0_hz_2": zap_f0_2,
             "zap_f1_hz_2": zap_f1_2,
             "zap_rise_ms_2": zap_rise_2,
+            "zap_win_t_2": _zw2_t,
+            "zap_win_g_2": _zw2_g,
+            "zap_win_size_2": np.int32(_zw2_n),
             "stim_comp_2": stim_comp_2,
             "stim_mode_2": stim_mode_2,
             "use_dfilter_secondary": use_dfilter_secondary,
@@ -902,7 +937,9 @@ class NeuronSolver:
         }
 
     # ─────────────────────────────────────────────────────────────────
-    def run_native(self, custom_config: "FullModelConfig | None" = None) -> SimulationResult:
+    def run_native(self, custom_config: "FullModelConfig | None" = None,
+                    calc_lle: bool = False, lle_delta: float = 1e-6,
+                    lle_t_evolve: float = 1.0) -> SimulationResult:
         """
         Run the model simulation using the native Hines fixed-step solver.
         
@@ -1142,6 +1179,10 @@ class NeuronSolver:
 
         na_i_rest_mM, k_o_rest_mM = _resolve_dynamic_atp_rest_values(cfg)
 
+        # Precompute ZAP Tukey windows (primary & secondary)
+        _zw1_t, _zw1_g, _zw1_n = _precompute_zap_window(td, zap_rise) if stype == 10 else (np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0)
+        _zw2_t, _zw2_g, _zw2_n = _precompute_zap_window(td_2, zap_rise_2) if stype_2 == 10 else (np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0)
+
         physics = create_physics_params(
             n_comp              = np.int32(n_comp),
             en_ih               = bool(cc.enable_Ih),
@@ -1194,6 +1235,9 @@ class NeuronSolver:
             zap_f0_hz           = float(zap_f0),
             zap_f1_hz           = float(zap_f1),
             zap_rise_ms         = float(zap_rise),
+            zap_win_t           = _zw1_t,
+            zap_win_g           = _zw1_g,
+            zap_win_size        = np.int32(_zw1_n),
             event_times_arr     = event_times_arr,
             n_events            = np.int32(len(event_times_arr)),
             event_times_arr_2   = event_times_arr_2,
@@ -1216,6 +1260,9 @@ class NeuronSolver:
             zap_f0_hz_2         = float(zap_f0_2),
             zap_f1_hz_2         = float(zap_f1_2),
             zap_rise_ms_2       = float(zap_rise_2),
+            zap_win_t_2         = _zw2_t,
+            zap_win_g_2         = _zw2_g,
+            zap_win_size_2      = np.int32(_zw2_n),
             stim_comp_2         = np.int32(stim_comp_2),
             stim_mode_2         = np.int32(stim_mode_2),
             use_dfilter_secondary     = np.int32(use_dfilter_secondary),
@@ -1237,7 +1284,7 @@ class NeuronSolver:
             np.random.seed(seed)
             set_numba_random_seed(seed)
 
-        t_out, y_out, diverged = run_native_loop(
+        t_out, y_out, diverged, lle_arr = run_native_loop(
             y0.astype(np.float64),
             float(cfg.stim.t_sim),
             dt_internal,
@@ -1248,6 +1295,9 @@ class NeuronSolver:
             morph["hines_order"].astype(np.int32),
             morph["g_axial_to_parent"].astype(np.float64),
             morph["g_axial_parent_to_child"].astype(np.float64),
+            calc_lle,
+            lle_delta,
+            lle_t_evolve,
         )
 
         if diverged:
@@ -1255,12 +1305,16 @@ class NeuronSolver:
             res = SimulationResult(t_out, y_out, n_comp, cfg)
             self._post_process_physics(res, morph)
             res.morph = morph
+            if calc_lle:
+                res.lle_convergence = lle_arr
             res.diverged = True
             return res
 
         res = SimulationResult(t_out, y_out, n_comp, cfg)
         self._post_process_physics(res, morph)
         res.morph = morph
+        if calc_lle:
+            res.lle_convergence = lle_arr
         return res
 
     # ─────────────────────────────────────────────────────────────────

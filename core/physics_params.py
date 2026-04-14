@@ -327,6 +327,10 @@ class PhysicsParams(NamedTuple):
     zap_f0_hz: float64
     zap_f1_hz: float64
     zap_rise_ms: float64  # Tukey window rise/fall time for ZAP (0 = no window, abrupt)
+    # Precomputed Tukey window lookup table (primary ZAP)
+    zap_win_t: np.ndarray    # float64[:] time offsets from stimulus start (ms)
+    zap_win_g: np.ndarray    # float64[:] window gain values [0, 1]
+    zap_win_size: int32      # table size (0 = fall back to direct cos computation)
     event_times_arr: np.ndarray
     n_events: int32
     event_times_arr_2: np.ndarray
@@ -366,6 +370,10 @@ class PhysicsParams(NamedTuple):
     zap_f0_hz_2: float64
     zap_f1_hz_2: float64
     zap_rise_ms_2: float64
+    # Precomputed Tukey window lookup table (secondary ZAP)
+    zap_win_t_2: np.ndarray
+    zap_win_g_2: np.ndarray
+    zap_win_size_2: int32
     stim_comp_2: int32
     stim_mode_2: int32
     use_dfilter_secondary: int32
@@ -448,7 +456,13 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         # Rise time: 5ms (5% of 100ms pulse), 0 = abrupt (no window)
         # Physics: Cosine-tapered window eliminates discontinuities at stimulus edges
         'zap_rise_ms': 5.0,
+        'zap_win_t': np.zeros(0, dtype=np.float64),
+        'zap_win_g': np.zeros(0, dtype=np.float64),
+        'zap_win_size': np.int32(0),
         'zap_rise_ms_2': 5.0,
+        'zap_win_t_2': np.zeros(0, dtype=np.float64),
+        'zap_win_g_2': np.zeros(0, dtype=np.float64),
+        'zap_win_size_2': np.int32(0),
         # Secondary (dual) stimulus - same parameters for independent control
         'dfilter_distance_um_2': 0.0,
         'dfilter_lambda_um_2': 150.0,

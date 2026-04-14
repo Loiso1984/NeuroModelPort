@@ -289,6 +289,94 @@ DEFAULT_EXPERT_RULES: List[ExpertRule] = [
         "severity": "info",
         "format_args": lambda s: [s.get('cv_isi', 0)]
     },
+    # ── v11.7 NEW RULES ──
+    {
+        "id": "refractory_abnormal",
+        "condition": lambda s: (
+            s.get('refractory_period_ms', 5) < 1.0 and 
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "⚡ **Abnormal Refractory Period**: {:.2f} ms < 1 ms. "
+            "Extremely short recovery. Check gK dynamics and AHP currents (IM/SK)."
+        ),
+        "message_ru": (
+            "⚡ **Аномальный рефрактерный период**: {:.2f} мс < 1 мс. "
+            "Экстремально короткое восстановление. Проверьте динамику gK и AHP токи (IM/SK)."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [s.get('refractory_period_ms', 1.0)]
+    },
+    {
+        "id": "hyperpolarized_silent",
+        "condition": lambda s: (
+            s.get('n_spikes', 0) == 0 and 
+            s.get('mean_v_mV', -70) < -75 and
+            s.get('stim_amplitude_pA', 0) > 50
+        ),
+        "message_en": (
+            "🔋 **Hyperpolarized Silence**: V_mean={:.1f} mV, no spikes at {:.0f} pA. "
+            "Strong K+ leak or Ih current. Reduce gL or increase Iext."
+        ),
+        "message_ru": (
+            "🔋 **Гиперполяризованное молчание**: V={:.1f} мВ, нет спайков при {:.0f} пА. "
+            "Сильный K+ утечка или ток Ih. Уменьшите gL или увеличьте Iext."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('mean_v_mV', -70), s.get('stim_amplitude_pA', 0)]
+    },
+    {
+        "id": "synaptic_dominance",
+        "condition": lambda s: (
+            s.get('synaptic_charge_ratio', 0) > 0.5 and 
+            s.get('n_spikes', 0) > 0
+        ),
+        "message_en": (
+            "🔗 **Synaptic Drive Dominant**: {:.1%} of charge from synapses. "
+            "Network-coupled behavior. Check synaptic reversal and conductance scaling."
+        ),
+        "message_ru": (
+            "🔗 **Синаптическое доминирование**: {:.1%} заряда от синапсов. "
+            "Сетевое поведение. Проверьте реверсал синапсов и масштабирование проводимости."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('synaptic_charge_ratio', 0)]
+    },
+    {
+        "id": "prominent_ahp",
+        "condition": lambda s: (
+            s.get('V_ahp_mV', -65) < -75 and 
+            s.get('n_spikes', 0) > 3
+        ),
+        "message_en": (
+            "📉 **Prominent Afterhyperpolarization**: AHP={:.1f} mV. "
+            "Strong K+ activation limits burst capability. Check SK/IKCa currents."
+        ),
+        "message_ru": (
+            "📉 **Выраженная послейперполяризация**: AHP={:.1f} мВ. "
+            "Сильная активация K+ ограничивает пакетную способность. Проверьте токи SK/IKCa."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('V_ahp_mV', -65)]
+    },
+    {
+        "id": "irregular_bursting",
+        "condition": lambda s: (
+            s.get('burst_spike_ratio', 0) > 0.2 and 
+            s.get('cv_isi', 0) > 0.3 and
+            s.get('n_spikes', 0) > 10
+        ),
+        "message_en": (
+            "🎆 **Irregular Bursting**: {:.1%} burst ratio with CV={:.2f}. "
+            "Mixed single-spike and burst modes. Typical of hippocampal CA3/pyramidal neurons."
+        ),
+        "message_ru": (
+            "🎆 **Нерегулярное пакетное разряжение**: {:.1%} пакетов при CV={:.2f}. "
+            "Смешанные одиночные и пакетные режимы. Типично для CA3/пирамидальных нейронов."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('burst_spike_ratio', 0), s.get('cv_isi', 0)]
+    },
 ]
 
 
