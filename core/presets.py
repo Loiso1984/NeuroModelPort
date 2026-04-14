@@ -702,7 +702,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.jacobian_mode = 'native_hines'
         cfg.stim.stim_type = 'const'
         cfg.stim.Iext = 35.0
-        cfg.stim.t_sim = 500.0
+        cfg.stim.t_sim = 3000.0  # Extended duration for ATP depletion visibility
         cfg.metabolism.enable_dynamic_atp = True
         cfg.metabolism.atp_synthesis_rate = 0.05
 

@@ -3041,7 +3041,7 @@ class AnalyticsWidget(QTabWidget):
         fit_end = params['fit_end_ms']
         fit_span = self._chaos_persistent_artists.get('fit_span')
         if fit_span is not None:
-            fit_span.set_xy([[fit_start, 0], [fit_end, 0], [fit_end, 1], [fit_start, 1]])
+            fit_span.set_bounds(fit_start, 0, fit_end - fit_start, 1)
             fit_span.set_visible(True)
         # Update persistent fit line
         fit_mask = (t_div >= fit_start) & (t_div <= fit_end)
@@ -3135,14 +3135,12 @@ class AnalyticsWidget(QTabWidget):
         
         trace_ref = self._chaos_persistent_artists.get('trace_ref')
         if trace_ref is not None:
-            trace_ref.set_xy([[start_i_ms, 0], [start_i_ms + span_ms, 0], 
-                              [start_i_ms + span_ms, 1], [start_i_ms, 1]])
+            trace_ref.set_bounds(start_i_ms, 0, span_ms, 1)
             trace_ref.set_visible(True)
         
         trace_neighbor = self._chaos_persistent_artists.get('trace_neighbor')
         if trace_neighbor is not None:
-            trace_neighbor.set_xy([[start_j_ms, 0], [start_j_ms + span_ms, 0], 
-                                   [start_j_ms + span_ms, 1], [start_j_ms, 1]])
+            trace_neighbor.set_bounds(start_j_ms, 0, span_ms, 1)
             trace_neighbor.set_visible(True)
         
         _configure_ax_interactive(ax_trace, title='Time-domain trace with selected divergence segment', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)
@@ -4915,6 +4913,10 @@ class AnalyticsWidget(QTabWidget):
         ax_profile = self._csd_profile_ax
 
         # Compute CSD using graph Laplacian for correct branched morphology
+        # CSD = -L @ V represents the divergence of axial currents, which equals
+        # the net transmembrane current (C_m dV/dt + I_ion - I_stim).
+        # Pump current is already included through I_ion contribution to V dynamics,
+        # so no additional terms are needed here.
         csd = compute_csd(result.v_all, result.morph)
 
         t = result.t
@@ -4924,9 +4926,10 @@ class AnalyticsWidget(QTabWidget):
         # Create meshgrid for heatmap
         T, X = np.meshgrid(t, x_pos)
 
-        # Plot CSD heatmap
+        # Plot CSD heatmap with auto-scaling (handle spike transients up to ±1000)
+        csd_vmax = max(100.0, np.percentile(np.abs(csd), 99.0))
         if self._csd_im is None:
-            self._csd_im = ax_csd.pcolormesh(T, X, csd, cmap='RdBu_r', shading='auto', vmin=-100, vmax=100)
+            self._csd_im = ax_csd.pcolormesh(T, X, csd, cmap='RdBu_r', shading='auto', vmin=-csd_vmax, vmax=csd_vmax)
             self._csd_cbar = self.fig_csd.colorbar(self._csd_im, ax=ax_csd, label='CSD (mV/cm²)')
         else:
             self._csd_im.set_array(csd.ravel())

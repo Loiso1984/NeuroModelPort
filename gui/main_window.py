@@ -392,6 +392,14 @@ class MainWindow(QMainWindow):
         self.btn_hines.setToolTip("Toggle native Hines solver (O(N) vs SciPy BDF)")
         self.btn_hines.clicked.connect(self._on_hines_toggled)
 
+        # ── Jacobian mode selector (when Hines is OFF) ──────────────────
+        self.combo_jacobian = QComboBox()
+        self.combo_jacobian.addItems(["dense_fd", "sparse_fd", "analytic_sparse"])
+        self.combo_jacobian.setToolTip("Jacobian mode for SciPy BDF solver")
+        self.combo_jacobian.setMinimumHeight(38)
+        self.combo_jacobian.setMaximumWidth(120)
+        self.combo_jacobian.currentTextChanged.connect(self._on_jacobian_changed)
+
         # ── Export buttons ─────────────────────────────────────
         self.btn_export = QPushButton("CSV")
         self.btn_export_plot = QPushButton("Plot")
@@ -488,6 +496,7 @@ class MainWindow(QMainWindow):
         row1.addWidget(self.btn_run, 4)
         row1.addWidget(self.btn_cancel, 2)
         row1.addWidget(self.btn_hines, 2)
+        row1.addWidget(self.combo_jacobian, 1)
         row1.addWidget(self.btn_stoch, 2)
         row1.addWidget(self.btn_sweep, 2)
         row1.addWidget(self.btn_fi, 1)
@@ -942,7 +951,14 @@ class MainWindow(QMainWindow):
             on_change=self._on_channel_field_changed,
         )
         self.form_calcium = PydanticFormWidget(self.config_manager.config.calcium, "Calcium Dynamics")
+
+        # Metabolism form with scroll area (many fields need scrollable space)
         self.form_metabolism = PydanticFormWidget(self.config_manager.config.metabolism, "ATP / Metabolism")
+        self._scroll_metabolism = QScrollArea()
+        self._scroll_metabolism.setWidgetResizable(True)
+        self._scroll_metabolism.setMaximumHeight(250)
+        self._scroll_metabolism.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll_metabolism.setWidget(self.form_metabolism)
         self.form_morph = PydanticFormWidget(
             self.config_manager.config.morphology,
             "Morphology",
@@ -978,7 +994,7 @@ class MainWindow(QMainWindow):
         context_right.setSpacing(4)
         context_left.addWidget(self.form_env)
         context_right.addWidget(self.form_calcium)
-        context_right.addWidget(self.form_metabolism)
+        context_right.addWidget(self._scroll_metabolism)
         context_layout.addLayout(context_left)
         context_layout.addLayout(context_right)
         c_layout.addWidget(grp_context)
@@ -1775,7 +1791,6 @@ class MainWindow(QMainWindow):
         minimum I_ext required to trigger a single spike.
         Includes convergence visualization and search tree display.
         """
-        from core.solver import SimulationController
         from core.analysis import detect_spikes
         from copy import deepcopy
         import numpy as np
@@ -1795,13 +1810,16 @@ class MainWindow(QMainWindow):
         cfg = deepcopy(self.config_manager.config)
         cfg.stim.t_sim = 50.0  # Short simulation
 
+        # Create solver once - expensive operation (builds morphology, validates config)
+        # Only recreate if cfg changes structurally (which it doesn't in this loop)
+        solver = NeuronSolver(cfg)
+
         self._lbl_rheobase_result.setText("🔍 Phase 1: Finding upper bound...")
         max_attempts = 10
         for attempt in range(max_attempts):
             cfg.stim.Iext = I_high
             try:
-                solver = SimulationController(cfg)
-                result = solver.run_single()
+                result = solver.run_single(cfg)
                 pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
                 if len(spike_times) > 0:
                     search_history.append((0.0, I_high, I_high, True))
@@ -1828,8 +1846,7 @@ class MainWindow(QMainWindow):
             cfg.stim.Iext = I_mid
 
             try:
-                solver = SimulationController(cfg)
-                result = solver.run_single()
+                result = solver.run_single(cfg)
                 pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
                 has_spike = len(spike_times) > 0
             except Exception as e:
@@ -2084,11 +2101,19 @@ class MainWindow(QMainWindow):
         self._status("Error.")
 
     def _sync_hines_button_state(self):
-        """Sync Hines button state with current jacobian_mode in config."""
+        """Sync Hines button and Jacobian combo with current jacobian_mode in config."""
         if not hasattr(self, 'btn_hines'):
             return
-        is_hines = str(getattr(self.config_manager.config.stim, "jacobian_mode", "dense_fd")) == "native_hines"
+        jac_mode = str(getattr(self.config_manager.config.stim, "jacobian_mode", "dense_fd"))
+        is_hines = jac_mode == "native_hines"
         self.btn_hines.setChecked(is_hines)
+
+        # Sync combo (non-Hines modes)
+        if hasattr(self, 'combo_jacobian'):
+            self.combo_jacobian.setEnabled(not is_hines)
+            if not is_hines and jac_mode in ["dense_fd", "sparse_fd", "analytic_sparse"]:
+                self.combo_jacobian.setCurrentText(jac_mode)
+
         if is_hines:
             self.btn_hines.setText("HINES ON")
             self.btn_hines.setStyleSheet("""
@@ -2140,6 +2165,15 @@ class MainWindow(QMainWindow):
             """)
             self.btn_hines.setText("HINES")
             self._sb.showMessage("Hines solver OFF. Using dense_fd BDF.", 3000)
+        # Show/hide jacobian combo based on Hines state
+        self.combo_jacobian.setEnabled(not checked)
+        self.combo_jacobian.setStyleSheet("" if not checked else "QComboBox { color: #555568; }")
+
+    def _on_jacobian_changed(self, mode: str):
+        """Handle Jacobian mode selection (when Hines is OFF)."""
+        if mode and not self.btn_hines.isChecked():
+            self.config_manager.config.stim.jacobian_mode = mode
+            self._sb.showMessage(f"Jacobian mode: {mode}", 3000)
 
     def _preflight_validate(self) -> bool:
         """

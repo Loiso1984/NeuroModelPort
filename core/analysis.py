@@ -638,6 +638,13 @@ def compute_nullclines(V_range: np.ndarray, config,
 #  7. CURRENT BALANCE  (numerical validation)
 # ─────────────────────────────────────────────────────────────────────
 
+# Synaptic stimulus types - current computed as g_syn(t) * (V - E_syn) in channel mechanisms
+# For these types, I_stim should be 0 since current is already in I_ion_soma
+_SYNAPTIC_TYPES = frozenset({
+    'AMPA', 'NMDA', 'GABA_A', 'GABA_B', 'Kainate', 'Nicotinic', 'dual_AMPA_GABA'
+})
+
+
 def compute_current_balance(result, morph: dict) -> np.ndarray:
     """
     Numerical consistency check: Cm·dV/dt − (I_stim − I_ion + I_ax) ≈ 0.
@@ -656,7 +663,10 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     if len(t) < 2 or len(np.unique(t)) < 2:
         dVdt = np.zeros_like(V)
     else:
-        dVdt = np.gradient(V, t)
+        # Backward Euler gradient (consistent with Hines solver): dV = (V_new - V_old) / dt
+        dt = float(t[1] - t[0]) if len(t) > 1 else 0.05
+        dV = np.diff(V)
+        dVdt = np.concatenate([[0.0], dV]) / dt
 
     # Total ionic current at soma only (index 0 for multi-compartment arrays).
     I_ion_soma = np.zeros_like(V, dtype=float)
@@ -667,22 +677,30 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
         else:
             I_ion_soma += curr_arr
 
-    # Stimulus current
+    # Stimulus current (for non-synaptic types: const, pulse, alpha, zap)
+    # For synaptic stimulus (AMPA, NMDA, GABA, etc.), the actual synaptic current
+    # is already included in I_ion_soma via channel currents, so I_stim = 0
     s_map = {'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10}
-    stype = s_map.get(cfg.stim.stim_type, 0)
+    stim_type = cfg.stim.stim_type
     _ew = np.zeros(0, dtype=np.float64)
-    I_stim = np.array([
-        get_stim_current(
-            float(ti), stype,
-            cfg.stim.Iext, cfg.stim.pulse_start,
-            cfg.stim.pulse_dur, cfg.stim.alpha_tau,
-            float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
-            float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
-            float(getattr(cfg.stim, "zap_rise_ms", 5.0)),
-            _ew, _ew, 0,
-        )
-        for ti in t
-    ])
+
+    if stim_type in _SYNAPTIC_TYPES:
+        # Synaptic current is already in I_ion_soma via channel mechanisms
+        I_stim = np.zeros_like(t)
+    else:
+        stype = s_map.get(stim_type, 0)
+        I_stim = np.array([
+            get_stim_current(
+                float(ti), stype,
+                cfg.stim.Iext, cfg.stim.pulse_start,
+                cfg.stim.pulse_dur, cfg.stim.alpha_tau,
+                float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+                float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+                float(getattr(cfg.stim, "zap_rise_ms", 5.0)),
+                _ew, _ew, 0,
+            )
+            for ti in t
+        ])
 
     # Axial current (row 0 of sparse Laplacian × V_all)
     if result.n_comp > 1:

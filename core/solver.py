@@ -13,6 +13,7 @@ from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, mak
 from core.rhs import (
     rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS,
     ATP_ISCHEMIC_THRESHOLD, NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
+    compute_na_k_pump_current,
 )
 from core.physics_params import create_physics_params, build_state_offsets
 from core.kinetics import z_inf_SK
@@ -768,7 +769,7 @@ class NeuronSolver:
             ena_eff = (R_GAS * t_kelvin / F_CONST) * np.log(cfg.metabolism.na_ext_mM / na_i) * 1000.0
         if cfg.metabolism.enable_dynamic_atp and res.k_o is not None:
             k_o = np.clip(np.asarray(res.k_o, dtype=float), K_O_MIN_M_M, K_O_MAX_M_M)
-            ek_eff = (R_GAS * t_kelvin / F_CONST) * np.log(cfg.metabolism.k_i_mM / k_o) * 1000.0
+            ek_eff = (R_GAS * t_kelvin / F_CONST) * np.log(k_o / cfg.metabolism.k_i_mM) * 1000.0
 
         # Broadcast conductances to shape (n_comp, 1) for 2D current calculation
         g_na = morph['gNa_v'][:, np.newaxis]
@@ -882,21 +883,45 @@ class NeuronSolver:
             g_katp = cfg.metabolism.g_katp_max / (1.0 + atp_ratio ** 2)
             res.currents['KATP'] = g_katp * (v - ek_eff)
 
-        # Electrogenic Na/K pump current estimate for visualization
-        # NOTE: v11.6+ uses Michaelis-Menten kinetics (pump_current from kinetics.py)
-        # This is a simplified estimate based on Na load; actual MM current requires [Na+]i, [K+]o
-        i_na_drive = np.asarray(res.currents['Na'], dtype=float)
-        if 'NaP' in res.currents:
-            i_na_drive = i_na_drive + np.asarray(res.currents['NaP'], dtype=float)
-        if 'NaR' in res.currents:
-            i_na_drive = i_na_drive + np.asarray(res.currents['NaR'], dtype=float)
-        if cfg.metabolism.enable_dynamic_atp and res.atp_level is not None:
-            pump_availability = np.clip(np.asarray(res.atp_level, dtype=float) / max(ATP_ISCHEMIC_THRESHOLD, 1e-12), 0.0, 1.0)
+        # Electrogenic Na/K pump current using Michaelis-Menten kinetics
+        # Honest calculation from [Na+]i, [K+]o, [ATP]i - matches native_loop.py physics
+        pump_drive = None  # Will hold pump current for ATP consumption calculation below
+        if cfg.metabolism.enable_dynamic_atp and res.na_i is not None and res.k_o is not None:
+            # Extract arrays and determine time dimension
+            na_i_arr = np.clip(np.asarray(res.na_i, dtype=float), NA_I_MIN_M_M, NA_I_MAX_M_M)
+            k_o_arr = np.clip(np.asarray(res.k_o, dtype=float), K_O_MIN_M_M, K_O_MAX_M_M)
+            n_t = na_i_arr.shape[1] if na_i_arr.ndim == 2 else na_i_arr.shape[0]
+            atp_arr = np.asarray(res.atp_level, dtype=float) if res.atp_level is not None else np.full(n_t, 2.0)
+
+            # Helper to extract soma value (compartment 0) at time t
+            _get = lambda arr, t: arr[0, t] if arr.ndim == 2 else arr[t]
+
+            # Vectorized computation of pump current for all timepoints
+            pump_current = np.array([
+                compute_na_k_pump_current(
+                    float(_get(na_i_arr, t)),
+                    float(_get(k_o_arr, t)),
+                    float(_get(atp_arr, t))
+                )
+                for t in range(n_t)
+            ])
+            # Reshape to (1, n_t) to match other currents broadcasting in compute_current_balance
+            pump_drive = pump_current.reshape(1, -1)
+            res.currents['PumpNaK'] = pump_drive
         else:
-            pump_availability = 1.0
-        pump_drive = np.maximum(0.0, -i_na_drive) * pump_availability
-        # Estimation factor: calibrated to match MM kinetics at typical [Na+]i=15mM, [K+]o=5mM
-        res.currents['PumpNaK'] = 0.05 * pump_drive
+            # Fallback: static ATP - use honest Michaelis-Menten with fixed resting ion concentrations
+            # This eliminates systematic error from 5% heuristic while maintaining compatibility
+            na_i_fixed = float(cfg.metabolism.na_i_rest_mM)
+            k_o_fixed = float(cfg.metabolism.k_o_rest_mM)
+            atp_fixed = float(cfg.metabolism.atp_max_mM)
+
+            # Compute single pump value (constant in time for static ATP)
+            pump_val = compute_na_k_pump_current(na_i_fixed, k_o_fixed, atp_fixed)
+            n_t = len(res.t)
+
+            # Broadcast to (1, n_t) for consistency with dynamic ATP branch
+            pump_drive = np.full((1, n_t), pump_val, dtype=float)
+            res.currents['PumpNaK'] = pump_drive
 
         res._finalize_current_shapes()
 
@@ -909,7 +934,8 @@ class NeuronSolver:
 
         # 1. Na+ pump cost: |Q_Na| / (3·F)  [µC/cm²·ms → mol → nmol ATP/cm²]
         t_arr = np.asarray(res.t, dtype=float)
-        i_na_pump = pump_drive
+        # Safety: pump_drive could be None if dynamic ATP enabled but na_i/k_o unavailable
+        i_na_pump = pump_drive if pump_drive is not None else np.zeros_like(t_arr)
         if np.ndim(i_na_pump) == 2:
             i_na_spatial_sum = np.sum(i_na_pump, axis=0)
         else:
