@@ -702,6 +702,31 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
             for ti in t
         ])
 
+    # v11.7: Add dual/secondary stimulus if enabled
+    dual_cfg = getattr(cfg, 'dual_stimulation', None)
+    if dual_cfg is not None and getattr(dual_cfg, 'enabled', False):
+        secondary_type = getattr(dual_cfg, 'secondary_stim_type', 'const')
+        if secondary_type in _SYNAPTIC_TYPES:
+            # Secondary synaptic current already in I_ion_soma
+            pass
+        else:
+            stype_2 = s_map.get(secondary_type, 0)
+            I_stim_2 = np.array([
+                get_stim_current(
+                    float(ti), stype_2,
+                    float(getattr(dual_cfg, 'secondary_Iext', 0.0)),
+                    float(getattr(dual_cfg, 'secondary_start', 0.0)),
+                    float(getattr(dual_cfg, 'secondary_duration', 0.0)),
+                    float(getattr(dual_cfg, 'secondary_alpha_tau', 1.0)),
+                    float(getattr(dual_cfg, "secondary_zap_f0_hz", 0.5)),
+                    float(getattr(dual_cfg, "secondary_zap_f1_hz", 40.0)),
+                    float(getattr(dual_cfg, "secondary_zap_rise_ms", 5.0)),
+                    _ew, _ew, 0,
+                )
+                for ti in t
+            ])
+            I_stim = I_stim + I_stim_2
+
     # Axial current (row 0 of sparse Laplacian × V_all)
     if result.n_comp > 1:
         n_c = result.n_comp

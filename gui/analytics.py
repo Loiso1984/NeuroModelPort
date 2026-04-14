@@ -36,6 +36,9 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import griddata
+from scipy.stats import expon
+from scipy.signal import stft
 from gui.text_sanitize import repair_text, repair_widget_tree
 
 # Import plot themes for global color consistency
@@ -3692,7 +3695,10 @@ class AnalyticsWidget(QTabWidget):
 
         # ── Vector Field Overlay ───────────────────────────────────────
         if hasattr(self, '_cb_vector_field') and self._cb_vector_field.isChecked():
-            if len(t) > 1 and len(V) > 1:
+            # v11.7: Check for sufficient variance to prevent griddata singular matrix crash
+            # when neuron is silent (constant V) or gate is frozen
+            has_variance = len(t) > 1 and len(V) > 1 and np.std(V) > 1e-4 and np.std(gate_t) > 1e-4
+            if has_variance:
                 dt = float(np.median(np.diff(t)))
                 dV = np.gradient(V, dt)
                 dgate = np.gradient(gate_t, dt)
@@ -3701,7 +3707,6 @@ class AnalyticsWidget(QTabWidget):
                 gate_grid = np.linspace(0, 1, 10)
                 VG, GG = np.meshgrid(V_grid, gate_grid)
                 # Interpolate derivatives to grid
-                from scipy.interpolate import griddata
                 points = np.column_stack([V, gate_t])
                 dV_grid = griddata(points, dV, (VG, GG), method='linear', fill_value=0)
                 dG_grid = griddata(points, dgate, (VG, GG), method='linear', fill_value=0)
@@ -3721,6 +3726,11 @@ class AnalyticsWidget(QTabWidget):
                         (dG_grid/mag*scale).ravel(),
                         mag.ravel()
                     )
+            else:
+                # Remove quiver if insufficient variance (silent neuron)
+                if self._vector_field_quiver is not None:
+                    self._vector_field_quiver.remove()
+                    self._vector_field_quiver = None
         else:
             if self._vector_field_quiver is not None:
                 self._vector_field_quiver.remove()
@@ -4328,7 +4338,6 @@ class AnalyticsWidget(QTabWidget):
         # Fit exponential if enough data
         if len(isi) >= 5:
             try:
-                from scipy.stats import expon
                 loc, scale = expon.fit(isi)
                 x_fit = np.linspace(isi.min(), isi.max(), 100)
                 y_fit = expon.pdf(x_fit, loc, scale) * len(isi) * (bin_edges[1] - bin_edges[0])
@@ -4398,7 +4407,6 @@ class AnalyticsWidget(QTabWidget):
     def _update_spectrogram(self, result):
         if not hasattr(self, 'fig_spectro'):
             return  # tab not yet visited
-        from scipy.signal import stft
         t  = result.t
         v  = result.v_soma
         ax_v, ax_sp = self.ax_spectro

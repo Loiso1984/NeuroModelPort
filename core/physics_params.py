@@ -28,7 +28,9 @@ ENV_K_I = 13
 ENV_K_O_REST = 14
 ENV_ION_DRIFT_GAIN = 15
 ENV_K_O_CLEARANCE_TAU = 16
-ENV_PARAM_COUNT = 17
+ENV_PUMP_MAX_CAPACITY = 17
+ENV_KM_NA = 18
+ENV_PARAM_COUNT = 19
 
 
 class StateOffsets(NamedTuple):
@@ -76,6 +78,8 @@ def build_env_params(
     k_o_rest_mM: float,
     ion_drift_gain: float,
     k_o_clearance_tau_ms: float,
+    pump_max_capacity: float = 0.25,
+    km_na: float = 15.0,
 ) -> np.ndarray:
     env = np.zeros(ENV_PARAM_COUNT, dtype=np.float64)
     env[ENV_T_KELVIN] = t_kelvin
@@ -95,6 +99,8 @@ def build_env_params(
     env[ENV_K_O_REST] = k_o_rest_mM
     env[ENV_ION_DRIFT_GAIN] = ion_drift_gain
     env[ENV_K_O_CLEARANCE_TAU] = k_o_clearance_tau_ms
+    env[ENV_PUMP_MAX_CAPACITY] = pump_max_capacity
+    env[ENV_KM_NA] = km_na
     return env
 
 
@@ -317,6 +323,8 @@ class PhysicsParams(NamedTuple):
     k_o_rest_mM: float64
     ion_drift_gain: float64
     k_o_clearance_tau_ms: float64
+    pump_max_capacity: float64
+    km_na: float64
     
     # Primary stimulation parameters
     stype: int32
@@ -435,6 +443,8 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'k_o_rest_mM': 3.5,
         'ion_drift_gain': 0.0,
         'k_o_clearance_tau_ms': 800.0,
+        'pump_max_capacity': 0.25,    # Default max pump current [µA/cm²]
+        'km_na': 15.0,                # Default Na+ half-saturation [mM]
         'e_rev_syn_primary': 0.0,      # Default: 0 mV (excitatory)
         'e_rev_syn_secondary': -75.0,  # Default: -75 mV (inhibitory)
         'im_speed_multiplier': 1.0,
@@ -492,6 +502,8 @@ def create_physics_params(**kwargs) -> PhysicsParams:
             kwargs['k_o_rest_mM'],
             kwargs['ion_drift_gain'],
             kwargs['k_o_clearance_tau_ms'],
+            kwargs['pump_max_capacity'],
+            kwargs['km_na'],
         )
 
     if 'state_offsets' not in kwargs:
@@ -535,6 +547,8 @@ def unpack_env_params(env_params):
         env_params[ENV_K_O_REST],
         env_params[ENV_ION_DRIFT_GAIN],
         env_params[ENV_K_O_CLEARANCE_TAU],
+        env_params[ENV_PUMP_MAX_CAPACITY],
+        env_params[ENV_KM_NA],
     )
 
 

@@ -563,8 +563,8 @@ _init_luts()
 # Michaelis-Menten kinetics with Hill coefficients (Na:3, K:2)
 # =====================================================================
 
-@njit(float64(float64, float64, float64), fastmath=True, cache=True)
-def pump_current(na_i_mM, k_o_mM, atp_mM):
+@njit(float64(float64, float64, float64, float64, float64), fastmath=True, cache=True)
+def pump_current(na_i_mM, k_o_mM, atp_mM, pump_max_capacity, km_na):
     """
     Electrogenic Na+/K+ pump current density (µA/cm²).
     
@@ -580,21 +580,25 @@ def pump_current(na_i_mM, k_o_mM, atp_mM):
         Extracellular potassium concentration [mM]
     atp_mM : float
         ATP concentration [mM] (2.0 mM = healthy/fully active)
+    pump_max_capacity : float
+        Maximum pump current density [µA/cm²] (e.g., 0.25 µA/cm²)
+    km_na : float
+        Intracellular Na+ half-saturation [mM] (e.g., 15.0 mM)
     
     Returns
     -------
     float
         Pump current density [µA/cm²], positive = outward (hyperpolarizing)
     """
-    # Physiological parameters (standard literature values)
-    I_MAX = 0.25               # Max pump current density [µA/cm²]
-    KM_NA = 15.0             # Intracellular Na+ half-saturation [mM]
-    KM_K = 2.0               # Extracellular K+ half-saturation [mM]
+    # Local constants (these are physical properties of the pump enzyme)
+    KM_K = 2.0               # Extracellular K+ half-saturation [mM] - fixed biophysical property
     ATP_HALF = 2.0           # ATP concentration for half-max activity [mM]
     
-    # Guard against non-positive concentrations
+    # Guard against non-positive concentrations and parameters
     na_safe = na_i_mM if na_i_mM > 1e-9 else 1e-9
     k_safe = k_o_mM if k_o_mM > 1e-9 else 1e-9
+    km_na_safe = km_na if km_na > 1e-9 else 1e-9  # Prevent division by zero in Hill kinetics
+    pump_max_safe = pump_max_capacity if pump_max_capacity > 0.0 else 0.25  # Default fallback
     
     # ATP availability factor - Michaelis-Menten kinetics (smooth, C1 continuous)
     # Previously: piecewise linear with kink at ATP_HALF (caused numerical ringing)
@@ -604,10 +608,10 @@ def pump_current(na_i_mM, k_o_mM, atp_mM):
     atp_factor = atp_mM / (atp_mM + ATP_HALF)  # K_m = ATP_HALF for smooth transition
     
     # Hill kinetics: (1 + Km/[S])^(-n)
-    na_factor = 1.0 / (1.0 + KM_NA / na_safe)
+    na_factor = 1.0 / (1.0 + km_na_safe / na_safe)
     na_factor = na_factor * na_factor * na_factor  # Hill coeff = 3
     
     k_factor = 1.0 / (1.0 + KM_K / k_safe)
     k_factor = k_factor * k_factor                   # Hill coeff = 2
     
-    return I_MAX * na_factor * k_factor * atp_factor
+    return pump_max_safe * na_factor * k_factor * atp_factor

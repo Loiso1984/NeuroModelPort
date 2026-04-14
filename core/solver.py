@@ -13,8 +13,9 @@ from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, mak
 from core.rhs import (
     rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS,
     ATP_ISCHEMIC_THRESHOLD, NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
-    compute_na_k_pump_current,
+    compute_na_k_pump_current, get_pump_current_array,
 )
+from core.dendritic_filter import get_ac_attenuation
 from core.physics_params import create_physics_params, build_state_offsets
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
@@ -395,9 +396,14 @@ class NeuronSolver:
         # filter_mode: 0=DC (classic), 1=AC (physiological)
         dfilter_filter_mode = 1 if (stim_mode == 2 and 
                                    getattr(cfg.dendritic_filter, 'filter_mode', 'Classic (DC)') == "Physiological (AC)") else 0
-        # Legacy: pre-computed DC attenuation (used as fallback)
+        # Dynamic AC attenuation (v11.7): Use frequency-dependent attenuation in AC mode
         dfilter_attenuation = 1.0
-        if stim_mode == 2 and dfilter_lambda_um > 0:
+        if dfilter_filter_mode == 1 and dfilter_lambda_um > 0:
+            dfilter_attenuation = get_ac_attenuation(
+                dfilter_distance_um, dfilter_lambda_um, dfilter_tau_ms, dfilter_input_freq_hz
+            )
+        elif stim_mode == 2 and dfilter_lambda_um > 0:
+            # DC fallback: classic exponential attenuation
             dfilter_attenuation = np.exp(-dfilter_distance_um / dfilter_lambda_um)
 
         # Secondary stimulus defaults.
@@ -433,7 +439,13 @@ class NeuronSolver:
             dfilter_input_freq_hz_2 = getattr(dual_cfg, 'secondary_input_frequency', 100.0)
             dfilter_filter_mode_2 = 1 if (stim_mode_2 == 2 and 
                                           getattr(dual_cfg, 'secondary_filter_mode', 'Classic (DC)') == "Physiological (AC)") else 0
-            if stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
+            # Dynamic AC attenuation for secondary (v11.7)
+            if dfilter_filter_mode_2 == 1 and dfilter_lambda_um_2 > 0:
+                dfilter_attenuation_2 = get_ac_attenuation(
+                    dfilter_distance_um_2, dfilter_lambda_um_2, dfilter_tau_ms_2, dfilter_input_freq_hz_2
+                )
+            elif stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
+                # DC fallback
                 dfilter_attenuation_2 = np.exp(-dfilter_distance_um_2 / dfilter_lambda_um_2)
 
         # Generate ephemeral primary train
@@ -546,6 +558,8 @@ class NeuronSolver:
             "k_o_rest_mM": k_o_rest_mM,
             "ion_drift_gain": cfg.metabolism.ion_drift_gain,
             "k_o_clearance_tau_ms": cfg.metabolism.k_o_clearance_tau_ms,
+            "pump_max_capacity": getattr(cfg.metabolism, 'pump_max_capacity', 0.25),
+            "km_na": getattr(cfg.metabolism, 'km_na', 15.0),
             "stype": stype,
             "iext": primary_iext,
             "t0": primary_t0,
@@ -896,15 +910,15 @@ class NeuronSolver:
             # Helper to extract soma value (compartment 0) at time t
             _get = lambda arr, t: arr[0, t] if arr.ndim == 2 else arr[t]
 
-            # Vectorized computation of pump current for all timepoints
-            pump_current = np.array([
-                compute_na_k_pump_current(
-                    float(_get(na_i_arr, t)),
-                    float(_get(k_o_arr, t)),
-                    float(_get(atp_arr, t))
-                )
-                for t in range(n_t)
-            ])
+            # Vectorized computation of pump current for all timepoints (v11.7)
+            # Uses Numba-jitted helper instead of slow Python list-comprehension
+            _pump_max = getattr(cfg.metabolism, 'pump_max_capacity', 0.25)
+            _km_na = getattr(cfg.metabolism, 'km_na', 15.0)
+            # Extract 1D arrays (soma compartment 0)
+            na_1d = na_i_arr[0, :] if na_i_arr.ndim == 2 else na_i_arr
+            ko_1d = k_o_arr[0, :] if k_o_arr.ndim == 2 else k_o_arr
+            atp_1d = atp_arr[0, :] if atp_arr.ndim == 2 else atp_arr
+            pump_current = get_pump_current_array(na_1d, ko_1d, atp_1d, _pump_max, _km_na)
             # Reshape to (1, n_t) to match other currents broadcasting in compute_current_balance
             pump_drive = pump_current.reshape(1, -1)
             res.currents['PumpNaK'] = pump_drive
@@ -916,7 +930,9 @@ class NeuronSolver:
             atp_fixed = float(cfg.metabolism.atp_max_mM)
 
             # Compute single pump value (constant in time for static ATP)
-            pump_val = compute_na_k_pump_current(na_i_fixed, k_o_fixed, atp_fixed)
+            _pump_max = getattr(cfg.metabolism, 'pump_max_capacity', 0.25)
+            _km_na = getattr(cfg.metabolism, 'km_na', 15.0)
+            pump_val = compute_na_k_pump_current(na_i_fixed, k_o_fixed, atp_fixed, _pump_max, _km_na)
             n_t = len(res.t)
 
             # Broadcast to (1, n_t) for consistency with dynamic ATP branch

@@ -128,8 +128,8 @@ def _validate_conductance(g: float64) -> float64:
     return g
 
 
-@njit(float64(float64, float64, float64), cache=True)
-def compute_na_k_pump_current(na_i_mM, k_o_mM, atp_mM):
+@njit(float64(float64, float64, float64, float64, float64), cache=True)
+def compute_na_k_pump_current(na_i_mM, k_o_mM, atp_mM, pump_max_capacity=0.25, km_na=15.0):
     """
     Electrogenic Na+/K+ pump current using Michaelis-Menten kinetics.
     
@@ -145,13 +145,50 @@ def compute_na_k_pump_current(na_i_mM, k_o_mM, atp_mM):
         Extracellular potassium [mM]  
     atp_mM : float
         ATP concentration [mM] (2.0 = healthy)
+    pump_max_capacity : float
+        Maximum pump current density [µA/cm²] (default 0.25)
+    km_na : float
+        Intracellular Na+ half-saturation [mM] (default 15.0)
         
     Returns
     -------
     float
         Pump current density [µA/cm²], positive = outward
     """
-    return pump_current(na_i_mM, k_o_mM, atp_mM)
+    return pump_current(na_i_mM, k_o_mM, atp_mM, pump_max_capacity, km_na)
+
+
+@njit(float64[:](float64[:], float64[:], float64[:], float64, float64), cache=True)
+def get_pump_current_array(na_arr, ko_arr, atp_arr, pump_max, km_na):
+    """
+    Vectorized computation of pump current for all timepoints.
+    
+    Replaces slow Python list-comprehension that freezes the GUI
+    when called 40,000+ times on the main thread.
+    
+    Parameters
+    ----------
+    na_arr : float64[:]
+        Intracellular sodium array [mM]
+    ko_arr : float64[:]
+        Extracellular potassium array [mM]
+    atp_arr : float64[:]
+        ATP concentration array [mM]
+    pump_max : float
+        Maximum pump current density [µA/cm²]
+    km_na : float
+        Na+ half-saturation [mM]
+        
+    Returns
+    -------
+    float64[:]
+        Pump current density array [µA/cm²] for all timepoints
+    """
+    n_t = len(na_arr)
+    out = np.empty(n_t, dtype=np.float64)
+    for i in range(n_t):
+        out[i] = compute_na_k_pump_current(na_arr[i], ko_arr[i], atp_arr[i], pump_max, km_na)
+    return out
 
 
 @njit(float64(float64, float64), cache=True)
@@ -182,6 +219,8 @@ def compute_metabolism_and_pump(
     na_i_val, k_o_val, k_o_rest_mM,
     ion_drift_gain, k_o_clearance_tau_ms,
     i_ca_influx,
+    pump_max_capacity=0.25,
+    km_na=15.0,
 ):
     """Unified metabolism + pump computation for a single compartment.
 
@@ -217,7 +256,7 @@ def compute_metabolism_and_pump(
 
     # ── Na/K pump current (Michaelis-Menten kinetics, C1-continuous) ──
     # MM kinetics: saturates at high [Na+]i, [K+]o; smooth ATP dependence
-    i_pump = compute_na_k_pump_current(na_i_val, k_o_val, atp_i_val)
+    i_pump = compute_na_k_pump_current(na_i_val, k_o_val, atp_i_val, pump_max_capacity, km_na)
     
     # Pump consumption: 1 ATP per 3 Na+ pumped (Skou 1957)
     # Derived from pump_current: consumption = pump_activity / (3*F*depth)
@@ -444,15 +483,13 @@ def ghk_current(v_mV, ci_mM, co_mM, z, T_kelvin):
     zF_V_RT = zF * V / RT
     
     # Handle V → 0 limit using Taylor expansion to avoid numerical issues
-    # At V=0: GHK reduces to I = P * z^2 * F^2 * (ci - co) / RT
+    # At V=0: GHK reduces to I = P * z * F * (ci - co)  (diffusion current, no voltage driving)
     eps = 1e-10
     if abs(V) < eps:
-        # Linear approximation near zero: derivative of exp(-x) at x=0 is -1
-        # I ≈ P * z^2 * F * (ci - co) * V / RT when V→0
-        # But we need consistent units: convert back
-        # At V→0: GHK simplifies to I = P*z^2*F^2*(ci-co)*V/RT
-        # Factor already computed: zF = z*F_CONST
-        return zF * (ci_mM - co_mM) * 1e-3 * (V / RT)  # mM·V→µA/cm² scaling
+        # Correct physical limit for GHK as V -> 0: I = P * z * F * (ci - co)
+        # Units: [P in cm/s] * [z in C/mol equiv] * [F in C/mol] * [conc in mM = mol/L]
+        # = cm/s * C/mol * mol/L * C/mol - with appropriate 1e-3 scaling for µA/cm²
+        return zF * (ci_mM - co_mM) * 1e-3  # µA/cm² scaling
     
     # Full GHK equation
     exp_term = np.exp(-zF_V_RT)
@@ -881,6 +918,8 @@ def rhs_multicompartment(
         k_o_rest_mM,
         ion_drift_gain,
         k_o_clearance_tau_ms,
+        pump_max_capacity,
+        km_na,
     ) = unpack_env_params(physics_params.env_params)
     b_ca = physics_params.b_ca
     nmda_mg_block_mM = physics_params.nmda_mg_block_mM
@@ -1047,6 +1086,8 @@ def rhs_multicompartment(
             na_i_val, k_o_val, k_o_rest_mM,
             ion_drift_gain, k_o_clearance_tau_ms,
             i_ca_influx,
+            pump_max_capacity,
+            km_na,
         )
         if dyn_atp:
             i_ion += i_katp

@@ -309,6 +309,8 @@ def run_native_loop(
         k_o_rest_mM,
         ion_drift_gain,
         k_o_clearance_tau_ms,
+        pump_max_capacity,
+        km_na,
     ) = unpack_env_params(physics.env_params)
     b_ca = physics.b_ca
     nmda_mg_block_mM = physics.nmda_mg_block_mM
@@ -376,6 +378,10 @@ def run_native_loop(
     # Minimal buffers for Nernst potentials (avoid recomputing in second loop)
     ena_arr_buf = np.empty(n_comp, dtype=np.float64)
     ek_arr_buf = np.empty(n_comp, dtype=np.float64)
+    # v11.7: Pre-allocated noise buffers for Langevin stochastic gating (same noise to both trajectories)
+    noise_m_arr = np.empty(n_comp, dtype=np.float64)
+    noise_h_arr = np.empty(n_comp, dtype=np.float64)
+    noise_n_arr = np.empty(n_comp, dtype=np.float64)
 
     # ── Stimulus flags (computed once) ──
     is_cond   = (physics.stype >= 4)
@@ -445,28 +451,40 @@ def run_native_loop(
                 i_ca_dummy_v,
             )
 
-            # ── 2. Langevin gate noise (main trajectory only) ──
-            if physics.stoch_gating and traj_idx == 0:
-                for i in range(n_comp):
-                    vi = y_active[i]
-                    am_v, bm_v = am_lut(vi), bm_lut(vi)
-                    m_val = y_active[off_m + i]
-                    var_m = max(0.0, am_v * (1.0 - m_val) + bm_v * m_val) / N_Na[i]
-                    y_active[off_m + i] += np.sqrt(var_m) * phi_na[i] * np.random.randn() * sqrt_dt
+            # ── 2. Langevin gate noise (same noise applied to both trajectories) ──
+            # v11.7: Generate and apply noise INSIDE trajectory loop for LLE correctness
+            # Both trajectories must experience identical noise to measure chaos, not noise divergence
+            # Noise variance depends on updated gate values (after update_gates_analytic)
+            if physics.stoch_gating:
+                # Generate noise for main trajectory (traj_idx == 0) and reuse for perturbed
+                if traj_idx == 0:
+                    for i in range(n_comp):
+                        vi = y_active[i]
+                        am_v, bm_v = am_lut(vi), bm_lut(vi)
+                        m_val = y_active[off_m + i]
+                        var_m = max(0.0, am_v * (1.0 - m_val) + bm_v * m_val) / N_Na[i]
+                        noise_m_arr[i] = np.sqrt(var_m) * phi_na[i] * np.random.randn() * sqrt_dt
 
-                    ah_v, bh_v = ah_lut(vi), bh_lut(vi)
-                    h_val = y_active[off_h + i]
-                    var_h = max(0.0, ah_v * (1.0 - h_val) + bh_v * h_val) / N_Na[i]
-                    y_active[off_h + i] += np.sqrt(var_h) * phi_na[i] * np.random.randn() * sqrt_dt
+                        ah_v, bh_v = ah_lut(vi), bh_lut(vi)
+                        h_val = y_active[off_h + i]
+                        var_h = max(0.0, ah_v * (1.0 - h_val) + bh_v * h_val) / N_Na[i]
+                        noise_h_arr[i] = np.sqrt(var_h) * phi_na[i] * np.random.randn() * sqrt_dt
 
-                    an_v, bn_v = an_lut(vi), bn_lut(vi)
-                    n_val = y_active[off_n + i]
-                    var_n = max(0.0, an_v * (1.0 - n_val) + bn_v * n_val) / N_K[i]
-                    y_active[off_n + i] += np.sqrt(var_n) * phi_k[i] * np.random.randn() * sqrt_dt
+                        an_v, bn_v = an_lut(vi), bn_lut(vi)
+                        n_val = y_active[off_n + i]
+                        var_n = max(0.0, an_v * (1.0 - n_val) + bn_v * n_val) / N_K[i]
+                        noise_n_arr[i] = np.sqrt(var_n) * phi_k[i] * np.random.randn() * sqrt_dt
 
-                    y_active[off_m + i] = max(0.0, min(1.0, y_active[off_m + i]))
-                    y_active[off_h + i] = max(0.0, min(1.0, y_active[off_h + i]))
-                    y_active[off_n + i] = max(0.0, min(1.0, y_active[off_n + i]))
+                        # Apply and clamp noise inline
+                        y_active[off_m + i] = max(0.0, min(1.0, y_active[off_m + i] + noise_m_arr[i]))
+                        y_active[off_h + i] = max(0.0, min(1.0, y_active[off_h + i] + noise_h_arr[i]))
+                        y_active[off_n + i] = max(0.0, min(1.0, y_active[off_n + i] + noise_n_arr[i]))
+                else:
+                    # Apply SAME pre-generated noise to perturbed trajectory (identical clamping)
+                    for i in range(n_comp):
+                        y_active[off_m + i] = max(0.0, min(1.0, y_active[off_m + i] + noise_m_arr[i]))
+                        y_active[off_h + i] = max(0.0, min(1.0, y_active[off_h + i] + noise_h_arr[i]))
+                        y_active[off_n + i] = max(0.0, min(1.0, y_active[off_n + i] + noise_n_arr[i]))
 
             # ── 3. Compute ionic conductances per-compartment (zero-slice) ──
             for i in range(n_comp):
@@ -565,7 +583,7 @@ def run_native_loop(
                 pump_atp_val = y_active[off_atp + i] if dyn_atp else atp_max_mM
                 na_i_val = y_active[off_na_i + i] if dyn_atp else na_i_rest_mM
                 k_o_val = y_active[off_k_o + i] if dyn_atp else k_o_rest_mM
-                i_pump = compute_na_k_pump_current(na_i_val, k_o_val, pump_atp_val)
+                i_pump = compute_na_k_pump_current(na_i_val, k_o_val, pump_atp_val, pump_max_capacity, km_na)
 
                 rhs[i] = cm_over_dt * vi + e_eff_arr[i] + katp_rhs + i_stim_eff - i_pump
 
@@ -640,6 +658,8 @@ def run_native_loop(
                         na_i_val, k_o_val, k_o_rest_mM,
                         ion_drift_gain, k_o_clearance_tau_ms,
                         i_ca_influx_2d[traj_idx, i],
+                        pump_max_capacity,
+                        km_na,
                     )
                     y_active[off_atp + i] = atp_val + datp * dt
                     y_active[off_na_i + i] = na_i_val + dnai * dt
