@@ -371,7 +371,8 @@ def run_native_loop(
     rhs   = np.empty(n_comp, dtype=np.float64)
     v_new = np.empty(n_comp, dtype=np.float64)
     # i_ca_influx: 2D when LLE enabled to prevent cross-talk between trajectories
-    i_ca_influx_2d = np.zeros((n_traj, n_comp), dtype=np.float64)
+    # Layout (n_comp, n_traj) for L1 cache locality — inner loop walks contiguous compartments
+    i_ca_influx_2d = np.zeros((n_comp, n_traj), dtype=np.float64)
     i_ca_dummy_v = np.zeros(n_comp, dtype=np.float64)  # Required by update_gates_analytic
     # v11.6: Ionic conductance buffers for unified scalar helper
     g_total_arr = np.empty(n_comp, dtype=np.float64)  # Total membrane conductance per compartment
@@ -383,6 +384,12 @@ def run_native_loop(
     noise_m_arr = np.empty(n_comp, dtype=np.float64)
     noise_h_arr = np.empty(n_comp, dtype=np.float64)
     noise_n_arr = np.empty(n_comp, dtype=np.float64)
+
+    # ── Dendritic delay line circular buffers (pre-allocated, zero-alloc in loop) ──
+    dfilter_delay_steps   = physics.dfilter_delay_steps
+    dfilter_delay_steps_2 = physics.dfilter_delay_steps_2
+    delay_line_primary   = np.zeros((dfilter_delay_steps,   n_traj), dtype=np.float64)
+    delay_line_secondary = np.zeros((dfilter_delay_steps_2, n_traj), dtype=np.float64)
 
     # ── Stimulus flags (computed once) ──
     is_cond   = (physics.stype >= 4)
@@ -526,7 +533,7 @@ def run_native_loop(
                 ena_i = ena_arr_buf[i]
                 ek_i = ek_arr_buf[i]
 
-                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[traj_idx, i] = compute_ionic_conductances_scalar(
+                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[i, traj_idx] = compute_ionic_conductances_scalar(
                     vi, mi, hi, ni,
                     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
                     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
@@ -534,6 +541,19 @@ def run_native_loop(
                     ena_i, ek_i, el, eih, eca,
                     ca_i_val, ca_ext, ca_rest, t_kelvin,
                 )
+
+            # ── 3b. Dendritic delay line — write current stimulus, read delayed ──
+            # Circular buffer: modulo arithmetic, zero heap allocation.
+            # Each trajectory writes/reads its own column → no cross-talk for LLE.
+            write_idx_p = step % dfilter_delay_steps
+            read_idx_p  = (step + 1) % dfilter_delay_steps
+            delay_line_primary[write_idx_p, traj_idx] = base_current
+            delayed_stim = delay_line_primary[read_idx_p, traj_idx]
+
+            write_idx_s = step % dfilter_delay_steps_2
+            read_idx_s  = (step + 1) % dfilter_delay_steps_2
+            delay_line_secondary[write_idx_s, traj_idx] = base_current_2
+            delayed_stim_2 = delay_line_secondary[read_idx_s, traj_idx]
 
             # ── 4. Build Hines linear system ──
             i_filt   = y_active[off_ifilt_primary]   if physics.use_dfilter_primary   == 1 else 0.0
@@ -550,7 +570,7 @@ def run_native_loop(
                 b_vec[i] = g_axial_parent_to_child[i]
 
                 i_stim_p = distributed_stimulus_current_for_comp(
-                    i, n_comp, base_current,
+                    i, n_comp, delayed_stim,
                     physics.stim_comp, physics.stim_mode,
                     physics.use_dfilter_primary, physics.dfilter_attenuation,
                     physics.dfilter_tau_ms, i_filt,
@@ -566,7 +586,7 @@ def run_native_loop(
 
                 if physics.dual_stim_enabled == 1:
                     i_stim_s = distributed_stimulus_current_for_comp(
-                        i, n_comp, base_current_2,
+                        i, n_comp, delayed_stim_2,
                         physics.stim_comp_2, physics.stim_mode_2,
                         physics.use_dfilter_secondary, physics.dfilter_attenuation_2,
                         physics.dfilter_tau_ms_2, i_filt_2,
@@ -614,15 +634,15 @@ def run_native_loop(
                     diverged = 1
                 break  # break trajectory loop
 
-            # ── 6. Dendritic filter states — Backward Euler ──
+            # ── 6. Dendritic filter states — Backward Euler (uses delayed stimulus) ──
             if physics.use_dfilter_primary == 1 and physics.dfilter_tau_ms > 0.0:
                 factor = dt / max(physics.dfilter_tau_ms, 1e-12)
-                i_att  = base_current * physics.dfilter_attenuation
+                i_att  = delayed_stim * physics.dfilter_attenuation
                 y_active[off_ifilt_primary] = (y_active[off_ifilt_primary] + factor * i_att) / (1.0 + factor)
 
             if physics.use_dfilter_secondary == 1 and physics.dfilter_tau_ms_2 > 0.0:
                 factor_2 = dt / max(physics.dfilter_tau_ms_2, 1e-12)
-                i_att_2  = base_current_2 * physics.dfilter_attenuation_2
+                i_att_2  = delayed_stim_2 * physics.dfilter_attenuation_2
                 y_active[off_ifilt_secondary] = (y_active[off_ifilt_secondary] + factor_2 * i_att_2) / (1.0 + factor_2)
 
             # ── 7. Calcium dynamics — Semi-implicit ──
@@ -630,7 +650,7 @@ def run_native_loop(
                 for i in range(n_comp):
                     ca_val = y_active[off_ca + i]
                     tau_ca_safe = max(tau_ca, 1e-12)
-                    influx = b_ca[i] * i_ca_influx_2d[traj_idx, i] + ca_rest / tau_ca_safe
+                    influx = b_ca[i] * i_ca_influx_2d[i, traj_idx] + ca_rest / tau_ca_safe
                     decay_rate = 1.0 / tau_ca_safe
                     y_active[off_ca + i] = (ca_val + dt * influx) / (1.0 + dt * decay_rate)
 
@@ -665,7 +685,7 @@ def run_native_loop(
                         atp_val, atp_synthesis_rate,
                         na_i_val, k_o_val, k_o_rest_mM,
                         ion_drift_gain, k_o_clearance_tau_ms,
-                        i_ca_influx_2d[traj_idx, i],
+                        i_ca_influx_2d[i, traj_idx],
                         pump_max_capacity,
                         km_na,
                     )

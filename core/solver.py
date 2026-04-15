@@ -581,6 +581,7 @@ class NeuronSolver:
             "dfilter_input_freq_hz": dfilter_input_freq_hz,
             "dfilter_filter_mode": dfilter_filter_mode,
             "dfilter_attenuation": dfilter_attenuation,
+            "dfilter_delay_steps": np.int32(1),  # SciPy path: delay handled by native loop only
             "event_times_arr": eff_event_times_1,
             "n_events": int(len(eff_event_times_1)),
             "event_times_arr_2": eff_event_times_2,
@@ -610,6 +611,7 @@ class NeuronSolver:
             "dfilter_input_freq_hz_2": dfilter_input_freq_hz_2,
             "dfilter_filter_mode_2": dfilter_filter_mode_2,
             "dfilter_attenuation_2": dfilter_attenuation_2,
+            "dfilter_delay_steps_2": np.int32(1),  # SciPy path: delay handled by native loop only
         }
         # Create structured PhysicsParams container
         physics_params = create_physics_params(**rhs_values)
@@ -1060,6 +1062,15 @@ class NeuronSolver:
         elif stim_mode == 2 and dfilter_lambda_um > 0:
             dfilter_attenuation = np.exp(-dfilter_distance_um / dfilter_lambda_um)
 
+        # Propagation delay steps for primary dendritic pathway (circular buffer in native loop)
+        # Conduction velocity ~250 µm/ms (passive dendrite, DendriticFilterState default)
+        _COND_VEL_UM_MS = 250.0
+        if use_dfilter_primary == 1 and dfilter_distance_um > 0.0:
+            _prop_delay_ms = dfilter_distance_um / _COND_VEL_UM_MS
+            dfilter_delay_steps = max(1, int(_prop_delay_ms / dt_internal))
+        else:
+            dfilter_delay_steps = 1  # No delay (passthrough)
+
         stype_2, iext_2, t0_2, td_2, atau_2 = 0, 0.0, 0.0, 0.0, 1.0
         zap_f0_2, zap_f1_2, zap_rise_2 = zap_f0, zap_f1, zap_rise
         stim_comp_2, stim_mode_2 = 0, 0
@@ -1068,6 +1079,7 @@ class NeuronSolver:
         dfilter_distance_um_2, dfilter_lambda_um_2 = 0.0, 150.0
         dfilter_tau_ms_2, dfilter_input_freq_hz_2 = 0.0, 100.0
         dfilter_filter_mode_2, dfilter_attenuation_2 = 0, 1.0
+        dfilter_delay_steps_2 = 1
         if dual_stim_enabled == 1:
             stype_2 = s_map.get(dual_cfg.secondary_stim_type, 0)
             iext_2 = dual_cfg.secondary_Iext
@@ -1095,6 +1107,10 @@ class NeuronSolver:
                 )
             elif stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
                 dfilter_attenuation_2 = np.exp(-dfilter_distance_um_2 / dfilter_lambda_um_2)
+            # Propagation delay steps for secondary dendritic pathway
+            if use_dfilter_secondary == 1 and dfilter_distance_um_2 > 0.0:
+                _prop_delay_ms_2 = dfilter_distance_um_2 / _COND_VEL_UM_MS
+                dfilter_delay_steps_2 = max(1, int(_prop_delay_ms_2 / dt_internal))
             # Generate event times for secondary stimulus (synaptic train)
             event_times_arr_2 = np.zeros(0, dtype=np.float64)
             if stype_2 >= 4:  # Conductance-based synapse
@@ -1310,6 +1326,7 @@ class NeuronSolver:
             dfilter_input_freq_hz = float(dfilter_input_freq_hz),
             dfilter_filter_mode   = np.int32(dfilter_filter_mode),
             dfilter_attenuation   = float(dfilter_attenuation),
+            dfilter_delay_steps   = np.int32(dfilter_delay_steps),
             dual_stim_enabled   = np.int32(dual_stim_enabled),
             stype_2             = np.int32(stype_2),
             iext_2              = float(iext_2),
@@ -1331,6 +1348,7 @@ class NeuronSolver:
             dfilter_input_freq_hz_2   = float(dfilter_input_freq_hz_2),
             dfilter_filter_mode_2     = np.int32(dfilter_filter_mode_2),
             dfilter_attenuation_2     = float(dfilter_attenuation_2),
+            dfilter_delay_steps_2     = np.int32(dfilter_delay_steps_2),
             stoch_gating       = stoch_gating,
             noise_sigma       = noise_sigma,
             gna_max           = gna_max,

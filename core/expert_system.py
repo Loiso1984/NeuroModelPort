@@ -377,6 +377,95 @@ DEFAULT_EXPERT_RULES: List[ExpertRule] = [
         "severity": "info",
         "format_args": lambda s: [s.get('burst_spike_ratio', 0), s.get('cv_isi', 0)]
     },
+    # ── v11.8 NEW RULES: Chaos & Dynamical Systems ──
+    {
+        "id": "lle_strong_chaos",
+        "condition": lambda s: s.get('lle_per_ms', 0) > 0.01,
+        "message_en": (
+            "🌊 **Strong Chaos**: LLE = {:.4f} 1/ms indicates robust chaotic attractor. "
+            "System exhibits sensitive dependence on initial conditions. "
+            "Predictability horizon: ~{:.1f} ms."
+        ),
+        "message_ru": (
+            "🌊 **Сильный хаос**: ЛЯ = {:.4f} 1/мс указывает на устойчивый хаотический аттрактор. "
+            "Система демонстрирует чувствительную зависимость от начальных условий. "
+            "Горизонт предсказуемости: ~{:.1f} мс."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [
+            s.get('lle_per_ms', 0),
+            1.0 / max(s.get('lle_per_ms', 1e-6), 1e-6)
+        ]
+    },
+    {
+        "id": "lle_weak_chaos",
+        "condition": lambda s: (
+            0.001 < s.get('lle_per_ms', 0) <= 0.01 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "🌊 **Weak Chaos/Noise**: LLE = {:.4f} 1/ms suggests weak chaotic dynamics or stochastic influence. "
+            "Borderline between order and chaos. Check for deterministic vs noise-driven behavior."
+        ),
+        "message_ru": (
+            "🌊 **Слабый хаос/шум**: ЛЯ = {:.4f} 1/мс указывает на слабую хаотическую динамику или стохастическое влияние. "
+            "Граница между порядком и хаосом. Проверьте детерминированное vs шум-драйвенное поведение."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('lle_per_ms', 0)]
+    },
+    {
+        "id": "lle_negative_stable",
+        "condition": lambda s: (
+            s.get('lle_per_ms', 0) < -0.001 and
+            s.get('n_spikes', 0) > 0
+        ),
+        "message_en": (
+            "🔒 **Stable Dynamics**: Negative LLE ({:.4f} 1/ms) confirms stable limit cycle or fixed point. "
+            "Perturbations decay exponentially. Highly reliable firing pattern."
+        ),
+        "message_ru": (
+            "🔒 **Устойчивая динамика**: Отрицательный ЛЯ ({:.4f} 1/мс) подтверждает устойчивый предельный цикл или неподвижную точку. "
+            "Возмущения затухают экспоненциально. Высоконадёжный паттерн разрядки."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('lle_per_ms', 0)]
+    },
+    # ── v11.8: Spike Timing & Precision ──
+    {
+        "id": "high_timing_precision",
+        "condition": lambda s: (
+            s.get('spike_timing_jitter_ms', 100) < 0.5 and
+            s.get('n_spikes', 0) > 10
+        ),
+        "message_en": (
+            "⏱️ **High Timing Precision**: Jitter = {:.2f} ms < 0.5 ms. "
+            "Neuron acts as precise temporal encoder. Check for resonant Ih or subthreshold oscillations."
+        ),
+        "message_ru": (
+            "⏱️ **Высокая временная точность**: Джиттер = {:.2f} мс < 0.5 мс. "
+            "Нейрон работает как точный временной кодировщик. Проверьте резонансный Ih или субпороговые осцилляции."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('spike_timing_jitter_ms', 0)]
+    },
+    {
+        "id": "low_timing_precision",
+        "condition": lambda s: (
+            s.get('spike_timing_jitter_ms', 0) > 2.0 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "⏱️ **Low Timing Precision**: Jitter = {:.2f} ms > 2 ms. "
+            "High variability in spike timing. Possible noise domination or chaotic dynamics."
+        ),
+        "message_ru": (
+            "⏱️ **Низкая временная точность**: Джиттер = {:.2f} мс > 2 мс. "
+            "Высокая вариативность во времени спайков. Возможно доминирование шума или хаотическая динамика."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [s.get('spike_timing_jitter_ms', 0)]
+    },
 ]
 
 

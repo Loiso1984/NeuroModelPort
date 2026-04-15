@@ -368,7 +368,10 @@ class PhysicsParams(NamedTuple):
     dfilter_filter_mode: int32
     # Legacy: pre-computed attenuation (used as fallback when real-time calc disabled)
     dfilter_attenuation: float64
-    
+    # Propagation delay in integration steps: max(1, int(distance / cond_velocity / dt))
+    # 1 = no delay (passthrough). Derived from distance_um and conduction velocity (~250 µm/ms).
+    dfilter_delay_steps: int32
+
     # Secondary stimulation (dual)
     dual_stim_enabled: int32
     stype_2: int32
@@ -401,7 +404,9 @@ class PhysicsParams(NamedTuple):
     dfilter_filter_mode_2: int32
     # Legacy pre-computed attenuation for secondary
     dfilter_attenuation_2: float64
-    
+    # Propagation delay steps for secondary dendritic pathway
+    dfilter_delay_steps_2: int32
+
     # Stochastic parameters
     stoch_gating: boolean  # Enable Langevin gate noise
     noise_sigma: float64    # Additive membrane current noise
@@ -475,11 +480,14 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'zap_win_t_2': np.zeros(0, dtype=np.float64),
         'zap_win_g_2': np.zeros(0, dtype=np.float64),
         'zap_win_size_2': np.int32(0),
+        # Propagation delay steps (1 = no delay / passthrough)
+        'dfilter_delay_steps': np.int32(1),
         # Secondary (dual) stimulus - same parameters for independent control
         'dfilter_distance_um_2': 0.0,
         'dfilter_lambda_um_2': 150.0,
         'dfilter_input_freq_hz_2': 100.0,
         'dfilter_filter_mode_2': 0,
+        'dfilter_delay_steps_2': np.int32(1),
     }
     for k, v in defaults.items():
         if k not in kwargs:

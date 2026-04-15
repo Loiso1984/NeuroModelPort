@@ -66,7 +66,7 @@ class Translator:
             'dx':            'Compartment length (cm).',
 
             # ── Channel descriptions ─────────────────────────────────
-            'Cm':        'Membrane capacitance (µF/cmÂ˛). Electrical inertia — higher Cm slows response.',
+            'Cm':        'Membrane capacitance (µF/cm²). Electrical inertia — higher Cm slows response.',
             'gNa_max':   'Max Na⁺ conductance. Drives the fast depolarising upstroke of the AP.',
             'gK_max':    'Max K⁺ conductance. Repolarises the membrane after the spike.',
             'gL':        'Leak conductance. Sets resting resistance; higher = shorter τ_m.',
@@ -89,8 +89,8 @@ class Translator:
             'dynamic_Ca':'Enable dynamic [Ca²⁺]ᵢ tracking and Nernst correction for E_Ca.',
             'Ca_ext':    'Extracellular [Ca²⁺] (mM). Used in Nernst equation.',
             'Ca_rest':   'Resting [Ca²⁺]ᵢ (mM). Baseline before stimulation.',
-            'tau_Ca':    'CaÂ˛âş pump time constant (ms). Long τ -> prolonged SK activation.',
-            'B_Ca':      'Current-to-concentration factor (mM / (µA/cmÂ˛ · ms)).',
+            'tau_Ca':    'Ca²⁺ pump time constant (ms). Long τ -> prolonged SK activation.',
+            'B_Ca':      'Current-to-concentration factor (mM / (µA/cm² · ms)).',
 
             # ── Metabolism descriptions ───────────────────────────────
             'enable_dynamic_atp': 'Enable dynamic ATP pool metabolism. ATP depletion opens K_ATP channels, hyperpolarizing the cell.',
@@ -114,7 +114,7 @@ class Translator:
             't_sim':       'Total simulation time (ms).',
             'dt_eval':     'Output sample interval (ms). Does not affect solver accuracy.',
             'stim_type':   'Stimulus waveform: const / pulse / alpha / OU noise / synaptic receptors / zap chirp.',
-            'Iext':        'Stimulus amplitude (µA/cmÂ˛).',
+            'Iext':        'Stimulus amplitude (µA/cm²).',
             'pulse_start': 'Pulse onset time (ms).',
             'pulse_dur':   'Pulse duration (ms).',
             'alpha_tau':   'Alpha-synapse time constant (ms). Peak at t = τ after onset.',
@@ -126,7 +126,7 @@ class Translator:
             'synaptic_train_freq_hz': 'Frequency of the generated spike train (Hz).',
             'synaptic_train_duration_ms': 'Duration of the spike train (ms).',
             'stoch_gating':'Langevin gate noise via Native Hines solver. Use the STOCHASTIC button.',
-            'noise_sigma': 'Additive white noise amplitude Ď (µA/cmÂ˛). Added to dV/dt.',
+            'noise_sigma': 'Additive white noise amplitude σ (µA/cm²). Added to dV/dt.',
 
             # ── Analysis descriptions ────────────────────────────────
             'run_mc':       'Run Monte-Carlo: parallel trials with ±5% gNa/gK variability.',
@@ -143,8 +143,8 @@ class Translator:
             'sweep_steps':  'Number of sweep points.',
             'run_sd_curve': 'Compute Strength-Duration curve (use ⏱ S-D button).',
             'run_excmap':   'Compute 2-D excitability map (use 🗺 button).',
-            'excmap_I_min': 'Excitability map: minimum current (µA/cmÂ˛).',
-            'excmap_I_max': 'Excitability map: maximum current (µA/cmÂ˛).',
+            'excmap_I_min': 'Excitability map: minimum current (µA/cm²).',
+            'excmap_I_max': 'Excitability map: maximum current (µA/cm²).',
             'excmap_NI':    'Excitability map: number of current steps.',
             'excmap_D_min': 'Excitability map: minimum pulse duration (ms).',
             'excmap_D_max': 'Excitability map: maximum pulse duration (ms).',
@@ -203,6 +203,46 @@ class Translator:
             'tt_stat_vmax': 'Maximum membrane potential',
             'tt_stat_atp': 'Minimum ATP concentration',
 
+            # ── Analytics tabs ───────────────────────────────────────
+            'tab_chaos_lle': 'Chaos & LLE',
+            'tab_phase_plane': 'Phase Plane',
+            'tab_spike_mech': 'Spike Mechanism',
+            'tab_kymograph': 'Kymograph',
+            'tab_spectrogram': 'Spectrogram',
+            'tab_impedance': 'Impedance',
+            'tab_energy_balance': 'Energy Balance',
+            'tab_currents': 'Currents',
+            'tab_bifurcation': 'Bifurcation',
+            'tab_poincare': 'Poincaré (ISI)',
+            'tab_isi_dist': 'ISI Distribution',
+            'tab_modulation': 'Phase-Locking',
+            'tab_passport': 'Passport',
+
+            # ── Chaos & LLE specific ─────────────────────────────────
+            'lbl_embed': 'Embed',
+            'lbl_lag': 'Lag',
+            'lbl_fit_start': 'Fit start',
+            'lbl_fit_end': 'Fit end',
+            'lbl_min_sep': 'Min sep',
+            'lbl_pair': 'Pair',
+            'pair_representative': 'Representative',
+            'pair_first': 'First pair',
+            'pair_index': 'Pair index',
+            'tip_chaos_click': 'Click the divergence curve to inspect a specific separation horizon.',
+            'summary_class': 'class',
+            'summary_lle': 'LLE',
+            'summary_pairs': 'pairs',
+            'summary_selected': 'selected k',
+            'summary_mode': 'mode',
+            'stoch_warning': 'STOCHASTIC INPUT: LLE mainly reflects noise entropy.',
+
+            # ── Phase Plane specific ─────────────────────────────────
+            'pp_gate_m': 'm (Na activation)',
+            'pp_gate_h': 'h (Na inactivation)',
+            'pp_gate_n': 'n (K activation)',
+            'pp_gate_r': 'r (Ih)',
+            'pp_gate_s': 's (SK)',
+
             # ── Keyboard shortcuts ───────────────────────────────────
             'shortcuts_title': 'Keyboard Shortcuts',
             'menu_help_shortcuts': 'Keyboard Shortcuts...',
@@ -242,12 +282,12 @@ class Translator:
             'lbl_enable_secondary': 'Включить вторичный стимул',
 
             # ── Морфология ──────────────────────────────────────────
-            'single_comp':   'ĐžĐ´Đ¸Đ˝ĐľŃ‡Đ˝Đ°ŃŹ ŃĐľĐĽĐ°: Đ˝ĐµĐąŃ€ĐľĐ˝ — Ń‚ĐľŃ‡ĐşĐ°, Đ±ĐµĐ· Đ°ĐşŃĐľĐ˝Đ°.',
+            'single_comp':   'Одиночная сома: нейрон — точка, без аксона.',
             'd_soma':        'Диаметр сомы (см). Больше -> больше ёмкость -> труднее возбудить.',
-            'N_ais':         'ĐˇĐµĐłĐĽĐµĐ˝Ń‚Ń‹ AIS. AIS — Â«ĐşŃŃ€ĐľĐşÂ» Đ˝ĐµĐąŃ€ĐľĐ˝Đ°, Đ·ĐľĐ˝Đ° Đ¸Đ˝Đ¸Ń†Đ¸Đ°Ń†Đ¸Đ¸ ŃĐżĐ°ĐąĐşĐ°.',
+            'N_ais':         'Сегменты AIS. AIS — «курок» нейрона, зона инициации спайка.',
             'd_ais':         'Диаметр AIS (см).',
             'l_ais':         'Длина сегмента AIS (см).',
-            'gNa_ais_mult':  'ĐśĐ˝ĐľĐ¶Đ¸Ń‚ĐµĐ»ŃŚ gNa Đ˛ AIS (ĐľĐ±Ń‹Ń‡Đ˝Đľ 40–100x). Đ—Đ°Đ´Đ°Ń‘Ń‚ ĐżĐľŃ€ĐľĐł Đ˛ĐľĐ·Đ±ŃĐ´Đ¸ĐĽĐľŃŃ‚Đ¸.',
+            'gNa_ais_mult':  'Множитель gNa в AIS (обычно 40–100x). Задаёт порог возбудимости.',
             'gK_ais_mult':   'Множитель gK в AIS.',
             'gIh_ais_mult':  'Множитель gIh в AIS.',
             'gCa_ais_mult':  'Множитель gCa в AIS.',
@@ -258,14 +298,14 @@ class Translator:
             'd_b1':          'Диаметр ветви 1 (см).',
             'N_b2':          'Сегментов ветви 2.',
             'd_b2':          'Диаметр ветви 2 (см).',
-            'Ra':            'ĐĐşŃĐ¸Đ°Đ»ŃŚĐ˝ĐľĐµ ŃĐľĐżŃ€ĐľŃ‚Đ¸Đ˛Đ»ĐµĐ˝Đ¸Đµ (ĐžĐĽ·ŃĐĽ). Đ’Ń‹ŃĐľĐşĐľĐµ Ra ĐłĐ°ŃĐ¸Ń‚ ŃĐ¸ĐłĐ˝Đ°Đ».',
+            'Ra':            'Аксиальное сопротивление (Ом·см). Высокое Ra гасит сигнал.',
             'dx':            'Длина одного сегмента (см).',
 
             # ── Каналы ───────────────────────────────────────────────
             'Cm':        'Ёмкость мембраны (мкФ/см²). Инерция: большая Cm замедляет реакцию.',
             'gNa_max':   'Макс. проводимость Na⁺. Отвечает за быстрый фронт спайка.',
             'gK_max':    'Макс. проводимость K⁺. Реполяризует мембрану после спайка.',
-            'gL':        'ĐźŃ€ĐľĐ˛ĐľĐ´Đ¸ĐĽĐľŃŃ‚ŃŚ ŃŃ‚ĐµŃ‡ĐşĐ¸. Đ—Đ°Đ´Đ°Ń‘Ń‚ Đ˛Ń…ĐľĐ´Đ˝ĐľĐµ ŃĐľĐżŃ€ĐľŃ‚Đ¸Đ˛Đ»ĐµĐ˝Đ¸Đµ Đ¸ τ_m.',
+            'gL':        'Проводимость утечки. Задаёт входное сопротивление и τ_m.',
             'ENa':       'Потенциал реверсии Na⁺ (мВ). Пик спайка стремится к этому значению.',
             'EK':        'Потенциал реверсии K⁺ (мВ). «Дно» реполяризации.',
             'EL':        'Потенциал реверсии утечки (мВ). Потенциал покоя.',
@@ -285,8 +325,8 @@ class Translator:
             'dynamic_Ca':'Динамический [Ca²⁺]ᵢ с пересчётом Нернста для E_Ca.',
             'Ca_ext':    'Внеклеточный [Ca²⁺] (мМ). Используется в уравнении Нернста.',
             'Ca_rest':   'Покоящийся [Ca²⁺]ᵢ (мМ). Базовый уровень до стимула.',
-            'tau_Ca':    'Đ’Ń€ĐµĐĽŃŹ ĐľŃ‚ĐşĐ°Ń‡ĐşĐ¸ CaÂ˛âş (ĐĽŃ). Đ”Đ»Đ¸Đ˝Đ˝Ń‹Đą τ -> Đ´ĐľĐ»ĐłĐ¸Đą SK-Ń‚ĐľĐş -> Đ°Đ´Đ°ĐżŃ‚Đ°Ń†Đ¸ŃŹ.',
-            'B_Ca':      'ĐšĐľĐ˝Đ˛ĐµŃ€ŃĐ¸ŃŹ Ń‚ĐľĐşĐ° Đ˛ ĐşĐľĐ˝Ń†ĐµĐ˝Ń‚Ń€Đ°Ń†Đ¸ŃŽ (ĐĽĐś / (ĐĽĐşĐ/ŃĐĽÂ˛ · ĐĽŃ)).',
+            'tau_Ca':    'Время откачки Ca²⁺ (мс). Длинный τ -> долгий SK-ток -> адаптация.',
+            'B_Ca':      'Конверсия тока в концентрацию (мМ / (мкА/см² · мс)).',
 
             # ── Метаболизм ───────────────────────────────────────────
             'enable_dynamic_atp': 'Включить динамический пул АТФ. Истощение АТФ открывает K_ATP каналы, гиперполяризуя клетку.',
@@ -301,10 +341,10 @@ class Translator:
             'input_frequency': 'Частота входного сигнала для AC затухания (Гц). Типичная синаптическая: 100-200 Гц.',
 
             # ── Среда ────────────────────────────────────────────────
-            'T_celsius':     'Đ˘ĐµĐĽĐżĐµŃ€Đ°Ń‚ŃŃ€Đ° ŃŤĐşŃĐżĐµŃ€Đ¸ĐĽĐµĐ˝Ń‚Đ° (°C). ĐśĐ°ŃŃŃ‚Đ°Đ±Đ¸Ń€ŃĐµŃ‚ ĐşĐ¸Đ˝ĐµŃ‚Đ¸ĐşŃ Ń‡ĐµŃ€ĐµĐ· Q10.',
-            'T_ref':         'Đ ĐµŃ„ĐµŃ€ĐµĐ˝ŃĐ˝Đ°ŃŹ Ń‚ĐµĐĽĐżĐµŃ€Đ°Ń‚ŃŃ€Đ° ĐşĐ°Đ˝Đ°Đ»ĐľĐ˛ (°C).',
-            'Q10':           'ĐšĐľŃŤŃ„Ń„Đ¸Ń†Đ¸ĐµĐ˝Ń‚ Q10. ĐźŃ€Đ¸ Q10=3 ŃĐşĐľŃ€ĐľŃŃ‚ŃŚ Ń€Đ°ŃŃ‚Ń‘Ń‚ Đ˛ 3 Ń€Đ°Đ·Đ° Đ·Đ° 10°C.',
-            'T_dend_offset': 'Đ Đ°Đ·Đ˝Đ¸Ń†Đ° Ń‚ĐµĐĽĐżĐµŃ€Đ°Ń‚ŃŃ€ Đ´ĐµĐ˝Đ´Ń€Đ¸Ń‚Ń‹–ŃĐľĐĽĐ° (°C). ĐźĐ»ŃŽŃ = Đ´ĐµĐ˝Đ´Ń€Đ¸Ń‚Ń‹ Ń‚ĐµĐżĐ»ĐµĐµ. Đ›Đ¸Đ˝ĐµĐąĐ˝Ń‹Đą Đ°ĐşŃĐ¸Đ°Đ»ŃŚĐ˝Ń‹Đą ĐłŃ€Đ°Đ´Đ¸ĐµĐ˝Ń‚.',
+            'T_celsius':     'Температура эксперимента (°C). Масштабирует кинетику через Q10.',
+            'T_ref':         'Референсная температура каналов (°C).',
+            'Q10':           'Коэффициент Q10. При Q10=3 скорость растёт в 3 раза за 10°C.',
+            'T_dend_offset': 'Разница температур дендриты–сома (°C). Плюс = дендриты теплее. Линейный аксиальный градиент.',
 
             # ── Симуляция ────────────────────────────────────────────
             't_sim':       'Длительность симуляции (мс).',
@@ -313,7 +353,7 @@ class Translator:
             'Iext':        'Амплитуда стимула (мкА/см²).',
             'pulse_start': 'Начало импульса (мс).',
             'pulse_dur':   'Длительность импульса (мс).',
-            'alpha_tau':   'ĐźĐľŃŃ‚ĐľŃŹĐ˝Đ˝Đ°ŃŹ Đ˛Ń€ĐµĐĽĐµĐ˝Đ¸ alpha-ŃĐ¸Đ˝Đ°ĐżŃĐ° (ĐĽŃ). ĐźĐ¸Đş ĐżŃ€Đ¸ t = τ.',
+            'alpha_tau':   'Постоянная времени alpha-синапса (мс). Пик при t = τ.',
             'zap_f0_hz':   'Начальная частота ZAP-чирпа (Гц).',
             'zap_f1_hz':   'Конечная частота ZAP-чирпа (Гц).',
             'stim_comp':   'Компартмент стимуляции (0 = сома).',
@@ -325,7 +365,7 @@ class Translator:
             'noise_sigma': 'Амплитуда белого шума на мембрану σ (мкА/см²).',
 
             # ── Анализ ───────────────────────────────────────────────
-            'run_mc':       'ĐśĐľĐ˝Ń‚Đµ-ĐšĐ°Ń€Đ»Đľ: ĐżĐ°Ń€Đ°Đ»Đ»ĐµĐ»ŃŚĐ˝Ń‹Đµ Đ·Đ°ĐżŃŃĐşĐ¸ Ń ±5% Ń€Đ°Đ·Đ±Ń€ĐľŃĐľĐĽ gNa/gK.',
+            'run_mc':       'Монте-Карло: параллельные запуски с ±5% разбросом gNa/gK.',
             'mc_trials':    'Число МК-попыток.',
             'run_bifurcation': 'Бифуркационный анализ после основного запуска.',
             'bif_param':    'Параметр для бифуркации.',
@@ -399,6 +439,46 @@ class Translator:
             'tt_stat_vmax': 'Максимальный мембранный потенциал',
             'tt_stat_atp': 'Минимальная концентрация АТФ',
 
+            # ── Аналитические вкладки ────────────────────────────────
+            'tab_chaos_lle': 'Хаос и ЛЯ',
+            'tab_phase_plane': 'Фазовая плоскость',
+            'tab_spike_mech': 'Механика спайка',
+            'tab_kymograph': 'Кимограф',
+            'tab_spectrogram': 'Спектрограмма',
+            'tab_impedance': 'Импеданс',
+            'tab_energy_balance': 'Энергетический баланс',
+            'tab_currents': 'Токи',
+            'tab_bifurcation': 'Бифуркация',
+            'tab_poincare': 'Пуанкаре (ИПВ)',
+            'tab_isi_dist': 'Распределение ИПВ',
+            'tab_modulation': 'Фазовая синхронизация',
+            'tab_passport': 'Паспорт',
+
+            # ── Chaos & LLE специфичные ───────────────────────────────
+            'lbl_embed': 'Размерность',
+            'lbl_lag': 'Лаг',
+            'lbl_fit_start': 'Начало фита',
+            'lbl_fit_end': 'Конец фита',
+            'lbl_min_sep': 'Мин. разделение',
+            'lbl_pair': 'Пара',
+            'pair_representative': 'Репрезентативная',
+            'pair_first': 'Первая пара',
+            'pair_index': 'Индекс пары',
+            'tip_chaos_click': 'Кликните на кривую расхождения для просмотра конкретного горизонта.',
+            'summary_class': 'класс',
+            'summary_lle': 'ЛЯ',
+            'summary_pairs': 'пары',
+            'summary_selected': 'выбрано k',
+            'summary_mode': 'режим',
+            'stoch_warning': 'СТОХАСТИЧЕСКИЙ ВХОД: ЛЯ в основном отражает энтропию шума.',
+
+            # ── Фазовая плоскость ────────────────────────────────────
+            'pp_gate_m': 'm (активация Na)',
+            'pp_gate_h': 'h (инаактивация Na)',
+            'pp_gate_n': 'n (активация K)',
+            'pp_gate_r': 'r (Ih)',
+            'pp_gate_s': 's (SK)',
+
             # ── Keyboard shortcuts ───────────────────────────────────
             'shortcuts_title': 'Горячие клавиши',
             'menu_help_shortcuts': 'Горячие клавиши...',
@@ -457,7 +537,7 @@ class Translator:
                 "F: Multiple Sclerosis (Demyelination)": "F: Рассеянный склероз (демиелинизация)",
                 "G: Local Anesthesia (gNa Block)": "G: Местная анестезия (блокада gNa)",
                 "H: Severe Hyperkalemia (High EK)": "H: Тяжелая гиперкалиемия (высокий EK)",
-                "I: In Vitro Slice (Mammalian 23°C)": "I: ĐˇŃ€ĐµĐ· in vitro (ĐĽĐ»ĐµĐşĐľĐżĐ¸Ń‚Đ°ŃŽŃ‰Đ¸Đµ 23°C)",
+                "I: In Vitro Slice (Mammalian 23°C)": "I: Срез in vitro (млекопитающие 23°C)",
                 "J: C-Fiber (Pain / Unmyelinated)": "J: C-волокно (боль / безмиелиновое)",
                 "K: Thalamic Relay (Ih + ITCa + Burst)": "K: Таламическое реле (Ih + ITCa + пачки)",
                 "L: Hippocampal CA1 Pyramidal (Adapting)": "L: Гиппокамп CA1 пирамидный (адаптивный)",
