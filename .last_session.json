@@ -64,14 +64,18 @@
     "enable_dynamic_atp": true,
     "atp_max_mM": 2.0,
     "atp_synthesis_rate": 0.6,
-    "g_katp_max": 0.2,
+    "g_katp_max": 0.1,
     "katp_kd_atp_mM": 0.5,
     "na_i_rest_mM": 12.0,
     "na_ext_mM": 145.0,
     "k_i_mM": 140.0,
     "k_o_rest_mM": 3.5,
     "ion_drift_gain": 0.0,
-    "k_o_clearance_tau_ms": 800.0
+    "k_o_clearance_tau_ms": 800.0,
+    "pump_max_capacity": 0.5,
+    "km_na": 15.0,
+    "enable_atp_limiting": true,
+    "atp_initial_mM": null
   },
   "env": {
     "T_celsius": 37.0,
@@ -87,10 +91,11 @@
     "Q10_NaP": 2.2,
     "Q10_NaR": 2.2,
     "Mg_ext": 1.0,
+    "nmda_mg_block_mM": 3.57,
     "T_dend_offset": 0.0
   },
   "stim": {
-    "t_sim": 1500.0,
+    "t_sim": 150.0,
     "dt_eval": 0.05,
     "jacobian_mode": "native_hines",
     "stim_type": "const",
@@ -100,6 +105,7 @@
     "alpha_tau": 1.5,
     "zap_f0_hz": 0.5,
     "zap_f1_hz": 40.0,
+    "zap_rise_ms": 5.0,
     "stim_comp": 0,
     "event_times": [],
     "event_times_2": [],
@@ -116,7 +122,11 @@
     "enabled": true,
     "distance_um": 150.0,
     "space_constant_um": 150.0,
-    "tau_dendritic_ms": 10.0
+    "tau_dendritic_ms": 10.0,
+    "conduction_velocity_um_ms": 250.0,
+    "show_propagation_delay_hint": true,
+    "filter_mode": "Classic (DC)",
+    "input_frequency": 100.0
   },
   "dual_stimulation": null,
   "notes": "",
