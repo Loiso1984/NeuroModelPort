@@ -395,7 +395,7 @@ class _LazyPlaceholder(QWidget):
         self._spec_key = spec_key  # Store original spec key for lookup
         lay = QVBoxLayout(self)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl = QLabel("Click this tab to load the view")
+        lbl = QLabel("Click this tab to load the view\nLazy-loaded to keep simulation UI responsive")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet(
             "color:#555; font-size:13px; font-style:italic;"
@@ -2081,6 +2081,7 @@ class AnalyticsWidget(QTabWidget):
 
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
+        self._set_passport_status(result, stats)
 
         # Tab 0 — always built
         self._update_passport(result, stats)
@@ -2108,6 +2109,42 @@ class AnalyticsWidget(QTabWidget):
         self._update_metabolic(result, stats)
 
 
+
+    def mark_analysis_pending(self, result):
+        """Show a non-empty Analytics state while background analysis is running."""
+        self._last_result = result
+        self._last_stats = None
+        self._btn_compute_lle.setEnabled(False)
+        self._set_passport_status(result, None)
+        self.passport_view.setPlainText(
+            "Simulation complete.\n\n"
+            "Analytics is running in the background.\n"
+            "Passport and lazy analysis tabs will populate when statistics are ready."
+        )
+
+    def _set_passport_status(self, result, stats) -> None:
+        if not hasattr(self, "_passport_status_label"):
+            return
+        if result is None:
+            self._passport_status_label.setText("No simulation loaded")
+            return
+        t = getattr(result, "t", None)
+        t_end = float(t[-1]) if t is not None and len(t) else 0.0
+        n_comp = int(getattr(result, "n_comp", 0) or 0)
+        if stats is None:
+            self._passport_status_label.setText(
+                f"Analysis pending | {n_comp} compartments | {t_end:.1f} ms"
+            )
+            return
+        n_spikes = stats.get("n_spikes", stats.get("spike_count", 0))
+        freq = stats.get("firing_rate_hz", stats.get("freq_hz", 0.0))
+        try:
+            freq_text = f"{float(freq):.2f} Hz"
+        except (TypeError, ValueError):
+            freq_text = "n/a"
+        self._passport_status_label.setText(
+            f"Analysis ready | {n_comp} compartments | {t_end:.1f} ms | spikes={n_spikes} | {freq_text}"
+        )
     def _compute_lle_now(self):
         """Emit signal to trigger full simulation rerun with LLE enabled.
         
@@ -2147,6 +2184,13 @@ class AnalyticsWidget(QTabWidget):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(6, 6, 6, 6)
         right_layout.setSpacing(8)
+
+        self._passport_status_label = QLabel("No simulation loaded")
+        self._passport_status_label.setStyleSheet(
+            "color:#89B4FA; font-weight:bold; font-size:12px; padding:4px;"
+            "background:#111827; border:1px solid #313244; border-radius:4px;"
+        )
+        right_layout.addWidget(self._passport_status_label)
         
         # Text view (original passport view)
         self.passport_view = QTextEdit()

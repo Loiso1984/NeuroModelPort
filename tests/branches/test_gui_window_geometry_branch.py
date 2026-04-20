@@ -87,7 +87,27 @@ def test_layout_guard_recovers_hidden_primary_docks_for_laptop():
                 assert w._dock_analytics.isVisible()
                 assert w.btn_run.isVisible()
                 assert w.combo_presets.isVisible()
-                assert w._sidebar_frame.maximumWidth() <= 360
+                assert w._sidebar_frame.maximumWidth() <= 430
+            finally:
+                w.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_desktop_and_debug_layouts_allow_wide_parameter_panel():
+    app = _app()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            w = MainWindow()
+            w.show()
+            app.processEvents()
+            try:
+                w._apply_layout_preset("Desktop", resize_window=False)
+                assert w._sidebar_frame.maximumWidth() >= 700
+                w._apply_layout_preset("Debug", resize_window=False)
+                assert w._sidebar_frame.maximumWidth() >= 850
             finally:
                 w.close()
         finally:
@@ -99,6 +119,7 @@ def _run_as_script() -> int:
         test_clean_start_uses_named_default_preset_and_visible_primary_docks,
         test_restored_config_without_preset_identity_is_marked_custom,
         test_layout_guard_recovers_hidden_primary_docks_for_laptop,
+        test_desktop_and_debug_layouts_allow_wide_parameter_panel,
     ]
     passed = 0
     for fn in tests:

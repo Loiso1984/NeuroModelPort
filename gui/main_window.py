@@ -597,7 +597,7 @@ class MainWindow(QMainWindow):
         self._sidebar_frame = QFrame()
         self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self._sidebar_frame.setMinimumWidth(320)
-        self._sidebar_frame.setMaximumWidth(520)
+        self._sidebar_frame.setMaximumWidth(900)
         self._build_sidebar_panel()
         self._dock_params.setWidget(self._sidebar_frame)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_params)
@@ -775,6 +775,7 @@ class MainWindow(QMainWindow):
             ("S-D Curve", lambda: self.btn_sd.click()),
             ("Excitability Map", lambda: self.btn_excmap.click()),
             ("Export NeuroML", lambda: self.btn_export_nml.click()),
+            ("Analytics Workspace", self._focus_analytics_workspace),
             ("Open Stimulation Studio", lambda: self._dock_stim.setVisible(True)),
         ]
         for label, callback in actions:
@@ -1264,6 +1265,10 @@ class MainWindow(QMainWindow):
         reset_action.triggered.connect(self._reset_dock_layout)
         view_menu.addAction(reset_action)
 
+        analytics_action = QAction("Analytics Workspace", self)
+        analytics_action.triggered.connect(self._focus_analytics_workspace)
+        view_menu.addAction(analytics_action)
+
         view_menu.addSeparator()
         for preset_name in ("Laptop", "Desktop", "Presentation", "Debug"):
             action = QAction(f"{preset_name} Layout", self)
@@ -1271,6 +1276,25 @@ class MainWindow(QMainWindow):
                 lambda _checked=False, name=preset_name: self._apply_layout_preset(name)
             )
             view_menu.addAction(action)
+
+    def _focus_analytics_workspace(self) -> None:
+        """Prioritize Analytics without hiding the core simulation controls."""
+        if hasattr(self, "_dock_params"):
+            self._dock_params.setVisible(True)
+        if hasattr(self, "_dock_analytics"):
+            self._dock_analytics.setVisible(True)
+            self._dock_analytics.raise_()
+            try:
+                self.resizeDocks(
+                    [self._dock_analytics],
+                    [max(320, int(self.height() * 0.46))],
+                    Qt.Orientation.Vertical,
+                )
+            except Exception as exc:
+                logger.debug("Could not resize analytics dock: %s", exc)
+        if hasattr(self, "analytics"):
+            self.analytics.setCurrentIndex(0)
+        self._status("Analytics workspace")
 
     def _reset_dock_layout(self):
         """Reset dock layout to default state."""
@@ -2542,12 +2566,21 @@ class MainWindow(QMainWindow):
 
                 # v13.0: Debounced analytics — restart timer if already running
                 # Increment generation to invalidate stale analytics
-                self._analytics_generation += 1
-                self._pending_analytics_generation = self._analytics_generation
-                self._pending_result_for_analytics = res
-                self._pending_morph_for_analytics = result.get('morph')  # may be None from some paths
-                self._analytics_debounce_timer.stop()
-                self._analytics_debounce_timer.start(300)  # 300ms debounce
+                stats = result.get('stats')
+                if stats is not None:
+                    self._analytics_generation += 1
+                    self._pending_result_for_analytics = None
+                    self._pending_morph_for_analytics = None
+                    self._analytics_debounce_timer.stop()
+                    self.analytics.update_analytics(res, stats)
+                else:
+                    self._analytics_generation += 1
+                    self._pending_analytics_generation = self._analytics_generation
+                    self._pending_result_for_analytics = res
+                    self._pending_morph_for_analytics = result.get('morph')  # may be None from some paths
+                    self.analytics.mark_analysis_pending(res)
+                    self._analytics_debounce_timer.stop()
+                    self._analytics_debounce_timer.start(300)  # 300ms debounce
 
                 dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
                 self.topology.draw_neuron(

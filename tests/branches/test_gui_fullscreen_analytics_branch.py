@@ -68,6 +68,23 @@ def test_main_window_single_result_populates_analytics_immediately():
         assert win.analytics._last_result is res
         assert win.analytics._last_stats is stats
         assert win.analytics.passport_view.toPlainText().strip()
+        assert "Analysis ready" in win.analytics._passport_status_label.text()
+    finally:
+        win.close()
+
+
+def test_analytics_workspace_keeps_dock_visible_and_raises_passport():
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    try:
+        win.show()
+        app.processEvents()
+        win.analytics.setCurrentIndex(min(2, win.analytics.count() - 1))
+        win._dock_analytics.setVisible(False)
+        win._focus_analytics_workspace()
+        app.processEvents()
+        assert win._dock_analytics.isVisible()
+        assert win.analytics.currentIndex() == 0
     finally:
         win.close()
 
@@ -76,6 +93,7 @@ def _run_as_script() -> int:
     tests = [
         test_analytics_fullscreen_opens_and_keeps_tab_index,
         test_main_window_single_result_populates_analytics_immediately,
+        test_analytics_workspace_keeps_dock_visible_and_raises_passport,
     ]
     passed = 0
     for fn in tests:
