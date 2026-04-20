@@ -31,6 +31,19 @@ from PySide6.QtGui import QFont
 
 import matplotlib
 matplotlib.use('QtAgg')
+
+# Configure matplotlib for dark theme (matching application)
+matplotlib.rcParams['figure.facecolor'] = '#0D1117'
+matplotlib.rcParams['axes.facecolor'] = '#0D1117'
+matplotlib.rcParams['axes.edgecolor'] = '#313244'
+matplotlib.rcParams['axes.labelcolor'] = '#CDD6F4'
+matplotlib.rcParams['text.color'] = '#CDD6F4'
+matplotlib.rcParams['xtick.color'] = '#CDD6F4'
+matplotlib.rcParams['ytick.color'] = '#CDD6F4'
+matplotlib.rcParams['grid.color'] = '#313244'
+matplotlib.rcParams['legend.facecolor'] = '#1E1E2E'
+matplotlib.rcParams['legend.edgecolor'] = '#313244'
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavToolbar
 from matplotlib.figure import Figure
@@ -69,10 +82,30 @@ GATE_COLORS = {
 
 
 def _mpl_fig(nrows=1, ncols=1, tight=True, **kwargs) -> tuple:
-    """Create a matplotlib Figure + FigureCanvas pair."""
+    """Create a matplotlib Figure + FigureCanvas pair with dark theme."""
     # Extract figsize from kwargs if provided, otherwise use default
     figsize = kwargs.pop('figsize', (8, 4 * nrows))
-    fig = Figure(figsize=figsize, dpi=90, **kwargs)
+    
+    # Dark theme colors matching the application
+    dark_bg = '#0D1117'
+    dark_fg = '#CDD6F4'
+    dark_grid = '#313244'
+    
+    fig = Figure(figsize=figsize, dpi=90, facecolor=dark_bg, edgecolor=dark_bg, **kwargs)
+    
+    # Apply dark theme to all axes
+    def _apply_dark_theme(ax):
+        ax.set_facecolor(dark_bg)
+        ax.tick_params(colors=dark_fg, which='both')
+        ax.xaxis.label.set_color(dark_fg)
+        ax.yaxis.label.set_color(dark_fg)
+        ax.title.set_color(dark_fg)
+        for spine in ax.spines.values():
+            spine.set_color(dark_grid)
+    
+    # Store the theme function for later use
+    fig._apply_dark_theme = _apply_dark_theme
+    
     if tight:
         try:
             fig.set_layout_engine('tight')
@@ -4436,8 +4469,9 @@ class AnalyticsWidget(QTabWidget):
         dt_ms = float(t[1] - t[0]) if len(t) > 1 else 0.05
         fs_hz = 1000.0 / dt_ms
 
-        # Adaptive window: ~10 ms or 256 samples, whichever is smaller
-        n_seg = min(256, max(32, int(10.0 / dt_ms)))
+        # Physiological window: target 500ms (Theta/Alpha/Gamma), capped at 25% of trace
+        target_window_ms = min(500.0, (t[-1] - t[0]) * 0.25)
+        n_seg = min(2048, max(64, int(target_window_ms / dt_ms)))
         n_overlap = n_seg * 3 // 4
 
         try:

@@ -413,32 +413,46 @@ def run_native_loop(
             out_idx += 1
 
         # ─────────────────────────────────────────────────────────────
-        # 0. Compute stimulus currents at time t (SAME for both trajectories —
-        #    external input is independent of state)
+        # 0. Get precomputed stimulus values (Optimization v11.8)
+        # Precomputed arrays eliminate per-step function call overhead.
+        # Dendritic delay: circular buffer shifts primary and secondary separately.
         # ─────────────────────────────────────────────────────────────
-        if physics.n_events > 0 and is_cond:
-            base_current = get_event_driven_conductance(
-                t, physics.stype, physics.iext,
-                physics.event_times_arr, physics.n_events, physics.atau)
+        # Primary stimulus: I_stim_pre (current) or G_syn_pre (conductance)
+        if step < len(physics.I_stim_pre):
+            i_ext_now = physics.I_stim_pre[step]
         else:
-            base_current = get_stim_current(
-                t, physics.stype, physics.iext,
-                physics.t0, physics.td, physics.atau,
-                physics.zap_f0_hz, physics.zap_f1_hz, physics.zap_rise_ms,
-                physics.zap_win_t, physics.zap_win_g, physics.zap_win_size)
-
-        base_current_2 = 0.0
+            i_ext_now = 0.0
+        
+        if step < len(physics.G_syn_pre):
+            g_syn_now = physics.G_syn_pre[step]
+        else:
+            g_syn_now = 0.0
+        
+        # Secondary stimulus (dual) - separate arrays for separate delay line
+        if step < len(physics.I_stim_pre_2):
+            i_ext_now_2 = physics.I_stim_pre_2[step]
+        else:
+            i_ext_now_2 = 0.0
+        
+        if step < len(physics.G_syn_pre_2):
+            g_syn_now_2 = physics.G_syn_pre_2[step]
+        else:
+            g_syn_now_2 = 0.0
+        
+        # Combine current and conductance stimuli for primary
+        if physics.n_events > 0 and is_cond:
+            base_current = g_syn_now  # Conductance-based (AMPA, NMDA, etc.)
+        else:
+            base_current = i_ext_now  # Current-based (const, pulse, alpha, zap)
+        
+        # Secondary stimulus (dual) - separate delay line
         if physics.dual_stim_enabled == 1:
             if physics.n_events_2 > 0 and is_cond_2:
-                base_current_2 = get_event_driven_conductance(
-                    t, physics.stype_2, physics.iext_2,
-                    physics.event_times_arr_2, physics.n_events_2, physics.atau_2)
+                base_current_2 = g_syn_now_2
             else:
-                base_current_2 = get_stim_current(
-                    t, physics.stype_2, physics.iext_2,
-                    physics.t0_2, physics.td_2, physics.atau_2,
-                    physics.zap_f0_hz_2, physics.zap_f1_hz_2, physics.zap_rise_ms_2,
-                    physics.zap_win_t_2, physics.zap_win_g_2, physics.zap_win_size_2)
+                base_current_2 = i_ext_now_2
+        else:
+            base_current_2 = 0.0
 
         # ─────────────────────────────────────────────────────────────
         # PRECOMPUTE Nernst potentials (Variant A: use start-of-step values)
@@ -498,16 +512,50 @@ def run_native_loop(
                         var_n = max(0.0, an_v * (1.0 - n_val) + bn_v * n_val) / N_K[i]
                         noise_n_arr[i] = np.sqrt(var_n) * phi_k[i] * np.random.randn() * sqrt_dt
 
-                        # Apply and clamp noise inline
-                        y_active[off_m + i] = max(0.0, min(1.0, y_active[off_m + i] + noise_m_arr[i]))
-                        y_active[off_h + i] = max(0.0, min(1.0, y_active[off_h + i] + noise_h_arr[i]))
-                        y_active[off_n + i] = max(0.0, min(1.0, y_active[off_n + i] + noise_n_arr[i]))
+                        # Apply noise with reflecting boundaries (preserves variance at [0,1])
+                        val_m = y_active[off_m + i] + noise_m_arr[i]
+                        if val_m < 0.0:
+                            val_m = -val_m
+                        elif val_m > 1.0:
+                            val_m = 2.0 - val_m
+                        y_active[off_m + i] = val_m
+
+                        val_h = y_active[off_h + i] + noise_h_arr[i]
+                        if val_h < 0.0:
+                            val_h = -val_h
+                        elif val_h > 1.0:
+                            val_h = 2.0 - val_h
+                        y_active[off_h + i] = val_h
+
+                        val_n = y_active[off_n + i] + noise_n_arr[i]
+                        if val_n < 0.0:
+                            val_n = -val_n
+                        elif val_n > 1.0:
+                            val_n = 2.0 - val_n
+                        y_active[off_n + i] = val_n
                 else:
-                    # Apply SAME pre-generated noise to perturbed trajectory (identical clamping)
+                    # Apply SAME pre-generated noise to perturbed trajectory (identical reflecting)
                     for i in range(n_comp):
-                        y_active[off_m + i] = max(0.0, min(1.0, y_active[off_m + i] + noise_m_arr[i]))
-                        y_active[off_h + i] = max(0.0, min(1.0, y_active[off_h + i] + noise_h_arr[i]))
-                        y_active[off_n + i] = max(0.0, min(1.0, y_active[off_n + i] + noise_n_arr[i]))
+                        val_m = y_active[off_m + i] + noise_m_arr[i]
+                        if val_m < 0.0:
+                            val_m = -val_m
+                        elif val_m > 1.0:
+                            val_m = 2.0 - val_m
+                        y_active[off_m + i] = val_m
+
+                        val_h = y_active[off_h + i] + noise_h_arr[i]
+                        if val_h < 0.0:
+                            val_h = -val_h
+                        elif val_h > 1.0:
+                            val_h = 2.0 - val_h
+                        y_active[off_h + i] = val_h
+
+                        val_n = y_active[off_n + i] + noise_n_arr[i]
+                        if val_n < 0.0:
+                            val_n = -val_n
+                        elif val_n > 1.0:
+                            val_n = 2.0 - val_n
+                        y_active[off_n + i] = val_n
 
             # ── 3. Compute ionic conductances per-compartment (zero-slice) ──
             for i in range(n_comp):

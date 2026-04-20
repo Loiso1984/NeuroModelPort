@@ -19,6 +19,7 @@ from core.dendritic_filter import get_ac_attenuation
 from core.physics_params import create_physics_params, build_state_offsets
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
+from core.rhs import get_stim_current, get_event_driven_conductance
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,99 @@ logger = logging.getLogger(__name__)
 # LLE subspace mode mapping for native solver (Numba-compatible ints)
 # 0=v_only, 1=v_and_gates, 2=full_state, 3=custom
 _LLE_MODE_MAP = {"v_only": 0, "v_and_gates": 1, "full_state": 2, "custom": 3}
+
+
+def precompute_stimulus_arrays(n_steps, dt, physics, is_cond_primary, is_cond_secondary):
+    """Precompute stimulus current and conductance arrays for the entire simulation.
+    
+    This eliminates per-step function call overhead in the native loop by computing
+    all stimulus values once before the main integration.
+    
+    Parameters:
+    -----------
+    n_steps : int
+        Total number of integration steps
+    dt : float
+        Time step in ms
+    physics : PhysicsParams
+        Physics parameters containing all stimulus configuration
+    is_cond_primary : bool
+        Whether primary stimulus is conductance-based
+    is_cond_secondary : bool
+        Whether secondary stimulus is conductance-based
+        
+    Returns:
+    --------
+    tuple: (I_stim_pre, G_syn_pre, I_stim_pre_2, G_syn_pre_2) - precomputed arrays
+        Primary and secondary stimulus arrays for separate delay line processing
+    """
+    I_stim_pre = np.zeros(n_steps, dtype=np.float64)
+    G_syn_pre = np.zeros(n_steps, dtype=np.float64)
+    I_stim_pre_2 = np.zeros(n_steps, dtype=np.float64)
+    G_syn_pre_2 = np.zeros(n_steps, dtype=np.float64)
+    
+    # Precompute primary stimulus
+    if physics.n_events > 0 and is_cond_primary:
+        # Event-driven synaptic conductance (AMPA, NMDA, GABA, etc.)
+        for step in range(n_steps):
+            t = step * dt
+            G_syn_pre[step] = get_event_driven_conductance(
+                t, physics.stype, physics.iext,
+                physics.event_times_arr, physics.n_events, physics.atau
+            )
+    else:
+        # Current-based stimulus (const, pulse, alpha, zap)
+        for step in range(n_steps):
+            t = step * dt
+            I_stim_pre[step] = get_stim_current(
+                t, physics.stype, physics.iext,
+                physics.t0, physics.td, physics.atau,
+                physics.zap_f0_hz, physics.zap_f1_hz, physics.zap_rise_ms,
+                physics.zap_win_t, physics.zap_win_g, physics.zap_win_size
+            )
+    
+    # Precompute secondary stimulus (dual stimulation) - separate for delay line
+    if physics.dual_stim_enabled == 1:
+        if physics.n_events_2 > 0 and is_cond_secondary:
+            # Secondary event-driven conductance
+            for step in range(n_steps):
+                t = step * dt
+                G_syn_pre_2[step] = get_event_driven_conductance(
+                    t, physics.stype_2, physics.iext_2,
+                    physics.event_times_arr_2, physics.n_events_2, physics.atau_2
+                )
+        else:
+            # Secondary current-based stimulus
+            for step in range(n_steps):
+                t = step * dt
+                I_stim_pre_2[step] = get_stim_current(
+                    t, physics.stype_2, physics.iext_2,
+                    physics.t0_2, physics.td_2, physics.atau_2,
+                    physics.zap_f0_hz_2, physics.zap_f1_hz_2, physics.zap_rise_ms_2,
+                    physics.zap_win_t_2, physics.zap_win_g_2, physics.zap_win_size_2
+                )
+    
+    return I_stim_pre, G_syn_pre, I_stim_pre_2, G_syn_pre_2
+
+
+def _ghk_array(v_mV, ci_mM, co_mM, z, T_kelvin):
+    """Vectorized GHK current for post-processing (matches rhs.py::ghk_current).
+
+    Reproduces the same equation used inside the native @njit loop so that
+    post-processing current reconstruction is physically consistent with the
+    integrator.  Pure NumPy — no Numba dependency.
+    """
+    V = v_mV * 1e-3  # mV → V
+    RT = R_GAS * T_kelvin
+    zF = z * F_CONST
+    zF_V_RT = zF * V / RT
+    exp_term = np.exp(np.clip(-zF_V_RT, -500.0, 500.0))
+    near_zero = np.abs(V) < 1e-10
+    denom = np.where(near_zero, 1.0, 1.0 - exp_term)
+    numer = ci_mM - co_mM * exp_term
+    ghk_factor = zF * zF / RT * V
+    return np.where(near_zero, zF * (ci_mM - co_mM) * 1e-3,
+                    ghk_factor * numer / denom)
 
 
 def _precompute_zap_window(td_ms: float, rise_ms: float, res_ms: float = 0.1):
@@ -353,7 +447,7 @@ class NeuronSolver:
 
         s_map = {
             'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 3,
-            'AMPA': 4, 'NMDA': 5, 'GABAA': 6, 'GABAB': 7,
+            'AMPA': 4, 'NMDA': 5, 'GABA_A': 6, 'GABA_B': 7,
             'Kainate': 8, 'Nicotinic': 9, 'zap': 10,
         }
         t_kelvin = cfg.env.T_celsius + 273.15
@@ -613,7 +707,29 @@ class NeuronSolver:
             "dfilter_attenuation_2": dfilter_attenuation_2,
             "dfilter_delay_steps_2": np.int32(1),  # SciPy path: delay handled by native loop only
         }
-        # Create structured PhysicsParams container
+        
+        # ── Precompute stimulus arrays (Optimization v11.8) ──
+        # Calculate n_steps for precomputation based on t_sim and dt_eval
+        t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
+        n_steps = len(t_eval)
+        dt = cfg.stim.dt_eval
+        
+        # Determine if stimuli are conductance-based
+        _COND_TYPES = {4, 5, 6, 7, 8, 9}  # AMPA, NMDA, GABA_A, GABA_B, Kainate, Nicotinic
+        is_cond_primary = stype in _COND_TYPES
+        is_cond_secondary = stype_2 in _COND_TYPES if dual_stim_enabled == 1 else False
+        
+        # Create temporary physics for precomputation (without precomputed arrays)
+        _physics_temp = create_physics_params(**rhs_values)
+        I_stim_pre, G_syn_pre, I_stim_pre_2, G_syn_pre_2 = precompute_stimulus_arrays(
+            n_steps, dt, _physics_temp, is_cond_primary, is_cond_secondary
+        )
+        rhs_values["I_stim_pre"] = I_stim_pre
+        rhs_values["G_syn_pre"] = G_syn_pre
+        rhs_values["I_stim_pre_2"] = I_stim_pre_2
+        rhs_values["G_syn_pre_2"] = G_syn_pre_2
+        
+        # Create structured PhysicsParams container with precomputed arrays
         physics_params = create_physics_params(**rhs_values)
 
         # Pre-allocate RHS output buffer once (reused across integration steps)
@@ -628,7 +744,7 @@ class NeuronSolver:
             rhs_multicompartment(t, y, physics_params, _dydt_buf)
             return _dydt_buf.copy()
 
-        t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
+        # t_eval already computed above for stimulus precomputation
 
         # ── Optimization settings ──
         # max_step prevents integrator from taking too large steps
@@ -828,10 +944,12 @@ class NeuronSolver:
                 g_ca = morph['gCa_v'][:, np.newaxis]
                 if cfg.calcium.dynamic_Ca and res.ca_i is not None:
                     ca_i = np.maximum(res.ca_i, 1e-9)
-                    e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_i) * 1000.0
+                    # GHK current — matches native loop exactly (avoids Ohmic/GHK mismatch)
+                    _RT_over_z2F2 = (R_GAS * t_kelvin) / (4.0 * F_CONST * F_CONST)
+                    res.currents['ICa'] = g_ca * _RT_over_z2F2 * (s ** 2) * u * _ghk_array(v, ca_i, cfg.calcium.Ca_ext, 2.0, t_kelvin)
                 else:
                     e_ca = 120.0
-                res.currents['ICa'] = g_ca * (s ** 2) * u * (v - e_ca)
+                    res.currents['ICa'] = g_ca * (s ** 2) * u * (v - e_ca)
             else:
                 logger.warning("ICa channel enabled but gCa_v missing from morph")
 
@@ -849,15 +967,17 @@ class NeuronSolver:
                 p_t = y[int(offsets.off_p):int(offsets.off_p) + n, :]
                 q_t = y[int(offsets.off_q):int(offsets.off_q) + n, :]
                 g_tca = morph['gTCa_v'][:, np.newaxis]
-                if not cfg.channels.enable_ICa:
-                    # e_ca not yet computed - compute here
-                    if cfg.calcium.dynamic_Ca and res.ca_i is not None:
-                        t_kelvin = cfg.env.T_celsius + 273.15
+                if cfg.calcium.dynamic_Ca and res.ca_i is not None:
+                    if not cfg.channels.enable_ICa:
+                        # ca_i / _RT_over_z2F2 not yet computed — do it here
                         ca_i = np.maximum(res.ca_i, 1e-9)
-                        e_ca = (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(cfg.calcium.Ca_ext / ca_i) * 1000.0
-                    else:
+                        _RT_over_z2F2 = (R_GAS * t_kelvin) / (4.0 * F_CONST * F_CONST)
+                    # GHK current — matches native loop exactly
+                    res.currents['ITCa'] = g_tca * _RT_over_z2F2 * (p_t ** 2) * q_t * _ghk_array(v, ca_i, cfg.calcium.Ca_ext, 2.0, t_kelvin)
+                else:
+                    if not cfg.channels.enable_ICa:
                         e_ca = 120.0
-                res.currents['ITCa'] = g_tca * (p_t ** 2) * q_t * (v - e_ca)
+                    res.currents['ITCa'] = g_tca * (p_t ** 2) * q_t * (v - e_ca)
             else:
                 logger.warning("ITCa channel enabled but gTCa_v missing from morph")
 
@@ -1017,7 +1137,7 @@ class NeuronSolver:
         # ── Stimulus maps (mirrors run_single) ──
         s_map = {
             "const": 0, "pulse": 1, "alpha": 2, "ou_noise": 3,
-            "AMPA": 4, "NMDA": 5, "GABAA": 6, "GABAB": 7,
+            "AMPA": 4, "NMDA": 5, "GABA_A": 6, "GABA_B": 7,
             "Kainate": 8, "Nicotinic": 9, "zap": 10,
         }
         stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
@@ -1062,11 +1182,15 @@ class NeuronSolver:
         elif stim_mode == 2 and dfilter_lambda_um > 0:
             dfilter_attenuation = np.exp(-dfilter_distance_um / dfilter_lambda_um)
 
+        # ── Fixed dt for native loop (must be defined before delay calculations) ──
+        dt_eval_f    = float(cfg.stim.dt_eval)
+        dt_internal  = min(0.025, dt_eval_f / 4.0)   # sub-step for accuracy
+
         # Propagation delay steps for primary dendritic pathway (circular buffer in native loop)
-        # Conduction velocity ~250 µm/ms (passive dendrite, DendriticFilterState default)
-        _COND_VEL_UM_MS = 250.0
+        # Conduction velocity default 250 µm/ms (passive dendrite, DendriticFilterState default)
+        _vel_1 = getattr(cfg.dendritic_filter, 'conduction_velocity_um_ms', 250.0)
         if use_dfilter_primary == 1 and dfilter_distance_um > 0.0:
-            _prop_delay_ms = dfilter_distance_um / _COND_VEL_UM_MS
+            _prop_delay_ms = dfilter_distance_um / max(_vel_1, 1e-12)
             dfilter_delay_steps = max(1, int(_prop_delay_ms / dt_internal))
         else:
             dfilter_delay_steps = 1  # No delay (passthrough)
@@ -1108,8 +1232,9 @@ class NeuronSolver:
             elif stim_mode_2 == 2 and dfilter_lambda_um_2 > 0:
                 dfilter_attenuation_2 = np.exp(-dfilter_distance_um_2 / dfilter_lambda_um_2)
             # Propagation delay steps for secondary dendritic pathway
+            _vel_2 = getattr(dual_cfg, 'secondary_conduction_velocity_um_ms', 250.0)
             if use_dfilter_secondary == 1 and dfilter_distance_um_2 > 0.0:
-                _prop_delay_ms_2 = dfilter_distance_um_2 / _COND_VEL_UM_MS
+                _prop_delay_ms_2 = dfilter_distance_um_2 / max(_vel_2, 1e-12)
                 dfilter_delay_steps_2 = max(1, int(_prop_delay_ms_2 / dt_internal))
             # Generate event times for secondary stimulus (synaptic train)
             event_times_arr_2 = np.zeros(0, dtype=np.float64)
@@ -1181,10 +1306,6 @@ class NeuronSolver:
         l_diag = np.array(l_sparse.diagonal(), dtype=np.float64)  # all < 0
 
         b_ca_v = self._build_b_ca_vector(cfg, morph)
-
-        # ── Fixed dt for native loop ──
-        dt_eval_f    = float(cfg.stim.dt_eval)
-        dt_internal  = min(0.025, dt_eval_f / 4.0)   # sub-step for accuracy
 
         # ── Pack gbar_mat: rows = [gNa, gK, gL, gIh, gCa, gA, gSK, gTCa, gIM, gNaP, gNaR] ──
         gbar_mat = np.array([
@@ -1258,7 +1379,8 @@ class NeuronSolver:
         _zw1_t, _zw1_g, _zw1_n = _precompute_zap_window(td, zap_rise) if stype == 10 else (np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0)
         _zw2_t, _zw2_g, _zw2_n = _precompute_zap_window(td_2, zap_rise_2) if stype_2 == 10 else (np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0)
 
-        physics = create_physics_params(
+        # Build physics parameters dictionary (will be finalized after stimulus precomputation)
+        physics_kwargs = dict(
             n_comp              = np.int32(n_comp),
             en_ih               = bool(cc.enable_Ih),
             en_ica              = bool(cc.enable_ICa),
@@ -1276,6 +1398,7 @@ class NeuronSolver:
             el                  = float(cc.EL),
             eih                 = float(cc.E_Ih),
             ea                  = float(cc.EK),  # A-current uses K reversal potential
+            eca                 = float(cc.E_Ca),  # Static calcium reversal (used when dyn_ca=False)
             e_rev_syn_primary   = float(cc.e_rev_syn_primary),
             e_rev_syn_secondary = float(cc.e_rev_syn_secondary),
             cm_v                = morph["Cm_v"].astype(np.float64),
@@ -1355,6 +1478,38 @@ class NeuronSolver:
             gk_max            = gk_max,
             rng_state         = None,
         )
+        
+        # ── Precompute stimulus arrays (Optimization v11.8) ──
+        # Create temporary physics to access stimulus parameters for precomputation
+        _physics_temp = create_physics_params(**{**physics_kwargs, 
+            'I_stim_pre': np.zeros(0, dtype=np.float64), 
+            'G_syn_pre': np.zeros(0, dtype=np.float64),
+            'I_stim_pre_2': np.zeros(0, dtype=np.float64),
+            'G_syn_pre_2': np.zeros(0, dtype=np.float64),
+        })
+        
+        # Determine if stimuli are conductance-based
+        _COND_TYPES = {4, 5, 6, 7, 8, 9}  # AMPA, NMDA, GABA_A, GABA_B, Kainate, Nicotinic
+        is_cond_primary = stype in _COND_TYPES
+        is_cond_secondary = stype_2 in _COND_TYPES if dual_stim_enabled == 1 else False
+        
+        # Calculate n_steps for native loop (must match native_loop.py formula exactly)
+        # native_loop.py: n_steps = int(t_sim / dt) + 1
+        n_steps = int(cfg.stim.t_sim / dt_internal) + 1
+        
+        # Precompute stimulus arrays (separate primary and secondary for delay lines)
+        I_stim_pre, G_syn_pre, I_stim_pre_2, G_syn_pre_2 = precompute_stimulus_arrays(
+            n_steps, dt_internal, _physics_temp, is_cond_primary, is_cond_secondary
+        )
+        
+        # Add precomputed arrays to physics parameters
+        physics_kwargs['I_stim_pre'] = I_stim_pre
+        physics_kwargs['G_syn_pre'] = G_syn_pre
+        physics_kwargs['I_stim_pre_2'] = I_stim_pre_2
+        physics_kwargs['G_syn_pre_2'] = G_syn_pre_2
+        
+        # Create final physics with precomputed arrays
+        physics = create_physics_params(**physics_kwargs)
 
         if stoch_gating or noise_sigma > 0:
             seed = _resolve_stochastic_seed(cfg, noise_sigma, stoch_gating)

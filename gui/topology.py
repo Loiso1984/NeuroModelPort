@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QSlider,
+    QComboBox,
 )
 from .delay_target import resolve_delay_target
 
@@ -106,6 +107,11 @@ class TopologyWidget(QWidget):
         self._spin_font.setPrefix("Font×")
         self._spin_font.valueChanged.connect(self._on_view_controls_changed)
         controls.addWidget(self._spin_font)
+
+        self._combo_layer = QComboBox()
+        self._combo_layer.addItems(["Voltage (Vm)", "Calcium [Ca2+]", "ATP Level"])
+        self._combo_layer.currentTextChanged.connect(lambda _: self._on_time_scrub(self._time_slider.value()))
+        controls.addWidget(self._combo_layer)
 
         self._btn_reset_view = QPushButton("Reset View")
         self._btn_reset_view.clicked.connect(self._on_reset_view)
@@ -246,6 +252,7 @@ class TopologyWidget(QWidget):
             self._delay_custom_index = max(1, int(delay_custom_index))
         self._last_config = config
         self._last_dual_config = dual_config
+        self._last_result = result  # Save for multi-layer heatmap access
 
         for item in self._draw_items:
             self._plot.removeItem(item)
@@ -781,9 +788,19 @@ class TopologyWidget(QWidget):
             self._heatmap_timer.stop()
 
     @staticmethod
-    def _get_heat_color(v: float) -> QColor:
-        """Map membrane voltage (mV) to a blue→yellow→red heatmap color."""
-        v_norm = max(0.0, min(1.0, (v + 80.0) / 120.0))
+    def _get_heat_color(v: float, vmin: float = -80.0, vmax: float = 40.0) -> QColor:
+        """Map value to a blue→yellow→red heatmap color.
+        
+        Parameters:
+        -----------
+        v : float
+            Value to map
+        vmin : float
+            Minimum value for normalization (default: -80 mV for Voltage)
+        vmax : float
+            Maximum value for normalization (default: 40 mV for Voltage)
+        """
+        v_norm = max(0.0, min(1.0, (v - vmin) / (vmax - vmin)))
         if v_norm < 0.5:
             r = int(2 * v_norm * 250)
             g = int(2 * v_norm * 200)
@@ -838,7 +855,40 @@ class TopologyWidget(QWidget):
         # Emit signal for bi-directional sync with Oscilloscope
         self.time_scrubbed.emit(float(t_val))
 
-        v_data = self._heatmap_data[:, idx]
+        # Determine which layer to display
+        layer = getattr(self, '_combo_layer', None)
+        layer_text = layer.currentText() if layer else "Voltage (Vm)"
+        
+        # Extract data and set appropriate colormap bounds
+        # Handle both 1D (single-compartment) and 2D (multi-compartment) arrays
+        if layer_text == "Calcium [Ca2+]" and hasattr(self, '_last_result'):
+            ca_data = getattr(self._last_result, 'ca_i', None)
+            if ca_data is not None and ca_data.ndim >= 2:
+                v_data = ca_data[:, idx]
+                vmin, vmax = 0.0, 1e-3  # Approx Ca range (mM)
+            elif ca_data is not None:
+                # 1D array - single compartment
+                v_data = np.array([ca_data[idx]] if len(ca_data) > idx else [ca_data[-1]])
+                vmin, vmax = 0.0, 1e-3
+            else:
+                v_data = self._heatmap_data[:, idx]
+                vmin, vmax = -80.0, 40.0
+        elif layer_text == "ATP Level" and hasattr(self, '_last_result'):
+            atp_data = getattr(self._last_result, 'atp_level', None)
+            if atp_data is not None and atp_data.ndim >= 2:
+                v_data = atp_data[:, idx]
+                vmin, vmax = 0.0, 2.0   # ATP range (mM)
+            elif atp_data is not None:
+                # 1D array - single compartment
+                v_data = np.array([atp_data[idx]] if len(atp_data) > idx else [atp_data[-1]])
+                vmin, vmax = 0.0, 2.0
+            else:
+                v_data = self._heatmap_data[:, idx]
+                vmin, vmax = -80.0, 40.0
+        else:
+            v_data = self._heatmap_data[:, idx]
+            vmin, vmax = -80.0, 40.0  # Vm range (mV)
+        
         n_comp = v_data.shape[0]
 
         for item in self._draw_items:
@@ -847,7 +897,7 @@ class TopologyWidget(QWidget):
             ci = int(item.comp_idx)
             if ci < 0 or ci >= n_comp:
                 continue
-            color = TopologyWidget._get_heat_color(float(v_data[ci]))
+            color = TopologyWidget._get_heat_color(float(v_data[ci]), vmin, vmax)
             if isinstance(item, pg.ScatterPlotItem):
                 item.setBrush(pg.mkBrush(color))
                 item.update()

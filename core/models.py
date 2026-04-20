@@ -126,6 +126,8 @@ class MetabolismParams(BaseModel):
     pump_max_capacity: float = Field(default=0.5, ge=0.0, le=5.0, description="Max Na+/K+ pump current density (µA/cm²). Literature: 0.1-0.5")
     km_na: float = Field(default=15.0, ge=1.0, le=50.0, description="Na+ half-saturation for pump (mM). Literature: 10-20 mM")
     enable_atp_limiting: bool = Field(default=True, description="Enable ATP-dependent pump limitation (pump slows when ATP < 2 mM)")
+    # Optional explicit initial ATP (v12.5): None = start at atp_max_mM (healthy default)
+    atp_initial_mM: Optional[float] = Field(default=None, description="Initial ATP concentration (mM). None = use atp_max_mM. Set < atp_max for pathology presets.")
 
 
 class EnvironmentParams(BaseModel):

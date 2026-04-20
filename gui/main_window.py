@@ -1453,6 +1453,7 @@ class MainWindow(QMainWindow):
             self.form_stim.update_soma_diameter(self.config_manager.config.morphology.d_soma)
         self._refresh_topology_preview()
         self._update_stim_preview()
+        self._sync_live_deck_to_config()
 
     def _on_stim_field_changed(self, field_name: str, value):
         if field_name == "stim_type":
@@ -1504,16 +1505,19 @@ class MainWindow(QMainWindow):
         self._refresh_topology_preview()
         if field_name != "t_sim":
             self._update_stim_preview()
+        self._sync_live_deck_to_config()
 
     def _on_stim_loc_field_changed(self, _field_name: str, _value):
         self.lbl_params_hint.setText(self.config_manager.get_hint_text())
         self._refresh_topology_preview()
         self._update_stim_preview()
+        self._sync_live_deck_to_config()
 
     def _on_dfilter_field_changed(self, _field_name: str, _value):
         self._refresh_topology_preview()
         self._update_stim_preview()
         self._update_attenuation_hint()
+        self._sync_live_deck_to_config()
 
     def _update_attenuation_hint(self):
         """Update dynamic attenuation hint for dendritic filter (v10.3+)."""
@@ -1549,6 +1553,7 @@ class MainWindow(QMainWindow):
 
     def _on_channel_field_changed(self, _field_name: str, _value):
         self._refresh_topology_preview()
+        self._sync_live_deck_to_config()
 
     def _refresh_topology_preview(self):
         if not hasattr(self, "topology"):
@@ -2755,6 +2760,51 @@ class MainWindow(QMainWindow):
         except Exception:
             # Silently fail — this is a UI optimization, not critical functionality
             pass
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts for tab navigation and actions."""
+        key = event.key()
+        modifiers = event.modifiers()
+        
+        # Tab navigation shortcuts: Ctrl+1..5
+        if modifiers == Qt.ControlModifier:
+            if key == Qt.Key_1:
+                self.tabs.setCurrentIndex(0)  # Parameters
+            elif key == Qt.Key_2:
+                self.tabs.setCurrentIndex(1)  # Oscilloscope
+            elif key == Qt.Key_3:
+                self.tabs.setCurrentIndex(2)  # Analytics
+            elif key == Qt.Key_4:
+                self.tabs.setCurrentIndex(3)  # Topology
+            elif key == Qt.Key_5:
+                self.tabs.setCurrentIndex(4)  # Help
+            elif key == Qt.Key_R:
+                self._on_run_button_clicked()  # Ctrl+R = Run
+            elif key == Qt.Key_S:
+                self.export_csv()  # Ctrl+S = Export CSV
+            elif key == Qt.Key_Q:
+                self.close()  # Ctrl+Q = Quit
+            else:
+                super().keyPressEvent(event)
+        # Function keys (no modifiers)
+        elif modifiers == Qt.NoModifier:
+            if key == Qt.Key_F5:
+                self._on_run_button_clicked()  # F5 = Run
+            elif key == Qt.Key_F11:
+                self._toggle_fullscreen()  # F11 = Fullscreen
+            elif key == Qt.Key_F1:
+                self.tabs.setCurrentIndex(4)  # F1 = Help
+            else:
+                super().keyPressEvent(event)
+        else:
+            super().keyPressEvent(event)
+    
+    def _toggle_fullscreen(self):
+        """Toggle window fullscreen state."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
 
 
 # ─────────────────────────────────────────────────────────────────────

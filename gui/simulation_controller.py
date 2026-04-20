@@ -63,15 +63,41 @@ class SimulationController(QObject):
         self.thread_pool.setMaxThreadCount(4)  # Limit concurrent simulations
         
     def run_single(self, config, on_success: Callable[[Any], None] = None,
-                   on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None):
-        """Run single simulation in background thread."""
+                   on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None,
+                   compute_lyapunov: bool = False):
+        """Run single simulation in background thread with async analysis.
+        
+        The worker now performs post-processing and full_analysis in the background
+        thread to eliminate GUI micro-freezes (Async Analytical Pipeline v11.8).
+        """
         from core.solver import NeuronSolver
+        from core.morphology import MorphologyBuilder
+        from core.analysis import full_analysis
         
         self.simulation_started.emit()
         
         def run_simulation():
             solver = NeuronSolver(config)
-            return {'single': solver.run_single()}
+            result = solver.run_single()
+            
+            # ── Async Analytical Pipeline (v11.8) ──
+            # Post-processing and analysis run in background thread
+            # to keep GUI thread responsive (< 16 ms per frame)
+            
+            # Build morphology for post-processing
+            morph = MorphologyBuilder.build(config)
+            
+            # Post-process physics (current reconstruction, ATP estimates)
+            solver._post_process_physics(result, morph)
+            
+            # Full analysis (spike detection, statistics, LLE if requested)
+            stats = full_analysis(result, compute_lyapunov=compute_lyapunov)
+            
+            return {
+                'single': result,
+                'stats': stats,
+                'morph': morph,
+            }
             
         worker = Worker(run_simulation)
         
@@ -91,15 +117,30 @@ class SimulationController(QObject):
         self.thread_pool.start(worker)
         
     def run_stochastic(self, config, n_trials: int, on_success: Callable[[Any], None] = None,
-                      on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None):
-        """Run stochastic simulation through the primary solver path."""
+                      on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None,
+                      compute_lyapunov: bool = False):
+        """Run stochastic simulation through the primary solver path with async analysis."""
         self.simulation_started.emit()
         
         def run_simulation():
             from core.solver import NeuronSolver
+            from core.morphology import MorphologyBuilder
+            from core.analysis import full_analysis
+            
             config.stim.stoch_gating = True
             solver = NeuronSolver(config)
-            return {'single': solver.run_single()}
+            result = solver.run_single()
+            
+            # Async Analytical Pipeline (v11.8)
+            morph = MorphologyBuilder.build(config)
+            solver._post_process_physics(result, morph)
+            stats = full_analysis(result, compute_lyapunov=compute_lyapunov)
+            
+            return {
+                'single': result,
+                'stats': stats,
+                'morph': morph,
+            }
             
         worker = Worker(run_simulation)
         

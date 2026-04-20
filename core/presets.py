@@ -324,6 +324,7 @@ def _apply_hypoxia_mode(cfg: FullModelConfig) -> None:
         cfg.morphology.gNa_trunk_mult = 0.35
         cfg.morphology.gL_trunk_mult = 8.0
         cfg.metabolism.atp_synthesis_rate = 0.005
+        cfg.metabolism.atp_initial_mM = 0.5  # Depleted initial ATP (terminal hypoxia)
         cfg.metabolism.g_katp_max = 2.5
         cfg.calcium.tau_Ca = 1200.0
         cfg.channels.gCa_max = 0.10

@@ -371,6 +371,13 @@ class PhysicsParams(NamedTuple):
     # Propagation delay in integration steps: max(1, int(distance / cond_velocity / dt))
     # 1 = no delay (passthrough). Derived from distance_um and conduction velocity (~250 µm/ms).
     dfilter_delay_steps: int32
+    
+    # Precomputed stimulus arrays (Optimization v11.8)
+    # These eliminate per-step function calls in the native loop
+    I_stim_pre: np.ndarray   # Precomputed primary current-based stimulus
+    G_syn_pre: np.ndarray    # Precomputed primary conductance-based synaptic stimulus
+    I_stim_pre_2: np.ndarray   # Precomputed secondary current-based stimulus (dual)
+    G_syn_pre_2: np.ndarray    # Precomputed secondary conductance-based synaptic stimulus (dual)
 
     # Secondary stimulation (dual)
     dual_stim_enabled: int32
@@ -482,6 +489,11 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'zap_win_size_2': np.int32(0),
         # Propagation delay steps (1 = no delay / passthrough)
         'dfilter_delay_steps': np.int32(1),
+        # Precomputed stimulus arrays (empty by default, filled by solver)
+        'I_stim_pre': np.zeros(0, dtype=np.float64),
+        'G_syn_pre': np.zeros(0, dtype=np.float64),
+        'I_stim_pre_2': np.zeros(0, dtype=np.float64),
+        'G_syn_pre_2': np.zeros(0, dtype=np.float64),
         # Secondary (dual) stimulus - same parameters for independent control
         'dfilter_distance_um_2': 0.0,
         'dfilter_lambda_um_2': 150.0,

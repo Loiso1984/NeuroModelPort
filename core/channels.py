@@ -176,7 +176,8 @@ class ChannelRegistry:
         # Динамика АТФ (metabolism) - LAST variable in state vector
         if config.metabolism.enable_dynamic_atp:
             na_i_rest, k_o_rest = derive_dynamic_atp_rest_ions(config)
-            y0_list.append(np.full(N, config.metabolism.atp_max_mM))
+            atp_init = config.metabolism.atp_initial_mM if config.metabolism.atp_initial_mM is not None else config.metabolism.atp_max_mM
+            y0_list.append(np.full(N, atp_init))
             y0_list.append(np.full(N, na_i_rest))
             y0_list.append(np.full(N, k_o_rest))
 
