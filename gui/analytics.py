@@ -26,7 +26,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget,
                                 QLabel, QTextEdit, QHBoxLayout,
                                 QSizePolicy, QScrollArea, QPushButton, QMainWindow, QComboBox)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 import matplotlib
@@ -503,13 +503,14 @@ class FullscreenPlotViewer(QMainWindow):
                 try:
                     self.canvas.mpl_disconnect(cid)
                 except Exception:
-                    pass  # Ignore if already disconnected
-        super().closeEvent(event)
+                    pass
 
 
-# ════════════════════════════════════════════════════════════════════
 class AnalyticsWidget(QTabWidget):
     """Main analytics widget — updated by MainWindow after each run."""
+    
+    # v12.2: Signal emitted when user requests LLE computation with full rerun
+    computeLleRequested = Signal()
 
     def __init__(self, parent=None):
         """
@@ -616,16 +617,9 @@ class AnalyticsWidget(QTabWidget):
 
         self.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
-        # â”€â”€ Tab 0: Passport — always built (pure text, zero MPL cost) â”€â”€
-        self.passport_view = QTextEdit()
-        self.passport_view.setReadOnly(True)
-        self.passport_view.setFont(QFont("Consolas", 10))
-        self.passport_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        self.passport_view.setMinimumWidth(400)
-        self.passport_view.setStyleSheet(
-            "background:#0D1117; color:#C9D1D9; border:none;"
-        )
-        self.addTab(self.passport_view, "Passport")
+        # â”€â”€ Tab 0: Passport Dashboard â€" Visual biophysical report with radar chart â”€â”€
+        self._passport_widget = self._build_tab_passport()
+        self.addTab(self._passport_widget, "Passport")
 
         # â”€â”€ Tabs 1–15: lazy placeholders — MPL canvas built on first visit â”€â”€
         # Each entry: builder (creates attrs + returns QWidget), updater (may be None),
@@ -2067,18 +2061,24 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     #  MAIN UPDATE ENTRY POINT
     # ─────────────────────────────────────────────────────────────────
-    def update_analytics(self, result):
+    def update_analytics(self, result, stats=None):
         """Update all already-built tabs from a SimulationResult.
 
         Lazy tabs that haven't been visited yet are skipped — their guard
         at the top of each _update_* method returns immediately if the
-        corresponding figure attribute doesn't exist yet.  They will be
+        corresponding figure attribute doesn't exist yet. They will be
         populated in _on_tab_changed when the user first clicks the tab.
+
+        v13.0: stats parameter is now optional for async analytics support.
+        If stats is None, it will be computed synchronously (legacy mode).
         """
         self._last_result = result
-        from core.analysis import full_analysis
-        # LLE computation is now only triggered by the Compute LLE button, not from config
-        stats = full_analysis(result, compute_lyapunov=False)
+
+        # v13.0: Use provided stats (async mode) or compute synchronously (legacy)
+        if stats is None:
+            from core.analysis import full_analysis
+            stats = full_analysis(result, compute_lyapunov=False)
+
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
 
@@ -2109,33 +2109,118 @@ class AnalyticsWidget(QTabWidget):
 
 
     def _compute_lle_now(self):
-        """Explicit Lyapunov action (separate from simulation parameter toggles)."""
+        """Emit signal to trigger full simulation rerun with LLE enabled.
+        
+        v12.2: Changed from post-hoc analysis to full rerun honesty.
+        MainWindow connects computeLleRequested to run with calc_lle=True.
+        """
         if self._last_result is None:
             return
-        from core.analysis import full_analysis
-
-        stats = full_analysis(self._last_result, compute_lyapunov=True)
-        self._last_stats = stats
-        self._update_passport(self._last_result, stats)
-        self._chaos_force_enabled = True
-
-        # Force-build chaos tab if not visited yet, using the robust helper
-        self._ensure_built('_build_tab_chaos')
-
-        self._update_chaos(self._last_result, stats)
-
-        for i in range(self.count()):
-            if self.tabText(i) == 'Chaos & LLE':
-                self.setCurrentIndex(i)
-                break
-
-        # Force synchronous repaint so the chart appears immediately
-        if hasattr(self, 'cvs_chaos'):
-            self.cvs_chaos.draw()
+        # Emit signal - MainWindow will handle the full rerun with calc_lle=True
+        self.computeLleRequested.emit()
 
     # ─────────────────────────────────────────────────────────────────
-    #  0 — NEURON PASSPORT
+    #  0 — NEURON PASSPORT DASHBOARD
     # ─────────────────────────────────────────────────────────────────
+    def _build_tab_passport(self) -> QWidget:
+        """Build the Neuron Passport Dashboard with radar chart and progress bars."""
+        from PySide6.QtWidgets import QProgressBar
+        
+        # Main container
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(8)
+        
+        # Left side: Radar chart (reuses fingerprint figure setup)
+        self.fig_passport_radar, cvs = _mpl_fig(1, 1, figsize=(6, 6), tight=False)
+        self.ax_passport_radar = self.fig_passport_radar.add_subplot(111, projection='polar')
+        self.ax_passport_radar.set_facecolor('#0D1117')
+        self.ax_passport_radar.tick_params(colors='#CDD6F4')
+        self.ax_passport_radar.set_title('Biophysical Fingerprint', color='#CDD6F4', pad=20)
+        layout.addWidget(cvs, stretch=1)
+        
+        # Right side: Scroll area with text and progress bars
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(6, 6, 6, 6)
+        right_layout.setSpacing(8)
+        
+        # Text view (original passport view)
+        self.passport_view = QTextEdit()
+        self.passport_view.setReadOnly(True)
+        self.passport_view.setFont(QFont("Consolas", 10))
+        self.passport_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.passport_view.setMinimumWidth(350)
+        self.passport_view.setStyleSheet("background:#0D1117; color:#C9D1D9; border:none;")
+        right_layout.addWidget(self.passport_view, stretch=1)
+        
+        # Progress bars section
+        bars_label = QLabel("Health Metrics")
+        bars_label.setStyleSheet("color:#CDD6F4; font-weight:bold; font-size:12px;")
+        right_layout.addWidget(bars_label)
+        
+        # Metabolic Health bar (ATP level 0-5 mM)
+        atp_container = QWidget()
+        atp_layout = QHBoxLayout(atp_container)
+        atp_layout.setContentsMargins(0, 0, 0, 0)
+        atp_label = QLabel("Metabolic Health (ATP)")
+        atp_label.setStyleSheet("color:#A6E3A1; font-size:10px;")
+        atp_layout.addWidget(atp_label)
+        self._passport_atp_bar = QProgressBar()
+        self._passport_atp_bar.setRange(0, 50)  # 0-5.0 mM scaled by 10
+        self._passport_atp_bar.setValue(25)  # Default 2.5 mM
+        self._passport_atp_bar.setFormat("%v/50 (2.5 mM)")
+        self._passport_atp_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #1E1E2E;
+                border: 1px solid #313244;
+                border-radius: 4px;
+                text-align: center;
+                color: #A6E3A1;
+            }
+            QProgressBar::chunk {
+                background-color: #A6E3A1;
+                border-radius: 3px;
+            }
+        """)
+        atp_layout.addWidget(self._passport_atp_bar, stretch=1)
+        right_layout.addWidget(atp_container)
+        
+        # Chaotic Instability bar (LLE 0-2.0)
+        lle_container = QWidget()
+        lle_layout = QHBoxLayout(lle_container)
+        lle_layout.setContentsMargins(0, 0, 0, 0)
+        lle_label = QLabel("Chaotic Instability (LLE)")
+        lle_label.setStyleSheet("color:#F38BA8; font-size:10px;")
+        lle_layout.addWidget(lle_label)
+        self._passport_lle_bar = QProgressBar()
+        self._passport_lle_bar.setRange(0, 200)  # 0-2.0 scaled by 100
+        self._passport_lle_bar.setValue(0)
+        self._passport_lle_bar.setFormat("%v/200 (0.00 λ)")
+        self._passport_lle_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #1E1E2E;
+                border: 1px solid #313244;
+                border-radius: 4px;
+                text-align: center;
+                color: #F38BA8;
+            }
+            QProgressBar::chunk {
+                background-color: #F38BA8;
+                border-radius: 3px;
+            }
+        """)
+        lle_layout.addWidget(self._passport_lle_bar, stretch=1)
+        right_layout.addWidget(lle_container)
+        
+        scroll.setWidget(right_widget)
+        layout.addWidget(scroll, stretch=1)
+        
+        return widget
+
     def _update_passport(self, result, stats: dict):
         cfg = result.config
         ch = cfg.channels
@@ -2466,6 +2551,28 @@ class AnalyticsWidget(QTabWidget):
             pass
 
         self.passport_view.setPlainText("\n".join(lines))
+        
+        # v12.2: Update progress bars. Numerical diagnostics can legitimately
+        # be NaN/inf for short or degenerate traces, so clamp UI values.
+        atp_min_mM = self._finite_float(stats.get('atp_min_mM'), default=2.0)
+        atp_scaled = max(0, min(self._passport_atp_bar.maximum(), int(atp_min_mM * 10)))
+        self._passport_atp_bar.setValue(atp_scaled)
+        self._passport_atp_bar.setFormat(f"{atp_scaled}/50 ({atp_min_mM:.2f} mM)")
+
+        lyap_lle = self._finite_float(stats.get('lle_per_s'), default=0.0)
+        lle_scaled = max(0, min(self._passport_lle_bar.maximum(), int(lyap_lle * 100)))
+        self._passport_lle_bar.setValue(lle_scaled)
+        self._passport_lle_bar.setFormat(f"{lle_scaled}/200 ({lyap_lle:.2f} lambda)")
+
+    @staticmethod
+    def _finite_float(value, *, default: float = 0.0) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return default
+        if not np.isfinite(parsed):
+            return default
+        return parsed
 
     def _update_impedance(self, result):
         """Update membrane impedance magnitude/phase panels from latest run."""

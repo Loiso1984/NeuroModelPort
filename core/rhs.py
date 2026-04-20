@@ -507,6 +507,39 @@ def ghk_current(v_mV, ci_mM, co_mM, z, T_kelvin):
     return ghk_factor * numerator / denominator
 
 
+@njit(float64[:](float64[:], float64[:], float64, float64, float64), cache=True)
+def get_ghk_current_array(v_arr, ca_i_arr, ca_ext, z, t_kelvin):
+    """
+    Vectorized GHK current for post-processing (UI-safe, Numba-accelerated).
+
+    Matches scalar ghk_current() exactly for SSoT. Used by solver.py
+    _post_process_physics to reconstruct ICa/ITCa without UI freezes.
+
+    Parameters
+    ----------
+    v_arr : float64[:]
+        Membrane potential array (mV) — flattened or 1D
+    ca_i_arr : float64[:]
+        Intracellular calcium array (mM), same length as v_arr
+    ca_ext : float64
+        Extracellular calcium (mM)
+    z : float64
+        Ion valence (2.0 for Ca2+)
+    t_kelvin : float64
+        Temperature (Kelvin)
+
+    Returns
+    -------
+    float64[:]
+        GHK current density array (µA/cm²) — same shape as v_arr
+    """
+    n_t = len(v_arr)
+    out = np.empty(n_t, dtype=np.float64)
+    for i in range(n_t):
+        out[i] = ghk_current(v_arr[i], ca_i_arr[i], ca_ext, z, t_kelvin)
+    return out
+
+
 @njit(cache=True)
 def compute_ionic_currents_scalar(
     vi, mi, hi, ni,

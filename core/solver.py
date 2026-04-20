@@ -13,7 +13,7 @@ from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, mak
 from core.rhs import (
     rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS,
     ATP_ISCHEMIC_THRESHOLD, NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
-    compute_na_k_pump_current, get_pump_current_array,
+    compute_na_k_pump_current, get_pump_current_array, get_ghk_current_array,
 )
 from core.dendritic_filter import get_ac_attenuation
 from core.physics_params import create_physics_params, build_state_offsets
@@ -102,26 +102,6 @@ def precompute_stimulus_arrays(n_steps, dt, physics, is_cond_primary, is_cond_se
     return I_stim_pre, G_syn_pre, I_stim_pre_2, G_syn_pre_2
 
 
-def _ghk_array(v_mV, ci_mM, co_mM, z, T_kelvin):
-    """Vectorized GHK current for post-processing (matches rhs.py::ghk_current).
-
-    Reproduces the same equation used inside the native @njit loop so that
-    post-processing current reconstruction is physically consistent with the
-    integrator.  Pure NumPy — no Numba dependency.
-    """
-    V = v_mV * 1e-3  # mV → V
-    RT = R_GAS * T_kelvin
-    zF = z * F_CONST
-    zF_V_RT = zF * V / RT
-    exp_term = np.exp(np.clip(-zF_V_RT, -500.0, 500.0))
-    near_zero = np.abs(V) < 1e-10
-    denom = np.where(near_zero, 1.0, 1.0 - exp_term)
-    numer = ci_mM - co_mM * exp_term
-    ghk_factor = zF * zF / RT * V
-    return np.where(near_zero, zF * (ci_mM - co_mM) * 1e-3,
-                    ghk_factor * numer / denom)
-
-
 def _precompute_zap_window(td_ms: float, rise_ms: float, res_ms: float = 0.1):
     """Precompute a Tukey (cosine-tapered) window lookup table for ZAP stimulus.
 
@@ -129,7 +109,7 @@ def _precompute_zap_window(td_ms: float, rise_ms: float, res_ms: float = 0.1):
     When rise_ms <= 0 or td_ms <= 0, returns empty arrays (rectangular window;
     get_stim_current falls back to direct computation).
     """
-    if td_ms <= 0.0 or rise_ms <= 0.0:
+    if td_ms <= 0.0 or rise_ms < 1e-9:
         return np.zeros(0, dtype=np.float64), np.zeros(0, dtype=np.float64), 0
     n_pts = max(int(td_ms / res_ms) + 1, 3)
     win_t = np.linspace(0.0, td_ms, n_pts)
@@ -297,6 +277,13 @@ class SimulationResult:
 
         # LLE convergence array (populated when calc_lle=True in run_native)
         self.lle_convergence: np.ndarray | None = None
+        
+        # SSoT: State offsets from physics (v12.2)
+        # Attached by run_native; analysis functions should use this instead of recalculating
+        self.state_offsets = None
+        
+        # v12.2: Total stimulus current at soma (precomputed for fast analysis)
+        self.i_stim_total: np.ndarray | None = None
 
     def _finalize_current_shapes(self):
         """Collapse single-compartment current matrices to 1-D time series."""
@@ -945,8 +932,12 @@ class NeuronSolver:
                 if cfg.calcium.dynamic_Ca and res.ca_i is not None:
                     ca_i = np.maximum(res.ca_i, 1e-9)
                     # GHK current — matches native loop exactly (avoids Ohmic/GHK mismatch)
+                    # SSoT: use Numba-accelerated get_ghk_current_array from rhs.py
                     _RT_over_z2F2 = (R_GAS * t_kelvin) / (4.0 * F_CONST * F_CONST)
-                    res.currents['ICa'] = g_ca * _RT_over_z2F2 * (s ** 2) * u * _ghk_array(v, ca_i, cfg.calcium.Ca_ext, 2.0, t_kelvin)
+                    v_flat = v.ravel()
+                    ca_flat = ca_i.ravel()
+                    ghk_arr = get_ghk_current_array(v_flat, ca_flat, cfg.calcium.Ca_ext, 2.0, t_kelvin)
+                    res.currents['ICa'] = g_ca * _RT_over_z2F2 * (s ** 2) * u * ghk_arr.reshape(v.shape)
                 else:
                     e_ca = 120.0
                     res.currents['ICa'] = g_ca * (s ** 2) * u * (v - e_ca)
@@ -973,7 +964,11 @@ class NeuronSolver:
                         ca_i = np.maximum(res.ca_i, 1e-9)
                         _RT_over_z2F2 = (R_GAS * t_kelvin) / (4.0 * F_CONST * F_CONST)
                     # GHK current — matches native loop exactly
-                    res.currents['ITCa'] = g_tca * _RT_over_z2F2 * (p_t ** 2) * q_t * _ghk_array(v, ca_i, cfg.calcium.Ca_ext, 2.0, t_kelvin)
+                    # SSoT: use Numba-accelerated get_ghk_current_array from rhs.py
+                    v_flat = v.ravel()
+                    ca_flat = ca_i.ravel()
+                    ghk_arr = get_ghk_current_array(v_flat, ca_flat, cfg.calcium.Ca_ext, 2.0, t_kelvin)
+                    res.currents['ITCa'] = g_tca * _RT_over_z2F2 * (p_t ** 2) * q_t * ghk_arr.reshape(v.shape)
                 else:
                     if not cfg.channels.enable_ICa:
                         e_ca = 120.0
@@ -1523,7 +1518,7 @@ class NeuronSolver:
         else:
             lle_subspace_mode_int = int(lle_subspace_mode)
 
-        t_out, y_out, diverged, lle_arr = run_native_loop(
+        t_out, y_out, diverged, lle_arr, i_stim_arr = run_native_loop(
             y0.astype(np.float64),
             float(cfg.stim.t_sim),
             dt_internal,
@@ -1547,6 +1542,8 @@ class NeuronSolver:
             res = SimulationResult(t_out, y_out, n_comp, cfg)
             self._post_process_physics(res, morph)
             res.morph = morph
+            res.state_offsets = physics.state_offsets  # SSoT v12.2
+            res.i_stim_total = i_stim_arr  # v12.2: Precomputed stimulus current
             if calc_lle:
                 res.lle_convergence = lle_arr
             res.diverged = True
@@ -1555,6 +1552,8 @@ class NeuronSolver:
         res = SimulationResult(t_out, y_out, n_comp, cfg)
         self._post_process_physics(res, morph)
         res.morph = morph
+        res.state_offsets = physics.state_offsets  # SSoT v12.2
+        res.i_stim_total = i_stim_arr  # v12.2: Precomputed stimulus current
         if calc_lle:
             res.lle_convergence = lle_arr
         return res

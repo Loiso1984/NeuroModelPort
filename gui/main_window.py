@@ -5,6 +5,7 @@ Tabs: Parameters | Oscilloscope | Analytics | Topology | Guide
 Run modes: Standard | Monte-Carlo | Sweep | S-D Curve | Excit. Map | Stochastic
 """
 import csv
+import logging
 import os
 from pathlib import Path
 import numpy as np
@@ -14,7 +15,8 @@ from PySide6.QtWidgets import (
     QTabWidget, QPushButton, QLabel, QComboBox, QStatusBar,
     QScrollArea, QMessageBox, QApplication, QFileDialog,
     QGroupBox, QToolBar, QProgressDialog, QLayout, QSizePolicy,
-    QFrame, QSplitter, QSlider, QTextEdit,
+    QFrame, QSplitter, QSlider, QTextEdit, QDockWidget, QMenuBar,
+    QLineEdit,
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from PySide6.QtGui import QIcon, QAction
@@ -38,7 +40,10 @@ from gui.axon_biophysics import AxonBiophysicsWidget
 from gui.dual_stimulation_widget import DualStimulationWidget
 from gui.text_sanitize import repair_text, repair_widget_tree
 from core.dendritic_filter import get_ac_attenuation
+from gui.ui_layout import LAYOUT_PRESETS, preset_for_width
 
+# v13.0: Module-level logger
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────
 #  LIVE DECK PARAMETER REGISTRY
@@ -157,11 +162,12 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.resize(1400, 900)
+        self.resize(1100, 700)
         self.setStyleSheet(self._STYLE)
         
         # Initialize services
         self.config_manager = ConfigManager()
+        self.config = self.config_manager.config  # Backward-compatible read path for older GUI helpers/tests.
         self.sim_controller = SimulationController()
         
         self._dual_stim_signal_connected = False
@@ -179,50 +185,35 @@ class MainWindow(QMainWindow):
         self._live_timer.setInterval(350)
         self._live_timer.timeout.connect(self._on_live_timer_fired)
 
+        # v13.0: Debounced analytics timer for async rendering
+        self._analytics_debounce_timer = QTimer(self)
+        self._analytics_debounce_timer.setSingleShot(True)
+        self._analytics_debounce_timer.timeout.connect(self._on_analytics_debounce_fired)
+        self._pending_result_for_analytics = None
+        self._pending_morph_for_analytics = None
+        # Generation counter to prevent race conditions with stale analytics
+        self._analytics_generation = 0
+        self._pending_analytics_generation = 0
+
         central = QWidget()
         self.setCentralWidget(central)
+        self._central_shell = central
         self._main_layout = QVBoxLayout(central)
         self._main_layout.setContentsMargins(4, 4, 4, 4)
         self._main_layout.setSpacing(4)
         self._main_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         central.setMinimumSize(0, 0)
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(980, 680)
 
         self._setup_top_bar()
-        self._setup_tabs()
+        self._setup_cockpit()
+        self._setup_view_menu()
         self._setup_status_bar()
         self._wire_service_signals()
         self.retranslate_ui()
         
-        # Try to restore last session, otherwise load default preset
-        import os
-        if os.path.exists(".last_session.json"):
-            if self.config_manager.load_config_from(".last_session.json"):
-                self._refresh_all_forms()
-                self._sync_hines_button_state()
-                self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
-                self.topology.draw_neuron(self.config_manager.config)
-                self._status("Restored previous session.")
-            else:
-                self.load_preset("A: Squid Giant Axon (HH 1952)")
-        else:
-            self.load_preset("A: Squid Giant Axon (HH 1952)")
-        
-        # Load UI state if available
-        if os.path.exists(".ui_state.json"):
-            try:
-                import json
-                with open(".ui_state.json", "r") as f:
-                    ui_state = json.load(f)
-                # Restore splitter sizes
-                if "splitter_sizes" in ui_state:
-                    self._main_splitter.setSizes(ui_state["splitter_sizes"])
-                # Restore live deck combo values
-                if "live_deck" in ui_state and len(ui_state["live_deck"]) == len(self._live_combos):
-                    for i, combo_text in enumerate(ui_state["live_deck"]):
-                        self._live_combos[i].setCurrentText(combo_text)
-            except Exception:
-                pass  # Silently fail on UI state load errors
+        self._restore_session_or_default()
+        self._restore_or_reset_dock_layout()
 
     def _wire_service_signals(self):
         """Connect ConfigManager and SimulationController signals to MainWindow slots."""
@@ -470,6 +461,15 @@ class MainWindow(QMainWindow):
         self.btn_load_config.setToolTip("Load configuration from JSON file")
         self.btn_load_config.clicked.connect(self.load_config_from)
 
+        self.btn_more_actions = QPushButton("Actions")
+        self.btn_more_actions.setMinimumHeight(38)
+        self.btn_more_actions.setStyleSheet(
+            "QPushButton { background:#313244; color:#CDD6F4; border-radius:5px; "
+            "border:1px solid #45475A; font-weight:bold; }"
+            "QPushButton:hover { background:#45475A; }"
+        )
+        self._build_more_actions_menu()
+
         # ── Sidebar toggle button ──────────────────────────────
         self.btn_toggle_sidebar = QPushButton("<")
         self.btn_toggle_sidebar.setFixedWidth(30)
@@ -507,6 +507,7 @@ class MainWindow(QMainWindow):
         row1.addWidget(self.btn_export_nml, 2)
         row1.addWidget(self.btn_save_config, 2)
         row1.addWidget(self.btn_load_config, 2)
+        row1.addWidget(self.btn_more_actions, 2)
         row1.addWidget(self.btn_window_size)
         row1.addWidget(self.btn_toggle_sidebar)
         row1.addStretch()
@@ -562,172 +563,70 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────
     #  TABS  +  COLLAPSIBLE SIDEBAR
     # ─────────────────────────────────────────────────────────────────
-    def _setup_tabs(self):
+    def _setup_cockpit(self):
         """
-        Constructs and configures the application's main tabbed interface, collapsible sidebar, and the widgets contained in each tab.
+        v13.0 Cockpit Layout — Dock-based professional interface.
         
-        Creates and assigns:
-        - the QTabWidget stored on `self.tabs`;
-        - a sidebar frame used as the primary parameter/quick-controls panel (`self._sidebar_frame`);
-        - the "Stimulation Studio" tab with primary stimulus forms (`self.form_stim`, `self.form_stim_loc`, `self.form_dfilter`), the secondary/dual stimulation widget (`self.dual_stim_widget`), and a resizable real-time stimulus preview plot with an I/g toggle (`self._stim_preview_plot`, `self._toggle_conductance`);
-        - the "Oscilloscope" tab (`self.oscilloscope`) and syncs its delay controls with the current config;
-        - the "Analytics" tab (`self.analytics`) with a session notes editor (`self.session_notes`);
-        - the "Topology", "Axon Biophysics", and "Guide" tabs (`self.topology`, `self.axon_biophysics`, `self.guide_browser`);
-        - the horizontal main splitter (`self._main_splitter`) that contains the sidebar and the tabs.
+        Replaces QTabWidget with QDockWidget architecture for maximum flexibility.
+        All major panels become detachable, nestable, and tabbable docks.
         
-        Also wires relevant signals (e.g., stimulus/dual-stim change handlers, oscilloscope ↔ analytics time highlighting), sets initial widget states from the configuration, and registers form widgets with the ConfigManager.
+        Dock Layout:
+        - Central: Oscilloscope (primary visualization)
+        - Left: Parameters (sidebar with forms)
+        - Right: Live Controls (sliders), Topology (heatmap)
+        - Bottom: Analytics (matplotlib tabs)
+        - Floating: Stimulation Studio, Axon Biophysics, Guide
         """
-        self.tabs = QTabWidget()
-        self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.tabs.setMovable(True)  # Allow users to rearrange tabs
-
-        # ── Sidebar panel (replaces old "1) Setup" tab) ───────────────
-        self._sidebar_frame = QFrame()
-        self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        # Calculate sidebar width based on screen size (15-20% of screen width, min 320px)
-        from PySide6.QtWidgets import QApplication
-        screen_width = QApplication.primaryScreen().availableSize().width()
-        calculated_width = max(320, min(int(screen_width * 0.18), 400))
-        self._sidebar_frame.setMinimumWidth(calculated_width)
-        self._sidebar_frame.setMaximumWidth(520)
-        self._build_sidebar_panel()
-        # Dummy tab_params kept for backward-compat references (not in tabs)
-        self.tab_params = self._sidebar_frame
-
-        # ── Tab 1: Stimulation Studio ───────────────────────────────
-        # Step 2: Stimulation Studio (consolidated stimulation controls)
-        stim_studio_widget_outer = QWidget()
-        stim_outer_layout = QVBoxLayout(stim_studio_widget_outer)
-        stim_outer_layout.setContentsMargins(0, 0, 0, 0)
-        stim_outer_layout.setSpacing(0)
-        
-        # Create scroll area for stim studio content
-        from PySide6.QtWidgets import QScrollArea
-        stim_scroll = QScrollArea()
-        stim_scroll.setWidgetResizable(True)
-        stim_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        stim_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        stim_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        stim_scroll.setStyleSheet("QScrollArea { background: #1E1E2E; }")
-        
-        stim_studio_widget = QWidget()
-        stim_main_layout = QVBoxLayout(stim_studio_widget)
-        stim_main_layout.setSpacing(6)
-        stim_main_layout.setContentsMargins(4, 4, 4, 4)
-        
-        # Top section: Primary and Secondary stimulus controls
-        stim_controls_widget = QWidget()
-        stim_layout = QHBoxLayout(stim_controls_widget)
-        stim_layout.setSpacing(10)
-        stim_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Left column: Primary stimulus controls
-        left_col = QWidget()
-        left_layout = QVBoxLayout(left_col)
-        left_layout.setSpacing(6)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.form_stim = StimFormWithUnits(
-            self.config_manager.config.stim,
-            self.config_manager.config.morphology.d_soma,
-            on_change=self._on_stim_field_changed,
-        )
-        self.form_stim_loc = PydanticFormWidget(
-            self.config_manager.config.stim_location,
-            "Stimulus Location",
-            on_change=self._on_stim_loc_field_changed,
-        )
-        self.form_dfilter = PydanticFormWidget(
-            self.config_manager.config.dendritic_filter,
-            "Dendritic Filter",
-            on_change=self._on_dfilter_field_changed,
-        )
-        
-        # Dynamic attenuation hint label (v10.3)
-        self.lbl_attenuation_hint = QLabel("")
-        self.lbl_attenuation_hint.setStyleSheet("color: #6C7086; font-size: 11px; padding: 4px;")
-        self.lbl_attenuation_hint.setWordWrap(True)
-        
-        left_layout.addWidget(self.form_stim)
-        left_layout.addWidget(self.form_stim_loc)
-        left_layout.addWidget(self.form_dfilter)
-        left_layout.addWidget(self.lbl_attenuation_hint)
-        left_layout.addStretch()
-        
-        # Right column: Secondary stimulus (dual stimulation widget)
-        self.dual_stim_widget = getattr(self, "dual_stim_widget", DualStimulationWidget())
-        if not self._dual_stim_signal_connected:
-            self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
-            self._dual_stim_signal_connected = True
-        
-        stim_layout.addWidget(left_col, 1)
-        stim_layout.addWidget(self.dual_stim_widget, 1)
-        
-        # Vertical splitter for resizable stim preview
-        stim_splitter = QSplitter(Qt.Orientation.Vertical)
-        stim_splitter.setChildrenCollapsible(False)  # Prevent complete collapse
-        stim_splitter.addWidget(stim_controls_widget)
-        
-        # Bottom section: Real-time stimulus preview (resizable)
-        preview_container = QWidget()
-        preview_layout = QVBoxLayout(preview_container)
-        preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.setSpacing(4)
-        
-        # Preview controls row
-        preview_controls = QHBoxLayout()
-        preview_controls.setSpacing(8)
-        
-        btn_refresh_preview = QPushButton("🔄 Refresh Preview")
-        btn_refresh_preview.setToolTip("Manually refresh stimulus preview with current parameters")
-        btn_refresh_preview.clicked.connect(self._update_stim_preview)
-        btn_refresh_preview.setMaximumWidth(140)
-        
-        self._toggle_conductance = QPushButton("I / g")
-        self._toggle_conductance.setCheckable(True)
-        self._toggle_conductance.setChecked(False)
-        self._toggle_conductance.setToolTip("Toggle between current (I) and conductance (g) view")
-        self._toggle_conductance.setMaximumWidth(60)
-        self._toggle_conductance.clicked.connect(self._update_stim_preview)
-        
-        preview_controls.addWidget(btn_refresh_preview)
-        preview_controls.addWidget(self._toggle_conductance)
-        preview_controls.addStretch()
-        
-        self._stim_preview_plot = pg.PlotWidget(title="Stimulus Protocol Preview")
-        self._stim_preview_plot.setLabel('left', 'Total Input Current')
-        self._stim_preview_plot.setLabel('bottom', 'Time (ms)')
-        self._stim_preview_plot.setBackground('#1E1E2E')
-        self._stim_preview_plot.setMinimumHeight(150)  # Larger minimum for better visibility
-        self._stim_preview_plot.setMaximumHeight(500)  # Allow more space for plot
-        
-        preview_layout.addLayout(preview_controls)
-        preview_layout.addWidget(self._stim_preview_plot)
-        
-        stim_splitter.addWidget(preview_container)
-        stim_splitter.setSizes([250, 300])  # Give preview more space initially
-        stim_splitter.setStretchFactor(0, 1)  # Controls get 1x stretch
-        stim_splitter.setStretchFactor(1, 2)  # Preview gets 2x stretch
-        
-        stim_main_layout.addWidget(stim_splitter)
-        
-        stim_scroll.setWidget(stim_studio_widget)
-        stim_outer_layout.addWidget(stim_scroll)
-        
-        self.tabs.addTab(stim_studio_widget_outer, "2) Stimulation Studio")
-
-        # ── Tab 2: Oscilloscope ───────────────────────────────────────
-        # Step 3: Oscilloscope
+        # ── Central Widget: Oscilloscope ────────────────────────────
         self.oscilloscope = OscilloscopeWidget()
         self.oscilloscope.delay_target_changed.connect(self._on_delay_target_changed)
         self._delay_target_name, self._delay_custom_index = (
             self.oscilloscope.get_delay_target_selection()
         )
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
-        self.tabs.addTab(self.oscilloscope, "3) Oscilloscope")
+        self._main_layout.addWidget(self.oscilloscope, 1)
 
-        # ── Tab 3: Analytics ──────────────────────────────────────────
-        # Step 4: Analytics
+        # ── Dock 1: Parameters (Left) ───────────────────────────────
+        self._dock_params = QDockWidget("Parameters", self)
+        self._dock_params.setObjectName("dock_params")
+        self._dock_params.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | 
+            Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        
+        self._sidebar_frame = QFrame()
+        self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._sidebar_frame.setMinimumWidth(320)
+        self._sidebar_frame.setMaximumWidth(520)
+        self._build_sidebar_panel()
+        self._dock_params.setWidget(self._sidebar_frame)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_params)
+        self.tab_params = self._sidebar_frame  # backward compat
+
+        # ── Dock 2: Live Control Deck (Right) ───────────────────────
+        self._dock_live = QDockWidget("🎛️ Live Controls", self)
+        self._dock_live.setObjectName("dock_live")
+        self._dock_live.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | 
+            Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        
+        self._live_deck_frame = QFrame()
+        self._live_deck_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._build_live_deck_panel()
+        self._dock_live.setWidget(self._live_deck_frame)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock_live)
+
+        # ── Dock 3: Analytics (Bottom) ─────────────────────────────
+        self._dock_analytics = QDockWidget("Analytics", self)
+        self._dock_analytics.setObjectName("dock_analytics")
+        self._dock_analytics.setAllowedAreas(
+            Qt.DockWidgetArea.TopDockWidgetArea |
+            Qt.DockWidgetArea.BottomDockWidgetArea |
+            Qt.DockWidgetArea.LeftDockWidgetArea |
+            Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        
         analytics_container = QWidget()
         analytics_layout = QVBoxLayout(analytics_container)
         analytics_layout.setContentsMargins(0, 0, 0, 0)
@@ -736,7 +635,7 @@ class MainWindow(QMainWindow):
         self.analytics = AnalyticsWidget()
         analytics_layout.addWidget(self.analytics)
         
-        # Collapsible Session Notes
+        # Session notes (collapsible)
         notes_group = QWidget()
         notes_layout = QVBoxLayout(notes_group)
         notes_layout.setContentsMargins(8, 0, 8, 8)
@@ -769,60 +668,211 @@ class MainWindow(QMainWindow):
         notes_layout.addWidget(self.session_notes)
         analytics_layout.addWidget(notes_group)
         
-        self.tabs.addTab(analytics_container, "4) Analytics")
-        
-        # Connect oscilloscope time_highlighted to analytics for linked cursors
-        self.oscilloscope.time_highlighted.connect(self.analytics.highlight_time)
+        self._dock_analytics.setWidget(analytics_container)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._dock_analytics)
 
-        # ── Tab 4: Topology ───────────────────────────────────────────
-        # Step 5: Topology
+        # Connect oscilloscope to analytics
+        self.oscilloscope.time_highlighted.connect(self.analytics.highlight_time)
+        
+        # v12.2: Connect LLE compute request to full simulation rerun
+        self.analytics.computeLleRequested.connect(self._run_with_lle_enabled)
+
+        # ── Dock 4: Topology (Right, tabbed with Live Controls) ───────
+        self._dock_topology = QDockWidget("Topology", self)
+        self._dock_topology.setObjectName("dock_topology")
+        self._dock_topology.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | 
+            Qt.DockWidgetArea.RightDockWidgetArea |
+            Qt.DockWidgetArea.TopDockWidgetArea |
+            Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        
         self.topology = TopologyWidget()
         self.topology.set_delay_focus(
             self._delay_target_name,
             self._delay_custom_index,
         )
-        self.tabs.addTab(self.topology,     "5) Topology")
+        self._dock_topology.setWidget(self.topology)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock_topology)
+        
+        # Tabify Topology with Live Controls
+        self.tabifyDockWidget(self._dock_live, self._dock_topology)
 
-        # ── Bi-directional time sync between Oscilloscope and Topology ──
-        # Oscilloscope crosshair -> Topology heatmap update
+        # Bi-directional time sync
         self.oscilloscope.time_highlighted.connect(self.topology.highlight_time)
-        # Topology time slider -> Oscilloscope vertical marker line
         self.topology.time_scrubbed.connect(self.oscilloscope.set_time_marker)
-        # Topology compartment click -> Oscilloscope delay target
         self.topology.compartment_selected.connect(self.oscilloscope.set_delay_compartment)
 
-        # ── Tab 5: Axon Biophysics ───────────────────────────────────
-        # Step 6: Axon Biophysics
-        self.axon_biophysics = AxonBiophysicsWidget()
-        self.tabs.addTab(self.axon_biophysics, "6) Axon Biophysics")
+        # ── Dock 5: Stimulation Studio (Floating/Left) ───────────────
+        self._dock_stim = QDockWidget("Stimulation Studio", self)
+        self._dock_stim.setObjectName("dock_stim")
+        self._dock_stim.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        
+        stim_container = QWidget()
+        stim_layout = QVBoxLayout(stim_container)
+        stim_layout.setContentsMargins(0, 0, 0, 0)
+        stim_layout.setSpacing(0)
+        
+        stim_scroll = QScrollArea()
+        stim_scroll.setWidgetResizable(True)
+        stim_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        stim_scroll.setStyleSheet("QScrollArea { background: #1E1E2E; }")
+        
+        stim_content = self._build_stimulation_studio()
+        stim_scroll.setWidget(stim_content)
+        stim_layout.addWidget(stim_scroll)
+        
+        self._dock_stim.setWidget(stim_container)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_stim)
+        self._dock_stim.setFloating(True)
+        self._dock_stim.move(self.x() + 100, self.y() + 100)
+        self._dock_stim.resize(900, 700)
 
-        # ── Tab 6: Guide ──────────────────────────────────────────────
-        # Step 7: Guide
+        # ── Dock 6: Axon Biophysics (Tabbed with Stimulation) ───────
+        self._dock_axon = QDockWidget("Axon Biophysics", self)
+        self._dock_axon.setObjectName("dock_axon")
+        self._dock_axon.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        
+        self.axon_biophysics = AxonBiophysicsWidget()
+        self._dock_axon.setWidget(self.axon_biophysics)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_axon)
+        self.tabifyDockWidget(self._dock_stim, self._dock_axon)
+
+        # ── Dock 7: Guide (Tabbed) ───────────────────────────────────
+        self._dock_guide = QDockWidget("Guide", self)
+        self._dock_guide.setObjectName("dock_guide")
+        self._dock_guide.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        
         from PySide6.QtWidgets import QTextBrowser
         self.guide_browser = QTextBrowser()
         self.guide_browser.setOpenExternalLinks(True)
         self.guide_browser.setStyleSheet(
             "background:#0D1117; color:#C9D1D9; font-size:13px; border:none;"
         )
-        self.tabs.addTab(self.guide_browser, "7) Guide")
+        self._dock_guide.setWidget(self.guide_browser)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock_guide)
+        self.tabifyDockWidget(self._dock_live, self._dock_guide)
 
-        # ── Main splitter: sidebar | tabs ────────────────────────────
-        self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._main_splitter.setChildrenCollapsible(False)  # Prevent complete collapse
-        self._main_splitter.setHandleWidth(6)
-        self._main_splitter.addWidget(self._sidebar_frame)
-        self._main_splitter.addWidget(self.tabs)
-        # Use smaller initial sizes for laptop screens
-        self._main_splitter.setSizes([350, 800])
-        self._main_splitter.setStretchFactor(0, 0)
-        self._main_splitter.setStretchFactor(1, 1)
-        self._main_layout.addWidget(self._main_splitter, stretch=1)
+        # Raise Live Controls and Oscilloscope to front
+        self._dock_live.raise_()
+        self.oscilloscope.raise_()
 
-        # Pass form widgets to ConfigManager for sync operations
+        # Pass form widgets to ConfigManager
         self.config_manager.set_dual_stim_widget(self.dual_stim_widget)
         self.config_manager.set_form_widgets(
             self.form_stim, self.form_stim_loc, self.form_preset_modes
         )
+        self._apply_layout_preset("Laptop", resize_window=False)
+
+    def _build_more_actions_menu(self):
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        actions = [
+            ("Stochastic", lambda: self.btn_stoch.click()),
+            ("Sweep", lambda: self.btn_sweep.click()),
+            ("f-I Curve", lambda: self.btn_fi.click()),
+            ("S-D Curve", lambda: self.btn_sd.click()),
+            ("Excitability Map", lambda: self.btn_excmap.click()),
+            ("Export NeuroML", lambda: self.btn_export_nml.click()),
+            ("Open Stimulation Studio", lambda: self._dock_stim.setVisible(True)),
+        ]
+        for label, callback in actions:
+            action = menu.addAction(label)
+            action.triggered.connect(callback)
+        self.btn_more_actions.setMenu(menu)
+
+    def _set_secondary_actions_visible(self, visible: bool) -> None:
+        for widget in (
+            self.btn_stoch,
+            self.btn_sweep,
+            self.btn_fi,
+            self.btn_sd,
+            self.btn_excmap,
+            self.btn_export_nml,
+        ):
+            widget.setVisible(visible)
+        self.btn_more_actions.setVisible(not visible)
+
+    def _sync_preset_combo_text(self, text: str) -> None:
+        for combo in (self.combo_presets, getattr(self, "_sidebar_preset_combo", None)):
+            if combo is None:
+                continue
+            if combo.findText(text) < 0:
+                combo.addItem(text)
+            combo.blockSignals(True)
+            combo.setCurrentText(text)
+            combo.blockSignals(False)
+
+    def _restore_session_or_default(self) -> None:
+        if os.path.exists(".last_session.json") and self.config_manager.load_config_from(".last_session.json"):
+            self.config = self.config_manager.config
+            self._sync_preset_combo_text(self.config_manager.current_preset_name or "Custom Config")
+            self._refresh_all_forms()
+            self._sync_hines_button_state()
+            self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
+            self.topology.draw_neuron(self.config_manager.config)
+            self._status("Restored previous session as custom configuration.")
+            return
+        self.load_preset("A: Squid Giant Axon (HH 1952)")
+
+    def _restore_or_reset_dock_layout(self) -> None:
+        restored = False
+        if self._can_restore_ui_state():
+            try:
+                with open(".dock_geometry.bin", "rb") as f:
+                    self.restoreGeometry(f.read())
+                with open(".dock_state.bin", "rb") as f:
+                    restored = bool(self.restoreState(f.read()))
+            except Exception as exc:
+                logger.warning("Failed to restore dock state: %s", exc)
+                restored = False
+        if not restored:
+            self._reset_dock_layout()
+        self._ensure_usable_layout()
+
+    def _can_restore_ui_state(self) -> bool:
+        if self._is_headless_qt_platform():
+            return False
+        required = (".dock_geometry.bin", ".dock_state.bin", ".ui_state_meta.json")
+        if not all(os.path.exists(path) for path in required):
+            return False
+        try:
+            import json
+            with open(".ui_state_meta.json", "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            return (
+                meta.get("version") == 1
+                and meta.get("layout_engine") == "dock-shell-v1"
+                and meta.get("qt_platform") not in {"offscreen", "minimal"}
+            )
+        except Exception as exc:
+            logger.warning("Ignoring invalid UI state metadata: %s", exc)
+            return False
+
+    def _is_headless_qt_platform(self) -> bool:
+        platform = ""
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                platform = QApplication.platformName()
+            except Exception:
+                platform = ""
+        platform = platform or os.environ.get("QT_QPA_PLATFORM", "")
+        return platform.lower() in {"offscreen", "minimal"}
+
+    def _ensure_usable_layout(self) -> None:
+        self._apply_layout_preset(preset_for_width(max(1, self.width())).name, resize_window=False)
+        if hasattr(self, "_dock_params"):
+            self._dock_params.setVisible(True)
+            self._dock_params.raise_()
+        if hasattr(self, "_dock_analytics"):
+            self._dock_analytics.setVisible(True)
+        if self.centralWidget() is not getattr(self, "_central_shell", None):
+            self.setCentralWidget(self._central_shell)
+        if self.oscilloscope.parent() is None:
+            self._main_layout.addWidget(self.oscilloscope, 1)
+        self.oscilloscope.raise_()
 
     def _build_sidebar_panel(self):
         """Build the collapsible left parameter panel (replaces old '1) Setup' tab)."""
@@ -848,57 +898,18 @@ class MainWindow(QMainWindow):
         quickset_row.addWidget(self._quickset_combo, 1)
         layout.addLayout(quickset_row)
 
-        # ── Live Control Deck (Step 2) ─────────────────────────────────
-        deck = QGroupBox("🎛️ Live Control Deck")
-        deck_layout = QVBoxLayout(deck)
-        deck_layout.setSpacing(6)
-        deck_layout.setContentsMargins(6, 10, 6, 6)
-        deck.setStyleSheet("QGroupBox { font-weight:bold; color:#89B4FA; }")
-
-        for row_i, default_param in enumerate(('stim.Iext', 'channels.gNa_max', 'env.T_celsius')):
-            row_w = QWidget()
-            row_h = QHBoxLayout(row_w)
-            row_h.setContentsMargins(0, 0, 0, 0)
-            row_h.setSpacing(4)
-
-            combo = QComboBox()
-            combo.setEditable(True)
-            combo.addItems(_LIVE_PARAM_SUGGESTIONS)
-            combo.setCurrentText(default_param)
-            combo.setFixedWidth(120)
-            combo.currentTextChanged.connect(
-                lambda _text, ri=row_i: self._on_live_combo_changed(ri)
-            )
-            self._live_combos.append(combo)
-
-            slider = QSlider(Qt.Orientation.Horizontal)
-            slider.setRange(0, _LIVE_SLIDER_STEPS)
-            slider.setValue(self._val_to_live_slider(default_param, row_i))
-            slider.valueChanged.connect(
-                lambda raw, ri=row_i: self._on_live_slider_moved(ri, raw)
-            )
-            self._live_sliders.append(slider)
-
-            # Get current value for label using path resolution
-            obj, attr = self._resolve_param(default_param)
-            if obj is not None and attr is not None:
-                cur_val = getattr(obj, attr)
-            elif default_param in _LIVE_PARAMS:
-                lo, hi, _, getter = _LIVE_PARAMS[default_param]
-                cur_val = getter(self.config_manager.config)
-            else:
-                cur_val = self.config_manager.config.stim.Iext
-            lbl = QLabel(f"{cur_val:.2f}")
-            lbl.setFixedWidth(52)
-            lbl.setStyleSheet("color:#CBA6F7; font-size:11px;")
-            self._live_labels.append(lbl)
-
-            row_h.addWidget(combo)
-            row_h.addWidget(slider, 1)
-            row_h.addWidget(lbl)
-            deck_layout.addWidget(row_w)
-
-        layout.addWidget(deck)
+        ux_row = QHBoxLayout()
+        ux_row.addWidget(QLabel("Filter:"))
+        self._form_search = QLineEdit()
+        self._form_search.setPlaceholderText("Search parameters")
+        self._form_search.textChanged.connect(self._apply_form_ux_filters)
+        ux_row.addWidget(self._form_search, 1)
+        self._form_priority = QComboBox()
+        self._form_priority.addItems(["all", "critical", "basic", "advanced"])
+        self._form_priority.setCurrentText("basic")
+        self._form_priority.currentTextChanged.connect(self._apply_form_ux_filters)
+        ux_row.addWidget(self._form_priority)
+        layout.addLayout(ux_row)
 
         # ── Params hint ───────────────────────────────────────────────
         self.lbl_params_hint = QLabel("")
@@ -1065,19 +1076,265 @@ class MainWindow(QMainWindow):
         scroll.setWidget(content)
         layout.addWidget(scroll)
 
+    def _build_live_deck_panel(self):
+        """Build the Live Control Deck panel (now separate dock)."""
+        # Safety check: _live_deck_frame must exist (created in _setup_cockpit)
+        if not hasattr(self, '_live_deck_frame') or self._live_deck_frame is None:
+            raise RuntimeError("_build_live_deck_panel called before _live_deck_frame initialization")
+        layout = QVBoxLayout(self._live_deck_frame)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+
+        header = QLabel("🎛️ Live Parameter Controls")
+        header.setStyleSheet("font-weight: bold; color: #89B4FA; font-size: 13px;")
+        layout.addWidget(header)
+
+        self._live_combos.clear()
+        self._live_sliders.clear()
+        self._live_labels.clear()
+
+        for row_i, default_param in enumerate(('stim.Iext', 'channels.gNa_max', 'env.T_celsius')):
+            row_w = QWidget()
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            row_h.setSpacing(4)
+
+            combo = QComboBox()
+            combo.setEditable(True)
+            combo.addItems(_LIVE_PARAM_SUGGESTIONS)
+            combo.setCurrentText(default_param)
+            combo.setFixedWidth(120)
+            combo.currentTextChanged.connect(
+                lambda _text, ri=row_i: self._on_live_combo_changed(ri)
+            )
+            self._live_combos.append(combo)
+
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, _LIVE_SLIDER_STEPS)
+            slider.setValue(self._val_to_live_slider(default_param, row_i))
+            slider.valueChanged.connect(
+                lambda raw, ri=row_i: self._on_live_slider_moved(ri, raw)
+            )
+            self._live_sliders.append(slider)
+
+            obj, attr = self._resolve_param(default_param)
+            if obj is not None and attr is not None:
+                cur_val = getattr(obj, attr)
+            elif default_param in _LIVE_PARAMS:
+                lo, hi, _, getter = _LIVE_PARAMS[default_param]
+                cur_val = getter(self.config_manager.config)
+            else:
+                cur_val = self.config_manager.config.stim.Iext
+            lbl = QLabel(f"{cur_val:.2f}")
+            lbl.setFixedWidth(52)
+            lbl.setStyleSheet("color:#CBA6F7; font-size:11px;")
+            self._live_labels.append(lbl)
+
+            row_h.addWidget(combo)
+            row_h.addWidget(slider, 1)
+            row_h.addWidget(lbl)
+            layout.addWidget(row_w)
+
+        layout.addStretch()
+
+    def _build_stimulation_studio(self) -> QWidget:
+        """Build Stimulation Studio content widget."""
+        stim_studio_widget = QWidget()
+        stim_main_layout = QVBoxLayout(stim_studio_widget)
+        stim_main_layout.setSpacing(6)
+        stim_main_layout.setContentsMargins(4, 4, 4, 4)
+
+        stim_controls_widget = QWidget()
+        stim_layout = QHBoxLayout(stim_controls_widget)
+        stim_layout.setSpacing(10)
+        stim_layout.setContentsMargins(0, 0, 0, 0)
+
+        left_col = QWidget()
+        left_layout = QVBoxLayout(left_col)
+        left_layout.setSpacing(6)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        if not hasattr(self, 'form_stim'):
+            self.form_stim = StimFormWithUnits(
+                self.config_manager.config.stim,
+                self.config_manager.config.morphology.d_soma,
+                on_change=self._on_stim_field_changed,
+            )
+        if not hasattr(self, 'form_stim_loc'):
+            self.form_stim_loc = PydanticFormWidget(
+                self.config_manager.config.stim_location,
+                "Stimulus Location",
+                on_change=self._on_stim_loc_field_changed,
+            )
+        if not hasattr(self, 'form_dfilter'):
+            self.form_dfilter = PydanticFormWidget(
+                self.config_manager.config.dendritic_filter,
+                "Dendritic Filter",
+                on_change=self._on_dfilter_field_changed,
+            )
+
+        self.lbl_attenuation_hint = QLabel("")
+        self.lbl_attenuation_hint.setStyleSheet("color: #6C7086; font-size: 11px; padding: 4px;")
+        self.lbl_attenuation_hint.setWordWrap(True)
+
+        left_layout.addWidget(self.form_stim)
+        left_layout.addWidget(self.form_stim_loc)
+        left_layout.addWidget(self.form_dfilter)
+        left_layout.addWidget(self.lbl_attenuation_hint)
+        left_layout.addStretch()
+
+        self.dual_stim_widget = getattr(self, "dual_stim_widget", DualStimulationWidget())
+        if not self._dual_stim_signal_connected:
+            self.dual_stim_widget.config_changed.connect(self._on_dual_stim_config_changed)
+            self._dual_stim_signal_connected = True
+
+        stim_layout.addWidget(left_col, 1)
+        stim_layout.addWidget(self.dual_stim_widget, 1)
+
+        stim_splitter = QSplitter(Qt.Orientation.Vertical)
+        stim_splitter.setChildrenCollapsible(False)
+        stim_splitter.addWidget(stim_controls_widget)
+
+        preview_container = QWidget()
+        preview_layout = QVBoxLayout(preview_container)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(4)
+
+        preview_controls = QHBoxLayout()
+        preview_controls.setSpacing(8)
+
+        btn_refresh_preview = QPushButton("🔄 Refresh Preview")
+        btn_refresh_preview.setToolTip("Manually refresh stimulus preview")
+        btn_refresh_preview.clicked.connect(self._update_stim_preview)
+        btn_refresh_preview.setMaximumWidth(140)
+
+        self._toggle_conductance = QPushButton("I / g")
+        self._toggle_conductance.setCheckable(True)
+        self._toggle_conductance.setChecked(False)
+        self._toggle_conductance.setToolTip("Toggle between current and conductance view")
+        self._toggle_conductance.setMaximumWidth(60)
+        self._toggle_conductance.clicked.connect(self._update_stim_preview)
+
+        preview_controls.addWidget(btn_refresh_preview)
+        preview_controls.addWidget(self._toggle_conductance)
+        preview_controls.addStretch()
+
+        self._stim_preview_plot = pg.PlotWidget(title="Stimulus Protocol Preview")
+        self._stim_preview_plot.setLabel('left', 'Total Input Current')
+        self._stim_preview_plot.setLabel('bottom', 'Time (ms)')
+        self._stim_preview_plot.setBackground('#1E1E2E')
+        self._stim_preview_plot.setMinimumHeight(150)
+
+        preview_layout.addLayout(preview_controls)
+        preview_layout.addWidget(self._stim_preview_plot)
+
+        stim_splitter.addWidget(preview_container)
+        stim_splitter.setSizes([250, 300])
+        stim_splitter.setStretchFactor(0, 1)
+        stim_splitter.setStretchFactor(1, 2)
+
+        stim_main_layout.addWidget(stim_splitter)
+
+        return stim_studio_widget
+
+    def _setup_view_menu(self):
+        """Create View menu with dock toggle actions."""
+        menubar = self.menuBar()
+        view_menu = menubar.addMenu("View")
+
+        docks = [
+            ("Parameters", getattr(self, '_dock_params', None)),
+            ("Live Controls", getattr(self, '_dock_live', None)),
+            ("Analytics", getattr(self, '_dock_analytics', None)),
+            ("Topology", getattr(self, '_dock_topology', None)),
+            ("Stimulation Studio", getattr(self, '_dock_stim', None)),
+            ("Axon Biophysics", getattr(self, '_dock_axon', None)),
+            ("Guide", getattr(self, '_dock_guide', None)),
+        ]
+
+        for name, dock in docks:
+            if dock is not None:
+                action = dock.toggleViewAction()
+                action.setText(name)
+                view_menu.addAction(action)
+
+        view_menu.addSeparator()
+
+        reset_action = QAction("Reset Layout", self)
+        reset_action.triggered.connect(self._reset_dock_layout)
+        view_menu.addAction(reset_action)
+
+        view_menu.addSeparator()
+        for preset_name in ("Laptop", "Desktop", "Presentation", "Debug"):
+            action = QAction(f"{preset_name} Layout", self)
+            action.triggered.connect(
+                lambda _checked=False, name=preset_name: self._apply_layout_preset(name)
+            )
+            view_menu.addAction(action)
+
+    def _reset_dock_layout(self):
+        """Reset dock layout to default state."""
+        # Main docks
+        if hasattr(self, '_dock_params'):
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_params)
+            self._dock_params.setVisible(True)
+        if hasattr(self, '_dock_live'):
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock_live)
+            self._dock_live.setVisible(True)
+        if hasattr(self, '_dock_analytics'):
+            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._dock_analytics)
+            self._dock_analytics.setVisible(True)
+        # Tabify right side: Live Controls + Topology + Guide
+        if hasattr(self, '_dock_topology') and hasattr(self, '_dock_live'):
+            self.tabifyDockWidget(self._dock_live, self._dock_topology)
+            self._dock_topology.setVisible(True)
+        if hasattr(self, '_dock_guide') and hasattr(self, '_dock_live'):
+            self.tabifyDockWidget(self._dock_live, self._dock_guide)
+            self._dock_guide.setVisible(True)
+        # Floating docks: Stimulation Studio + Axon Biophysics (tabbed together)
+        if hasattr(self, '_dock_stim'):
+            self._dock_stim.setFloating(True)
+            self._dock_stim.move(self.x() + 100, self.y() + 100)
+            self._dock_stim.resize(900, 700)
+            self._dock_stim.setVisible(True)
+        if hasattr(self, '_dock_axon') and hasattr(self, '_dock_stim'):
+            self.tabifyDockWidget(self._dock_stim, self._dock_axon)
+            self._dock_axon.setVisible(True)
+
+    def _apply_layout_preset(self, preset_name: str, *, resize_window: bool = True) -> None:
+        preset = LAYOUT_PRESETS.get(preset_name, LAYOUT_PRESETS["Laptop"])
+        if resize_window:
+            self.resize(preset.width, preset.height)
+        if hasattr(self, "_sidebar_frame"):
+            self._sidebar_frame.setMaximumWidth(preset.sidebar_max_width)
+        self._set_secondary_actions_visible(preset.show_secondary_actions)
+        if hasattr(self, "_dock_stim"):
+            self._dock_stim.setFloating(preset.float_stimulation)
+            self._dock_stim.setVisible(preset.float_stimulation)
+            if preset.float_stimulation:
+                self._dock_stim.resize(900, 700)
+        if hasattr(self, "_dock_axon"):
+            self._dock_axon.setVisible(preset.float_stimulation)
+        if hasattr(self, "_dock_live"):
+            self._dock_live.setVisible(True)
+        if hasattr(self, "_dock_topology"):
+            self._dock_topology.setVisible(preset.name != "Laptop")
+        if hasattr(self, "_sb"):
+            self._status(f"{preset.name} layout")
+
     def _toggle_ui_complexity(self, mode: str):
         """Toggle UI complexity based on experience mode.
         
-        Microscope: Simplified for students - hide topology/axon tabs, hide morphology/analysis groups, force single-comp
+        Microscope: Simplified for students - hide topology/axon docks, hide morphology/analysis groups, force single-comp
         Bridge: Full functionality
         Research: Future SWC/Network support (identical to Bridge for now)
         """
         if mode == "🔬 Microscope":
-            # Hide topology and axon biophysics tabs
-            for i in range(self.tabs.count()):
-                tab_text = self.tabs.tabText(i)
-                if "Topology" in tab_text or "Axon Biophysics" in tab_text:
-                    self.tabs.setTabVisible(i, False)
+            # Hide topology and axon biophysics docks
+            if hasattr(self, '_dock_topology'):
+                self._dock_topology.setVisible(False)
+            if hasattr(self, '_dock_axon'):
+                self._dock_axon.setVisible(False)
             
             # Hide morphology and analysis groups in sidebar
             if hasattr(self, 'grp_morph'):
@@ -1090,9 +1347,12 @@ class MainWindow(QMainWindow):
             self._refresh_all_forms()
             
         elif mode == "🌉 Bridge":
-            # Show all tabs
-            for i in range(self.tabs.count()):
-                self.tabs.setTabVisible(i, True)
+            # Show all docks
+            for dock_name in ('_dock_params', '_dock_live', '_dock_analytics', 
+                              '_dock_topology', '_dock_stim', '_dock_axon', '_dock_guide'):
+                dock = getattr(self, dock_name, None)
+                if dock:
+                    dock.setVisible(True)
             
             # Show all sidebar groups
             if hasattr(self, 'grp_morph'):
@@ -1101,9 +1361,12 @@ class MainWindow(QMainWindow):
                 self.grp_ana.setVisible(True)
             
         elif mode == "🧪 Research":
-            # Identical to Bridge for now (future SWC/Network tabs)
-            for i in range(self.tabs.count()):
-                self.tabs.setTabVisible(i, True)
+            # Identical to Bridge for now (future SWC/Network support)
+            for dock_name in ('_dock_params', '_dock_live', '_dock_analytics',
+                              '_dock_topology', '_dock_stim', '_dock_axon', '_dock_guide'):
+                dock = getattr(self, dock_name, None)
+                if dock:
+                    dock.setVisible(True)
             
             if hasattr(self, 'grp_morph'):
                 self.grp_morph.setVisible(True)
@@ -1204,6 +1467,28 @@ class MainWindow(QMainWindow):
                 "This field drives both the top SWEEP button and the dedicated f-I run."
             )
             self._sweep_param_combo.setStyleSheet("")
+
+    def _apply_form_ux_filters(self, *_args):
+        search = self._form_search.text() if hasattr(self, "_form_search") else ""
+        priority = self._form_priority.currentText() if hasattr(self, "_form_priority") else "all"
+        for form in (
+            getattr(self, "form_stim", None),
+            getattr(self, "form_stim_loc", None),
+            getattr(self, "form_dfilter", None),
+            getattr(self, "form_preset_modes", None),
+            getattr(self, "form_chan", None),
+            getattr(self, "form_calcium", None),
+            getattr(self, "form_metabolism", None),
+            getattr(self, "form_morph", None),
+            getattr(self, "form_env", None),
+            getattr(self, "form_ana", None),
+        ):
+            if form is None:
+                continue
+            if hasattr(form, "set_search_filter"):
+                form.set_search_filter(search)
+            if hasattr(form, "set_priority_filter"):
+                form.set_priority_filter(priority)
 
     def _on_sweep_param_changed(self, text: str):
         self.config_manager.config.analysis.sweep_param = self._canonical_sweep_param(text)
@@ -1437,12 +1722,19 @@ class MainWindow(QMainWindow):
             "zap_f1_hz": show_zap,
         }
         for field_name, is_visible in visibility.items():
+            if hasattr(self.form_stim, "hidden_fields"):
+                if is_visible:
+                    self.form_stim.hidden_fields.discard(field_name)
+                else:
+                    self.form_stim.hidden_fields.add(field_name)
             w = stim_fields.get(field_name)
             l = labels.get(field_name)
             if w is not None:
                 w.setVisible(is_visible)
             if l is not None:
                 l.setVisible(is_visible)
+        if hasattr(self.form_stim, "_apply_visibility_filters"):
+            self.form_stim._apply_visibility_filters()
 
     def _on_morph_field_changed(self, field_name: str, _value):
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
@@ -1453,6 +1745,7 @@ class MainWindow(QMainWindow):
             self.form_stim.update_soma_diameter(self.config_manager.config.morphology.d_soma)
         self._refresh_topology_preview()
         self._update_stim_preview()
+        # Sync live deck to reflect morphology changes (e.g., diameter affects current density)
         self._sync_live_deck_to_config()
 
     def _on_stim_field_changed(self, field_name: str, value):
@@ -1493,11 +1786,12 @@ class MainWindow(QMainWindow):
                 if cfg.stim.pulse_dur < 1:
                     cfg.stim.pulse_dur = 50.0  # Standard synaptic input duration
             
-            self._sync_stim_type_controls()
             self.form_stim.refresh()
+            self._sync_stim_type_controls()
         if field_name in {"Iext", "stim_type"}:
             self.lbl_params_hint.setText(self.config_manager.get_hint_text())
             self.form_stim.refresh()
+            self._sync_stim_type_controls()
         if field_name == "t_sim":
             # t_sim change requires updating stim preview with new time range
             self._update_stim_preview()
@@ -1641,10 +1935,16 @@ class MainWindow(QMainWindow):
             return
         # Keep both preset combos in sync without re-firing
         for combo in (self.combo_presets, getattr(self, '_sidebar_preset_combo', None)):
-            if combo is not None and combo.currentText() != name:
-                combo.blockSignals(True)
-                combo.setCurrentText(name)
-                combo.blockSignals(False)
+            if combo is None:
+                continue
+            try:
+                if combo.currentText() != name:
+                    combo.blockSignals(True)
+                    combo.setCurrentText(name)
+                    combo.blockSignals(False)
+            except RuntimeError:
+                # Qt C++ object was deleted - skip this combo
+                pass
         self.config_manager.load_preset(name)
         self.config_manager.auto_select_jacobian_for_preset()
         self._sync_hines_button_state()
@@ -1665,28 +1965,6 @@ class MainWindow(QMainWindow):
             delay_custom_index=self._delay_custom_index,
         )
         self._status(f"Preset applied: {name}{self.config_manager.active_mode_suffix()}")
-
-    def closeEvent(self, event):
-        """Save session state on application exit."""
-        try:
-            import os
-            self.config_manager.save_config_as(".last_session.json")
-        except Exception:
-            pass
-        super().closeEvent(event)
-
-    def _refresh_all_forms(self):
-        for form in (self.form_morph, self.form_env, self.form_chan,
-                     self.form_calcium, self.form_metabolism, self.form_stim, self.form_stim_loc,
-                     self.form_dfilter, self.form_ana, self.form_preset_modes):
-            form.refresh()
-        # Update soma diameter in stim form after refresh in case morphology changed
-        if hasattr(self.form_stim, 'update_soma_diameter'):
-            self.form_stim.update_soma_diameter(self.config_manager.config.morphology.d_soma)
-        self.lbl_params_hint.setText(self.config_manager.get_hint_text())
-        self._sync_stim_type_controls()
-        self._sync_preset_mode_controls()
-        self._sync_live_deck_to_config()
 
     def _sync_live_deck_to_config(self):
         """Sync all live deck sliders/labels to reflect the current config values."""
@@ -1790,106 +2068,62 @@ class MainWindow(QMainWindow):
             self._stim_preview_plot.addItem(error_text)
 
     def _on_find_threshold_clicked(self):
-        """Run Auto-Rheobase Search using binary search algorithm with visualization.
+        """v13.0: Run Auto-Rheobase Search using non-blocking async worker.
 
-        Runs up to 10 mini-simulations (50ms each) to find the absolute
-        minimum I_ext required to trigger a single spike.
-        Includes convergence visualization and search tree display.
+        Previously ran on main thread, freezing UI. Now uses SimulationController
+        worker with progress updates. UI remains responsive during search.
         """
-        from core.analysis import detect_spikes
-        from copy import deepcopy
-        import numpy as np
-
         self._lbl_rheobase_result.setText("🔍 Searching for threshold...")
         self._status("Running Auto-Rheobase Search...")
-        QApplication.processEvents()
+        self._lock_ui(True)  # Lock UI during search
 
-        # Initialize visualization
-        search_history = []  # [(I_low, I_high, I_mid, has_spike), ...]
+        def on_progress(message, data):
+            """Update UI with progress from worker thread (via signal)."""
+            self._lbl_rheobase_result.setText(f"🔍 {message}")
+            if data.get('phase') == 2:
+                self._status(f"Auto-Rheobase: iter {data['iteration']}, I={data['I_mid']:.2f}")
 
-        # Binary search bounds (µA/cm²)
-        I_low = 0.0
-        I_high = 100.0
+        def on_success(result):
+            """Handle completed rheobase search."""
+            I_rheobase = result['I_rheobase']
+            uncertainty = result['uncertainty']
+            search_history = result['search_history']
 
-        # First, find an upper bound that elicits a spike
-        cfg = deepcopy(self.config_manager.config)
-        cfg.stim.t_sim = 50.0  # Short simulation
+            # Build visualization
+            viz_text = self._format_rheobase_visualization(search_history, I_rheobase, uncertainty)
 
-        # Create solver once - expensive operation (builds morphology, validates config)
-        # Only recreate if cfg changes structurally (which it doesn't in this loop)
-        solver = NeuronSolver(cfg)
-
-        self._lbl_rheobase_result.setText("🔍 Phase 1: Finding upper bound...")
-        max_attempts = 10
-        for attempt in range(max_attempts):
-            cfg.stim.Iext = I_high
-            try:
-                result = solver.run_single(cfg)
-                pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
-                if len(spike_times) > 0:
-                    search_history.append((0.0, I_high, I_high, True))
-                    break
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).debug(f"Rheobase search exception: {e}")
-                pass
-            I_high *= 2.0
-            search_history.append((0.0, I_high, I_high, False))
-            if I_high > 1000.0:
-                self._lbl_rheobase_result.setText("❌ Could not find upper bound for rheobase")
-                self._status("Auto-Rheobase Search failed")
-                return
-            self._lbl_rheobase_result.setText(
-                f"🔍 Phase 1: Expanding bound... I_high = {I_high:.1f} µA/cm²"
-            )
-            QApplication.processEvents()
-
-        # Binary search with visualization tracking
-        self._lbl_rheobase_result.setText("🔍 Phase 2: Binary search...")
-        for iteration in range(10):
-            I_mid = (I_low + I_high) / 2.0
-            cfg.stim.Iext = I_mid
-
-            try:
-                result = solver.run_single(cfg)
-                pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
-                has_spike = len(spike_times) > 0
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).debug(f"Rheobase iteration exception: {e}")
-                has_spike = False
-
-            search_history.append((I_low, I_high, I_mid, has_spike))
-
-            if has_spike:
-                I_high = I_mid
+            # Guard against division by zero
+            if abs(I_rheobase) > 1e-9:
+                uncertainty_pct = uncertainty / I_rheobase * 100
+                uncertainty_str = f"{uncertainty_pct:.1f}%"
             else:
-                I_low = I_mid
+                uncertainty_str = "N/A (I_rheobase ≈ 0)"
 
             self._lbl_rheobase_result.setText(
-                f"🔍 Iteration {iteration+1}/10: I = {I_mid:.2f} µA/cm²\n"
-                f"   Range: [{I_low:.2f}, {I_high:.2f}]"
+                f"✅ Rheobase: {I_rheobase:.2f} ± {uncertainty:.2f} µA/cm²\n"
+                f"   Uncertainty: {uncertainty_str}\n\n"
+                f"{viz_text}"
             )
-            self._status(f"Auto-Rheobase: iter {iteration+1}, I={I_mid:.2f}, spike={'YES' if has_spike else 'NO'}")
-            QApplication.processEvents()
+            self._status(f"Auto-Rheobase complete: {I_rheobase:.2f} µA/cm²")
 
-        # Final result
-        I_rheobase = (I_low + I_high) / 2.0
-        uncertainty = (I_high - I_low) / 2.0
+            # Update config
+            self.config_manager.config.stim.Iext = I_rheobase
+            self._refresh_all_forms()
+            self._lock_ui(False)
 
-        # Build visualization text
-        viz_text = self._format_rheobase_visualization(search_history, I_rheobase, uncertainty)
+        def on_error(error_msg):
+            """Handle rheobase search error."""
+            self._lbl_rheobase_result.setText(f"❌ Auto-Rheobase failed: {error_msg}")
+            self._status("Auto-Rheobase Search failed")
+            self._lock_ui(False)
 
-        self._lbl_rheobase_result.setText(
-            f"✅ Rheobase: {I_rheobase:.2f} ± {uncertainty:.2f} µA/cm²\n"
-            f"   Uncertainty: {uncertainty/I_rheobase*100:.1f}%\n\n"
-            f"{viz_text}"
+        # Start async rheobase search
+        self.sim_controller.run_rheobase(
+            self.config_manager.config,
+            on_progress=on_progress,
+            on_success=on_success,
+            on_error=on_error
         )
-        self._status(f"Auto-Rheobase complete: {I_rheobase:.2f} µA/cm²")
-
-        # Update config
-        self.config_manager.config.stim.Iext = I_rheobase
-        self._refresh_all_forms()
 
     def _format_rheobase_visualization(self, history, final_value, uncertainty):
         """Format binary search history as ASCII visualization."""
@@ -1929,74 +2163,47 @@ class MainWindow(QMainWindow):
         self._sidebar_visible = not self._sidebar_visible
     
     def _show_window_size_menu(self):
-        """Show window size preset menu for laptop users."""
+        """Show layout preset menu for laptop-first responsive shell."""
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
-
-        action_desktop = menu.addAction("🖥 Desktop (1400x900)")
-        action_desktop.triggered.connect(lambda: self._set_window_size(1400, 900))
-
-        action_laptop_small = menu.addAction("💻 Laptop Small (1100x700)")
-        action_laptop_small.triggered.connect(lambda: self._set_window_size(1100, 700))
-
-        action_laptop_large = menu.addAction("💻 Laptop Large (1280x800)")
-        action_laptop_large.triggered.connect(lambda: self._set_window_size(1280, 800))
-        
+        for preset_name in ("Laptop", "Presentation", "Desktop", "Debug"):
+            action = menu.addAction(f"{preset_name} Layout")
+            action.triggered.connect(
+                lambda _checked=False, name=preset_name: self._apply_layout_preset(name)
+            )
         menu.addSeparator()
-        
-        action_fullscreen = menu.addAction("⛶ Fullscreen")
+        action_fullscreen = menu.addAction("Fullscreen")
         action_fullscreen.triggered.connect(self._toggle_fullscreen)
-        
         menu.exec(self.btn_window_size.mapToGlobal(self.btn_window_size.rect().bottomLeft()))
-    
+
     def _set_window_size(self, width: int, height: int):
-        """Set window to specified size and adjust splitter sizes for laptop screens."""
+        """Set window size and apply the matching responsive layout preset."""
         self.resize(width, height)
-        
-        # Adjust splitter sizes based on window width
-        if width < 1200:  # Small laptop
-            self._main_splitter.setSizes([280, width - 320])
-            self._sidebar_frame.setMaximumWidth(350)
-        elif width < 1400:  # Large laptop
-            self._main_splitter.setSizes([320, width - 360])
-            self._sidebar_frame.setMaximumWidth(450)
-        else:  # Desktop
-            self._main_splitter.setSizes([350, width - 400])
-            self._sidebar_frame.setMaximumWidth(520)
-        
+        self._apply_layout_preset(preset_for_width(width).name, resize_window=False)
         self._status(f"Window resized to {width}x{height}")
-    
+
     def closeEvent(self, event):
         """Save UI state on close."""
         try:
-            import json
-            import logging
-            logger = logging.getLogger(__name__)
-            
-            self.config_manager.save_config_as(".last_session.json")
-            # Save UI state - check if widgets are still valid before accessing
-            try:
-                splitter_sizes = self._main_splitter.sizes()
-            except:
-                splitter_sizes = []
-            
-            live_deck = []
-            for combo in self._live_combos:
-                try:
-                    if hasattr(combo, 'currentText'):
-                        live_deck.append(combo.currentText())
-                except:
-                    pass  # Widget already deleted, skip
-            
-            ui_state = {
-                "splitter_sizes": splitter_sizes,
-                "live_deck": live_deck
-            }
-            with open(".ui_state.json", "w") as f:
-                json.dump(ui_state, f)
+            if not self._is_headless_qt_platform():
+                self.config_manager.save_config_as(".last_session.json")
+                # Save dock geometry/state only for real desktop sessions. Headless
+                # GUI tests must not poison the next interactive startup.
+                with open(".dock_geometry.bin", "wb") as f:
+                    f.write(self.saveGeometry())
+                with open(".dock_state.bin", "wb") as f:
+                    f.write(self.saveState())
+                import json
+                with open(".ui_state_meta.json", "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "version": 1,
+                            "layout_engine": "dock-shell-v1",
+                            "qt_platform": QApplication.platformName(),
+                        },
+                        f,
+                    )
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"Failed to save UI state on close: {e}")
         super().closeEvent(event)
     
@@ -2010,8 +2217,8 @@ class MainWindow(QMainWindow):
             self._status("Fullscreen mode")
 
     def _reset_layout(self):
-        """Reset splitter sizes to default (350/800)."""
-        self._main_splitter.setSizes([350, 800])
+        """Reset dock layout to default state."""
+        self._reset_dock_layout()
         self._status("Layout reset to default")
 
     def _on_preset_mode_changed(self, _field_name: str, _value):
@@ -2257,8 +2464,11 @@ class MainWindow(QMainWindow):
         # Update only the stim_comp field to avoid breaking focus on other widgets
         self._set_stim_form_value('stim_comp', comp_idx)
         # Sync oscilloscope delay target to clicked compartment
-        self.oscilloscope._combo_delay_target.setCurrentText("Custom Compartment")
-        self.oscilloscope._spin_delay_comp.setValue(comp_idx)
+        try:
+            self.oscilloscope._combo_delay_target.setCurrentText("Custom Compartment")
+            self.oscilloscope._spin_delay_comp.setValue(comp_idx)
+        except RuntimeError:
+            pass  # Qt C++ object was deleted
         self._delay_target_name = "Custom Compartment"
         self._delay_custom_index = comp_idx
         # Redraw topology to move PRI marker
@@ -2277,6 +2487,24 @@ class MainWindow(QMainWindow):
             self.config_manager.config,
             on_success=self._on_simulation_done,
             on_error=self._on_sim_error,
+        )
+
+    def _run_with_lle_enabled(self):
+        """Run simulation with LLE computation enabled (v12.2).
+
+        Triggered by "Compute LLE" button click. Performs full rerun
+        with calc_lle=True for accurate Lyapunov exponent calculation.
+        """
+        self._is_live_run = False
+        self._status("Running simulation with LLE computation...")
+        cfg = self.config_manager.config
+        # Enable LLE in config (stored in stim section, not analysis)
+        cfg.stim.calc_lle = True
+        self.sim_controller.run_single(
+            cfg,
+            on_success=self._on_simulation_done,
+            on_error=self._on_sim_error,
+            compute_lyapunov=True,
         )
 
     def _on_simulation_done(self, result: dict):
@@ -2309,8 +2537,18 @@ class MainWindow(QMainWindow):
                     self.analytics.update_analytics(res)
                     self._lock_ui(False)
                     return
+                # v13.0: Immediate oscilloscope update (fast, 60FPS capable)
                 self.oscilloscope.update_plots(res)
-                self.analytics.update_analytics(res)
+
+                # v13.0: Debounced analytics — restart timer if already running
+                # Increment generation to invalidate stale analytics
+                self._analytics_generation += 1
+                self._pending_analytics_generation = self._analytics_generation
+                self._pending_result_for_analytics = res
+                self._pending_morph_for_analytics = result.get('morph')  # may be None from some paths
+                self._analytics_debounce_timer.stop()
+                self._analytics_debounce_timer.start(300)  # 300ms debounce
+
                 dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
                 self.topology.draw_neuron(
                     self.config_manager.config,
@@ -2333,13 +2571,58 @@ class MainWindow(QMainWindow):
 
             # Only switch to oscilloscope on manual runs, not live timer updates
             if not self._is_live_run:
-                self.tabs.setCurrentWidget(self.oscilloscope)
+                self._dock_analytics.raise_()
+                self.oscilloscope.raise_()
         except Exception as e:
             QMessageBox.critical(self, "Simulation Error", str(e))
             self._status("Error — check parameters.")
         finally:
             self._lock_ui(False)
             self._is_live_run = False  # Reset flag after any simulation completion
+
+    def _on_analytics_debounce_fired(self):
+        """v13.0: Start async analytics after debounce period."""
+        if self._pending_result_for_analytics is None:
+            return
+
+        res = self._pending_result_for_analytics
+        # Capture generation for this analytics run
+        current_generation = self._pending_analytics_generation
+
+        # Build morphology if not already available
+        morph = self._pending_morph_for_analytics
+        if morph is None:
+            from core.morphology import MorphologyBuilder
+            morph = MorphologyBuilder.build(self.config_manager.config)
+
+        # Run analytics in background thread with generation tracking
+        def on_analytics_done_wrapped(stats):
+            """Wrapper to check generation before updating UI."""
+            # Only update if this is still the current generation
+            if current_generation == self._analytics_generation:
+                self._on_analytics_done(stats)
+            else:
+                logger.debug(f"Stale analytics result dropped (gen {current_generation} != {self._analytics_generation})")
+
+        self.sim_controller.run_analytics(
+            res, morph, self.config_manager.config,
+            on_success=on_analytics_done_wrapped,
+            on_error=lambda e: logger.error(f"Analytics error: {e}")
+        )
+
+    def _on_analytics_done(self, stats):
+        """v13.0: Update analytics widget when async analytics completes."""
+        if self._pending_result_for_analytics is None:
+            return
+
+        res = self._pending_result_for_analytics
+        # Clear pending state to prevent double-processing
+        self._pending_result_for_analytics = None
+        self._pending_morph_for_analytics = None
+        # Note: generation is NOT reset here - it's used to detect stale results
+
+        # Update analytics with result AND precomputed stats
+        self.analytics.update_analytics(res, stats)
 
     def _normalize_worker_payload(self, payload):
         """Normalize legacy worker callbacks to the dict payload contract."""
@@ -2362,6 +2645,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'config_manager'):
             return
         self._sync_dual_stim_into_config()
+        if hasattr(self, "form_stim"):
+            self.form_stim.refresh()
+            self._sync_stim_type_controls()
+            self._apply_form_ux_filters()
         self._refresh_topology_preview()
         self._update_stim_preview()
         if self.dual_stim_widget.config.enabled:
@@ -2396,7 +2683,7 @@ class MainWindow(QMainWindow):
     def _on_stoch_done(self, payload):
         self._on_simulation_done(self._normalize_worker_payload(payload))
         self._status("Stochastic run complete.")
-        self.tabs.setCurrentWidget(self.oscilloscope)
+        self.oscilloscope.raise_()
 
     # ─────────────────────────────────────────────────────────────────
     #  3. SWEEP
@@ -2449,7 +2736,7 @@ class MainWindow(QMainWindow):
         self.analytics.update_sweep(results, param_name)
         self._lock_ui(False)
         self._status(f"Sweep complete — {len(results)} steps.")
-        self.tabs.setCurrentWidget(self.analytics)
+        self._dock_analytics.raise_()
 
     # ─────────────────────────────────────────────────────────────────
     #  4. S-D CURVE
@@ -2483,10 +2770,10 @@ class MainWindow(QMainWindow):
         self.analytics.update_sd_curve(sd)
         self._lock_ui(False)
         self._status(
-            f"S-D done — Rheobase={rh:.2f} µA/cmÂ˛  "
+            f"S-D done — Rheobase={rh:.2f} µA/cm²  "
             f"Chronaxie={'—' if tc != tc else f'{tc:.2f} ms'}"
         )
-        self.tabs.setCurrentWidget(self.analytics)
+        self._dock_analytics.raise_()
 
     # ─────────────────────────────────────────────────────────────────
     #  5. EXCITABILITY MAP
@@ -2523,7 +2810,7 @@ class MainWindow(QMainWindow):
         self.analytics.update_excmap(exc)
         self._lock_ui(False)
         self._status("Excitability map complete.")
-        self.tabs.setCurrentWidget(self.analytics)
+        self._dock_analytics.raise_()
 
     # ─────────────────────────────────────────────────────────────────
     #  EXPORT CSV
@@ -2696,6 +2983,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
         if self.config_manager.load_config_from(path):
+            self.config = self.config_manager.config
+            self._sync_preset_combo_text(self.config_manager.current_preset_name or "Custom Config")
             self._refresh_all_forms()
             self._status(f"Configuration loaded from {path}")
             QMessageBox.information(self, "Load Configuration", 
@@ -2725,6 +3014,10 @@ class MainWindow(QMainWindow):
             self.form_preset_modes.refresh()
         self._refresh_sweep_param_ui()
         self._update_attenuation_hint()
+        self._sync_stim_type_controls()
+        self._sync_preset_mode_controls()
+        self._sync_live_deck_to_config()
+        self._apply_form_ux_filters()
 
     def _set_stim_form_value(self, field_name: str, value):
         """Update a single field in the stimulation form without refreshing others.
@@ -2766,18 +3059,22 @@ class MainWindow(QMainWindow):
         key = event.key()
         modifiers = event.modifiers()
         
-        # Tab navigation shortcuts: Ctrl+1..5
+        # Dock focus shortcuts: Ctrl+1..7
         if modifiers == Qt.ControlModifier:
             if key == Qt.Key_1:
-                self.tabs.setCurrentIndex(0)  # Parameters
+                if hasattr(self, '_dock_params'): self._dock_params.raise_()  # Parameters
             elif key == Qt.Key_2:
-                self.tabs.setCurrentIndex(1)  # Oscilloscope
+                self.oscilloscope.raise_()  # Oscilloscope (central)
             elif key == Qt.Key_3:
-                self.tabs.setCurrentIndex(2)  # Analytics
+                if hasattr(self, '_dock_analytics'): self._dock_analytics.raise_()  # Analytics
             elif key == Qt.Key_4:
-                self.tabs.setCurrentIndex(3)  # Topology
+                if hasattr(self, '_dock_topology'): self._dock_topology.raise_()  # Topology
             elif key == Qt.Key_5:
-                self.tabs.setCurrentIndex(4)  # Help
+                if hasattr(self, '_dock_stim'): self._dock_stim.raise_()  # Stimulation
+            elif key == Qt.Key_6:
+                if hasattr(self, '_dock_live'): self._dock_live.raise_()  # Live Controls
+            elif key == Qt.Key_7:
+                if hasattr(self, '_dock_guide'): self._dock_guide.raise_()  # Guide
             elif key == Qt.Key_R:
                 self._on_run_button_clicked()  # Ctrl+R = Run
             elif key == Qt.Key_S:
@@ -2793,7 +3090,7 @@ class MainWindow(QMainWindow):
             elif key == Qt.Key_F11:
                 self._toggle_fullscreen()  # F11 = Fullscreen
             elif key == Qt.Key_F1:
-                self.tabs.setCurrentIndex(4)  # F1 = Help
+                if hasattr(self, '_dock_guide'): self._dock_guide.raise_()  # F1 = Guide
             else:
                 super().keyPressEvent(event)
         else:

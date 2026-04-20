@@ -1,37 +1,105 @@
-"""Branch checks for MainWindow minimum-size constraints (geometry safety)."""
+"""Branch checks for dock-based MainWindow laptop geometry and session restore."""
 
 from __future__ import annotations
 
-import pytest
-pytest.importorskip("pydantic")
-
 import os
 import sys
+import tempfile
 from pathlib import Path
+
+import pytest
+
+pytest.importorskip("pydantic")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT))
 
+from core.models import FullModelConfig
 from gui.main_window import MainWindow
 
 
-def test_main_window_has_bounded_minimum_size():
-    app = QApplication.instance() or QApplication([])
-    w = MainWindow()
-    try:
-        min_size = w.minimumSize()
-        assert min_size.width() <= 1000, f"minimum width too large: {min_size.width()}"
-        assert min_size.height() <= 800, f"minimum height too large: {min_size.height()}"
-        assert w.tabs.sizePolicy().horizontalPolicy() == w.tabs.sizePolicy().Policy.Expanding
-    finally:
-        w.close()
+def _app():
+    return QApplication.instance() or QApplication([])
+
+
+def test_clean_start_uses_named_default_preset_and_visible_primary_docks():
+    app = _app()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            w = MainWindow()
+            w.show()
+            app.processEvents()
+            try:
+                assert w.config_manager.current_preset_name.startswith("A:")
+                assert w.combo_presets.currentText().startswith("A:")
+                assert w._sidebar_preset_combo.currentText().startswith("A:")
+                assert w._dock_params.isVisible()
+                assert w._dock_analytics.isVisible()
+                assert w.oscilloscope.parent() is w.centralWidget()
+            finally:
+                w.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_restored_config_without_preset_identity_is_marked_custom():
+    app = _app()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            FullModelConfig().save_to_file(".last_session.json")
+            w = MainWindow()
+            w.show()
+            app.processEvents()
+            try:
+                assert w.config_manager.current_preset_name == "Custom Config"
+                assert w.combo_presets.currentText() == "Custom Config"
+                assert w._sidebar_preset_combo.currentText() == "Custom Config"
+            finally:
+                w.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_layout_guard_recovers_hidden_primary_docks_for_laptop():
+    app = _app()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            w = MainWindow()
+            w.show()
+            app.processEvents()
+            try:
+                w._dock_params.setVisible(False)
+                w._dock_analytics.setVisible(False)
+                w.resize(1100, 700)
+                w._ensure_usable_layout()
+                app.processEvents()
+                assert w._dock_params.isVisible()
+                assert w._dock_analytics.isVisible()
+                assert w.btn_run.isVisible()
+                assert w.combo_presets.isVisible()
+                assert w._sidebar_frame.maximumWidth() <= 360
+            finally:
+                w.close()
+        finally:
+            os.chdir(old_cwd)
 
 
 def _run_as_script() -> int:
-    tests = [test_main_window_has_bounded_minimum_size]
+    tests = [
+        test_clean_start_uses_named_default_preset_and_visible_primary_docks,
+        test_restored_config_without_preset_identity_is_marked_custom,
+        test_layout_guard_recovers_hidden_primary_docks_for_laptop,
+    ]
     passed = 0
     for fn in tests:
         try:

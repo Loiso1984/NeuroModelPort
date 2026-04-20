@@ -93,27 +93,43 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
         if cfg.calcium.B_Ca <= 0.0:
             raise SimulationParameterError(f"B_Ca must be > 0, got {cfg.calcium.B_Ca}.")
         if cfg.calcium.Ca_ext <= cfg.calcium.Ca_rest:
-            warnings.append(
-                f"Ca_ext ({cfg.calcium.Ca_ext}) <= Ca_rest ({cfg.calcium.Ca_rest}); "
-                "E_Ca may become non-physiological."
+            raise SimulationParameterError(
+                f"Ca_ext ({cfg.calcium.Ca_ext}) must be > Ca_rest ({cfg.calcium.Ca_rest}); "
+                "a reversed Ca gradient is physically impossible."
             )
 
     if cfg.channels.enable_Ih and cfg.channels.gIh_max <= 0.0:
-        raise SimulationParameterError("Ih is enabled but gIh_max <= 0.")
+        raise SimulationParameterError(
+            f"Ih is enabled but gIh_max={cfg.channels.gIh_max}. Set gIh_max > 0 (typical: 0.01–0.1 mS/cm²)."
+        )
     if cfg.channels.enable_ICa and cfg.channels.gCa_max <= 0.0:
-        raise SimulationParameterError("ICa is enabled but gCa_max <= 0.")
+        raise SimulationParameterError(
+            f"ICa is enabled but gCa_max={cfg.channels.gCa_max}. Set gCa_max > 0 (typical: 0.1–1.0 mS/cm²)."
+        )
     if cfg.channels.enable_ITCa and cfg.channels.gTCa_max <= 0.0:
-        raise SimulationParameterError("ITCa is enabled but gTCa_max <= 0.")
+        raise SimulationParameterError(
+            f"ITCa is enabled but gTCa_max={cfg.channels.gTCa_max}. Set gTCa_max > 0 (typical: 0.1–0.5 mS/cm²)."
+        )
     if cfg.channels.enable_IA and cfg.channels.gA_max <= 0.0:
-        raise SimulationParameterError("IA is enabled but gA_max <= 0.")
+        raise SimulationParameterError(
+            f"IA is enabled but gA_max={cfg.channels.gA_max}. Set gA_max > 0 (typical: 5–50 mS/cm²)."
+        )
     if cfg.channels.enable_SK and cfg.channels.gSK_max <= 0.0:
-        raise SimulationParameterError("SK is enabled but gSK_max <= 0.")
+        raise SimulationParameterError(
+            f"SK is enabled but gSK_max={cfg.channels.gSK_max}. Set gSK_max > 0 (typical: 0.5–5.0 mS/cm²)."
+        )
     if cfg.channels.enable_IM and cfg.channels.gIM_max <= 0.0:
-        raise SimulationParameterError("IM is enabled but gIM_max <= 0.")
+        raise SimulationParameterError(
+            f"IM is enabled but gIM_max={cfg.channels.gIM_max}. Set gIM_max > 0 (typical: 0.1–1.0 mS/cm²)."
+        )
     if cfg.channels.enable_NaP and cfg.channels.gNaP_max <= 0.0:
-        raise SimulationParameterError("NaP is enabled but gNaP_max <= 0.")
+        raise SimulationParameterError(
+            f"NaP is enabled but gNaP_max={cfg.channels.gNaP_max}. Set gNaP_max > 0 (typical: 0.01–0.2 mS/cm²)."
+        )
     if cfg.channels.enable_NaR and cfg.channels.gNaR_max <= 0.0:
-        raise SimulationParameterError("NaR is enabled but gNaR_max <= 0.")
+        raise SimulationParameterError(
+            f"NaR is enabled but gNaR_max={cfg.channels.gNaR_max}. Set gNaR_max > 0 (typical: 0.05–0.5 mS/cm²)."
+        )
 
     dual = getattr(cfg, "dual_stimulation", None)
     if dual is not None and getattr(dual, "enabled", False):

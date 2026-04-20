@@ -257,6 +257,12 @@ def run_native_loop(
     n_comp  = physics.n_comp
     n_state = y0.shape[0]
 
+    # ── Validate LLE custom mask length (prevent IndexError) ──
+    if lle_custom_mask is not None and len(lle_custom_mask) != n_state:
+        raise ValueError(
+            f"lle_custom_mask length ({len(lle_custom_mask)}) must match n_state ({n_state})"
+        )
+
     # ── Unpack conductance and temperature-scaling matrices ──
     (gna_v, gk_v, gl_v, gih_v, gca_v, ga_v,
      gsk_v, gtca_v, gim_v, gnap_v, gnar_v) = unpack_conductances(physics.gbar_mat, n_comp)
@@ -364,6 +370,11 @@ def run_native_loop(
     lle_out = np.zeros(n_out, dtype=np.float64)
     lle_t_next_renorm = lle_t_evolve if calc_lle else t_sim + 1.0
 
+    # v12.2: Pre-allocated output for total stimulus current (soma compartment)
+    # Records the actual effective stimulus applied to soma (compartment 0)
+    i_stim_out = np.zeros(n_out, dtype=np.float64)
+    i_stim_soma_accum = 0.0  # Accumulates effective stimulus during physics loop
+
     # ── Hines system buffers (pre-allocated, reused every step per trajectory) ──
     d     = np.empty(n_comp, dtype=np.float64)
     a_vec = np.empty(n_comp, dtype=np.float64)
@@ -371,8 +382,8 @@ def run_native_loop(
     rhs   = np.empty(n_comp, dtype=np.float64)
     v_new = np.empty(n_comp, dtype=np.float64)
     # i_ca_influx: 2D when LLE enabled to prevent cross-talk between trajectories
-    # Layout (n_comp, n_traj) for L1 cache locality — inner loop walks contiguous compartments
-    i_ca_influx_2d = np.zeros((n_comp, n_traj), dtype=np.float64)
+    # Layout (n_traj, n_comp): trajectory-major row keeps compartment loop contiguous.
+    i_ca_influx_2d = np.zeros((n_traj, n_comp), dtype=np.float64)
     i_ca_dummy_v = np.zeros(n_comp, dtype=np.float64)  # Required by update_gates_analytic
     # v11.6: Ionic conductance buffers for unified scalar helper
     g_total_arr = np.empty(n_comp, dtype=np.float64)  # Total membrane conductance per compartment
@@ -409,8 +420,14 @@ def run_native_loop(
             t_out[out_idx] = t
             for s in range(n_state):
                 y_out[s, out_idx] = y[s]
+            # v12.2: Record effective stimulus current for soma (compartment 0)
+            # Value is accumulated during physics loop below
+            i_stim_out[out_idx] = i_stim_soma_accum
             # Note: LLE is recorded only at final output section after all computations
             out_idx += 1
+
+        # Reset accumulator for this step's stimulus computation
+        i_stim_soma_accum = 0.0
 
         # ─────────────────────────────────────────────────────────────
         # 0. Get precomputed stimulus values (Optimization v11.8)
@@ -581,7 +598,7 @@ def run_native_loop(
                 ena_i = ena_arr_buf[i]
                 ek_i = ek_arr_buf[i]
 
-                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[i, traj_idx] = compute_ionic_conductances_scalar(
+                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[traj_idx, i] = compute_ionic_conductances_scalar(
                     vi, mi, hi, ni,
                     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
                     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
@@ -648,6 +665,10 @@ def run_native_loop(
                     else:
                         i_stim_eff += i_stim_s
 
+                # Accumulate effective stimulus for soma compartment (i=0)
+                if i == 0 and traj_idx == 0:
+                    i_stim_soma_accum = i_stim_eff
+
                 katp_rhs = 0.0
                 if dyn_atp:
                     atp_val = y_active[off_atp + i]
@@ -698,7 +719,7 @@ def run_native_loop(
                 for i in range(n_comp):
                     ca_val = y_active[off_ca + i]
                     tau_ca_safe = max(tau_ca, 1e-12)
-                    influx = b_ca[i] * i_ca_influx_2d[i, traj_idx] + ca_rest / tau_ca_safe
+                    influx = b_ca[i] * i_ca_influx_2d[traj_idx, i] + ca_rest / tau_ca_safe
                     decay_rate = 1.0 / tau_ca_safe
                     y_active[off_ca + i] = (ca_val + dt * influx) / (1.0 + dt * decay_rate)
 
@@ -733,7 +754,7 @@ def run_native_loop(
                         atp_val, atp_synthesis_rate,
                         na_i_val, k_o_val, k_o_rest_mM,
                         ion_drift_gain, k_o_clearance_tau_ms,
-                        i_ca_influx_2d[i, traj_idx],
+                        i_ca_influx_2d[traj_idx, i],
                         pump_max_capacity,
                         km_na,
                     )
@@ -828,9 +849,81 @@ def run_native_loop(
                 lle_accum += np.log(dist / lle_delta)
                 lle_count += 1
                 # Renormalize perturbation vector to lle_delta
+                # CRITICAL FIX (v12.1): Only scale variables IN the subspace;
+                # variables NOT in subspace snap directly to main trajectory.
+                # Physics: Unmeasured dimensions must not be scaled by tangent
+                # vector of measured subspace — prevents ATP/Ca_i inflation.
                 scale = lle_delta / dist
-                for i in range(n_state):
-                    y_pert[i] = y[i] + (y_pert[i] - y[i]) * scale
+
+                if lle_subspace_mode == 3 and lle_custom_mask is not None:
+                    # Custom mode: use mask to determine scaling
+                    for i in range(n_state):
+                        if lle_custom_mask[i]:
+                            y_pert[i] = y[i] + (y_pert[i] - y[i]) * scale
+                        else:
+                            y_pert[i] = y[i]  # Snap to main
+                elif lle_subspace_mode == 0:
+                    # v_only: Scale only voltage; snap all others
+                    for i in range(n_comp):
+                        y_pert[i] = y[i] + (y_pert[i] - y[i]) * scale
+                    for i in range(n_comp, n_state):
+                        y_pert[i] = y[i]  # Snap gates, Ca, ATP, etc.
+                elif lle_subspace_mode == 1:
+                    # v_and_gates: Scale V + gates; snap metabolic variables
+                    for i in range(n_comp):  # V
+                        y_pert[i] = y[i] + (y_pert[i] - y[i]) * scale
+                    # Core gates (always present)
+                    for off in (off_m, off_h, off_n):
+                        for i in range(n_comp):
+                            y_pert[off + i] = y[off + i] + (y_pert[off + i] - y[off + i]) * scale
+                    # Optional channel gates
+                    if en_ih:
+                        for i in range(n_comp):
+                            y_pert[off_r + i] = y[off_r + i] + (y_pert[off_r + i] - y[off_r + i]) * scale
+                    if en_ica:
+                        for off in (off_s, off_u):
+                            for i in range(n_comp):
+                                y_pert[off + i] = y[off + i] + (y_pert[off + i] - y[off + i]) * scale
+                    if en_ia:
+                        # I_A has two gates: a (activation), b (inactivation)
+                        for off in (off_a, off_b):
+                            for i in range(n_comp):
+                                y_pert[off + i] = y[off + i] + (y_pert[off + i] - y[off + i]) * scale
+                    if en_itca:
+                        for off in (off_p, off_q):
+                            for i in range(n_comp):
+                                y_pert[off + i] = y[off + i] + (y_pert[off + i] - y[off + i]) * scale
+                    if en_im:
+                        for i in range(n_comp):
+                            y_pert[off_w + i] = y[off_w + i] + (y_pert[off_w + i] - y[off_w + i]) * scale
+                    if en_nap:
+                        for i in range(n_comp):
+                            y_pert[off_x + i] = y[off_x + i] + (y_pert[off_x + i] - y[off_x + i]) * scale
+                    if en_nar:
+                        for off in (off_y, off_j):
+                            for i in range(n_comp):
+                                y_pert[off + i] = y[off + i] + (y_pert[off + i] - y[off + i]) * scale
+                    if en_sk:
+                        for i in range(n_comp):
+                            y_pert[off_zsk + i] = y[off_zsk + i] + (y_pert[off_zsk + i] - y[off_zsk + i]) * scale
+                    # Snap metabolic/filter variables to main trajectory
+                    if dyn_ca:
+                        for i in range(n_comp):
+                            y_pert[off_ca + i] = y[off_ca + i]
+                    if dyn_atp:
+                        for i in range(n_comp):
+                            y_pert[off_atp + i] = y[off_atp + i]
+                            y_pert[off_na_i + i] = y[off_na_i + i]
+                            y_pert[off_k_o + i] = y[off_k_o + i]
+                    # Filter states are scalar offsets (not per-compartment), snap directly
+                    if off_ifilt_primary >= 0:
+                        y_pert[off_ifilt_primary] = y[off_ifilt_primary]
+                    if off_ifilt_secondary >= 0:
+                        y_pert[off_ifilt_secondary] = y[off_ifilt_secondary]
+                else:
+                    # mode 2 (full_state) or default: Scale all variables
+                    for i in range(n_state):
+                        y_pert[i] = y[i] + (y_pert[i] - y[i]) * scale
 
             lle_t_next_renorm = t + lle_t_evolve  # Use absolute time, not incremental
 
@@ -845,5 +938,6 @@ def run_native_loop(
 
     # Return empty LLE array if not computed to avoid confusion with zero values
     lle_result = lle_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
-    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_result
+    i_stim_result = i_stim_out[:out_idx]  # v12.2: Stimulus current for analysis
+    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_result, i_stim_result
 

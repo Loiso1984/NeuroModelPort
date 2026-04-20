@@ -17,6 +17,8 @@ class WorkerSignals(QObject):
     finished = Signal(object)  # SimulationResult
     error = Signal(str)        # Error message
     progress = Signal(int, int, float)  # (current, total, value) for progress updates
+    # v13.0: Rich progress signal for rheobase (message, data_dict)
+    progress_rich = Signal(str, dict)  # (message, data) for detailed progress updates
 
 
 class Worker(QRunnable):
@@ -41,22 +43,28 @@ class Worker(QRunnable):
 
 class SimulationController(QObject):
     """Manages simulation thread execution and signal routing.
-    
+
     Separates thread management from UI logic in MainWindow.
-    
+
     Signals:
         simulation_started: Emitted when a simulation starts
         simulation_finished: Emitted when simulation completes with result
+        analytics_started: Emitted when analytics processing starts
+        analytics_finished: Emitted when analytics completes with stats dict
         progress_updated: Emitted with (current, total, value) for progress
         error_occurred: Emitted when an error occurs
     """
-    
+
     # Public signals for MainWindow to connect to
     simulation_started = Signal()
     simulation_finished = Signal(object)  # result dict
+    analytics_started = Signal()  # v13.0: separate analytics signal
+    analytics_finished = Signal(object)  # v13.0: stats dict
     progress_updated = Signal(int, int, float)  # (current, total, value)
+    # v13.0: Rich progress for rheobase search (thread-safe)
+    rheobase_progress = Signal(str, dict)  # (message, data) for rheobase updates
     error_occurred = Signal(str)  # error message
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.thread_pool = QThreadPool()
@@ -115,7 +123,40 @@ class SimulationController(QObject):
             worker.signals.progress.connect(lambda i, n, v: on_progress(f"Progress: {i}/{n}"))
             
         self.thread_pool.start(worker)
-        
+
+    def run_analytics(self, result, morph, config, on_success: Callable[[Any], None] = None,
+                      on_error: Callable[[str], None] = None, compute_lyapunov: bool = False):
+        """v13.0: Run analytics (full_analysis) in separate background thread.
+
+        This allows immediate oscilloscope update while analytics processes.
+        Matplotlib rendering happens only after analytics completes.
+        """
+        self.analytics_started.emit()
+
+        from core.solver import NeuronSolver
+        from core.analysis import full_analysis
+
+        def run_analysis():
+            # Post-process physics (current reconstruction, ATP estimates)
+            solver = NeuronSolver(config)
+            solver._post_process_physics(result, morph)
+
+            # Full analysis (spike detection, statistics, LLE if requested)
+            stats = full_analysis(result, compute_lyapunov=compute_lyapunov)
+            return stats
+
+        worker = Worker(run_analysis)
+
+        # Connect signals
+        worker.signals.finished.connect(self.analytics_finished)
+        if on_success:
+            worker.signals.finished.connect(on_success)
+        if on_error:
+            worker.signals.error.connect(on_error)
+            worker.signals.error.connect(self.error_occurred)
+
+        self.thread_pool.start(worker)
+
     def run_stochastic(self, config, n_trials: int, on_success: Callable[[Any], None] = None,
                       on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None,
                       compute_lyapunov: bool = False):
@@ -271,6 +312,119 @@ class SimulationController(QObject):
             
         self.thread_pool.start(worker)
         
+    def run_rheobase(self, config, on_progress: Callable[[str, dict], None] = None,
+                     on_success: Callable[[Any], None] = None,
+                     on_error: Callable[[str], None] = None):
+        """v13.0: Run non-blocking Auto-Rheobase search in worker thread.
+
+        Performs binary search to find minimum I_ext required to trigger a spike.
+        Emits progress updates through signals (thread-safe).
+        """
+        self.simulation_started.emit()
+
+        from core.solver import NeuronSolver
+        from core.analysis import detect_spikes
+        from copy import deepcopy
+
+        def run_search(progress_signal):
+            """Worker function that emits progress through signal."""
+            search_history = []
+            I_low, I_high = 0.0, 100.0
+
+            cfg = deepcopy(config)
+            cfg.stim.t_sim = 50.0  # Short simulation
+            solver = NeuronSolver(cfg)
+
+            # Phase 1: Find upper bound
+            for attempt in range(10):
+                cfg.stim.Iext = I_high
+                try:
+                    result = solver.run_single(cfg)
+                    pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
+                    if len(spike_times) > 0:
+                        search_history.append((0.0, I_high, I_high, True))
+                        break
+                except Exception:
+                    pass
+                I_high *= 2.0
+                search_history.append((0.0, I_high, I_high, False))
+                if I_high > 1000.0:
+                    raise RuntimeError("Could not find upper bound for rheobase")
+                # Thread-safe: emit progress through signal
+                progress_signal.emit(
+                    f"Phase 1: Expanding bound... I_high = {I_high:.1f}",
+                    {'phase': 1, 'I_high': I_high, 'attempt': attempt}
+                )
+
+            # Phase 2: Binary search
+            for iteration in range(10):
+                I_mid = (I_low + I_high) / 2.0
+                cfg.stim.Iext = I_mid
+
+                try:
+                    result = solver.run_single(cfg)
+                    pk_idx, spike_times, _ = detect_spikes(result.v_soma, result.t, threshold=-20.0)
+                    has_spike = len(spike_times) > 0
+                except Exception:
+                    has_spike = False
+
+                search_history.append((I_low, I_high, I_mid, has_spike))
+
+                if has_spike:
+                    I_high = I_mid
+                else:
+                    I_low = I_mid
+
+                # Thread-safe: emit progress through signal
+                progress_signal.emit(
+                    f"Iteration {iteration+1}/10: I = {I_mid:.2f}, spike={'YES' if has_spike else 'NO'}",
+                    {'phase': 2, 'iteration': iteration+1, 'I_mid': I_mid,
+                     'I_low': I_low, 'I_high': I_high, 'has_spike': has_spike}
+                )
+
+            I_rheobase = (I_low + I_high) / 2.0
+            uncertainty = (I_high - I_low) / 2.0
+
+            return {
+                'I_rheobase': I_rheobase,
+                'uncertainty': uncertainty,
+                'search_history': search_history,
+            }
+
+        # Custom worker class to pass signal to run function
+        class RheobaseWorker(QRunnable):
+            def __init__(self, func, signals):
+                super().__init__()
+                self.func = func
+                self.signals = signals
+
+            def run(self):
+                try:
+                    result = self.func(self.signals.progress_rich)
+                    self.signals.finished.emit(result)
+                except Exception as e:
+                    logger.error(f"Rheobase worker failed: {e}")
+                    self.signals.error.emit(str(e))
+
+        signals = WorkerSignals()
+        worker = RheobaseWorker(run_search, signals)
+
+        # Connect signals
+        # Note: rheobase results are NOT emitted to simulation_finished
+        # because they have a different payload structure (I_rheobase, uncertainty, etc.)
+        # Only use on_success callback for rheobase results
+        if on_success:
+            worker.signals.finished.connect(on_success)
+        worker.signals.error.connect(self.error_occurred)
+        if on_error:
+            worker.signals.error.connect(on_error)
+        # v13.0: Thread-safe progress routing through controller signal
+        worker.signals.progress_rich.connect(self.rheobase_progress)
+        if on_progress:
+            worker.signals.progress_rich.connect(on_progress)
+
+        self.thread_pool.start(worker)
+
     def shutdown(self):
         """Wait for all threads to finish."""
         self.thread_pool.waitForDone(5000)  # Wait up to 5 seconds

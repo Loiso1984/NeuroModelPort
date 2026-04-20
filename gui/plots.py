@@ -262,29 +262,35 @@ class OscilloscopeWidget(QWidget):
         return base
 
     def _apply_plot_layout_profile(self) -> None:
-        weights = _OSC_LAYOUT_PROFILES.get(
-            self._layout_profile,
-            _OSC_LAYOUT_PROFILES["Balanced"],
-        )
-        row_visible = (
-            True,
-            self._p_g.isVisible(),
-            self._p_i.isVisible(),
-            self._p_ca.isVisible(),
-        )
-        for row_i, (weight, visible) in enumerate(zip(weights, row_visible)):
-            self._win.ci.layout.setRowStretchFactor(row_i, float(weight) if visible else 0.01)
+        """Apply layout profile by adjusting QSplitter sizes."""
+        # Map layout profiles to splitter size presets
+        size_presets = {
+            "Compact": self._compact_splitter_sizes,
+            "Balanced": self._default_splitter_sizes,
+            "Voltage Focus": [500, 100, 150, 80],
+            "Currents Focus": [250, 100, 400, 100],
+            "Expanded": self._expanded_splitter_sizes,
+        }
+        sizes = size_presets.get(self._layout_profile, self._default_splitter_sizes).copy()
 
+        # Adjust for visibility: if a plot is hidden, its size is 0
+        if not self._p_g.isVisible():
+            sizes[1] = 0
+        if not self._p_i.isVisible():
+            sizes[2] = 0
+        if not self._p_ca.isVisible():
+            sizes[3] = 0
+
+        # Only non-zero sizes are valid for QSplitter
+        if hasattr(self, '_plot_splitter'):
+            self._plot_splitter.setSizes(sizes)
+
+        # Update scroll area height based on profile
         target_height = self._target_plot_height()
         if hasattr(self, "_plot_container"):
             self._plot_container.setMinimumHeight(target_height)
-            self._plot_container.setFixedHeight(target_height)
-        if hasattr(self, "_win"):
-            self._win.setMinimumHeight(target_height)
-            self._win.setFixedHeight(target_height)
         if hasattr(self, "_plot_scroll"):
             self._plot_scroll.setMinimumHeight(min(target_height + 16, 1200))
-            self._plot_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
     # ─────────────────────────────────────────────────────────────────
     def _mouse_moved(self, evt):
@@ -341,33 +347,36 @@ class OscilloscopeWidget(QWidget):
 
     def _build_ui(self):
         """
-        Construct and lay out the oscilloscope plotting area and its accompanying control panel.
+        v13.0 Oscilloscope — Vertical QSplitter with four independent PlotWidgets.
         
-        Creates the main graphics widget with four stacked plots (membrane potential, gate variables, ion currents, intracellular calcium), adds crosshair items and a mouse-move signal proxy for the voltage plot, and configures plot appearance (labels, legends, grid, row stretch factors, and view linking). Builds a scrollable right-hand control panel containing grouped checkboxes for voltage/gate/current/calcium traces and a "View" group with theme, line width, title font, grid alpha, reference toggle, presentation/scale-bar mode, spike/delay controls, delay-target selection and custom compartment selector, and a fullscreen button. Connects UI controls to the widget's handlers, stores commonly referenced widgets on self (plots, checkboxes, controls, proxy, reference widgets), sets initial splitter sizes, and updates row visibility.
+        Replaces GraphicsLayoutWidget with user-resizable QSplitter layout.
+        Each plot (V, Gates, Currents, Calcium) is a separate PlotWidget with
+        linked X-axes for synchronized zooming/panning.
         """
         from PySide6.QtWidgets import QSplitter
-        
+
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        
-        # Use splitter for resizable panels
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(4)
-        splitter.setStyleSheet("QSplitter::handle { background: #45475A; }")
 
-        # ── Plot area ─────────────────────────────────────────────────
-        self._win = pg.GraphicsLayoutWidget()
-        self._win.setBackground('#0D1117')
+        # Main horizontal splitter: plots | controls
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.setHandleWidth(4)
+        main_splitter.setStyleSheet("QSplitter::handle { background: #45475A; }")
 
-        # V(t) — row 0
-        self._p_v = self._win.addPlot(
-            title=self._title_html("Membrane Potential  V(t)", "#89B4FA"))
+        # ── Plot area: Vertical QSplitter with 4 PlotWidgets ─────────
+        self._plot_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._plot_splitter.setHandleWidth(4)
+        self._plot_splitter.setStyleSheet("QSplitter::handle { background: #45475A; }")
+
+        # V(t) — plot 0 (tallest)
+        self._p_v = pg.PlotWidget(title=self._title_html("Membrane Potential  V(t)", "#89B4FA"))
         self._p_v.setLabel('left', 'V', units='mV', color='#CDD6F4')
         self._p_v.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_v.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
-        self._p_v.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
-        
+        self._p_v.setMouseEnabled(x=True, y=True)
+        self._p_v.setBackground('#0D1117')
+
         # Crosshair for V(t) plot
         self.vLine = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#A6ADC8', style=Qt.PenStyle.DashLine))
         self.hLine = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('#A6ADC8', style=Qt.PenStyle.DashLine))
@@ -375,54 +384,52 @@ class OscilloscopeWidget(QWidget):
         self._p_v.addItem(self.hLine, ignoreBounds=True)
         self.crosshair_label = pg.TextItem(text="", color='#CBA6F7', fill='#1E1E2E88')
         self._p_v.addItem(self.crosshair_label, ignoreBounds=True)
-        
-        self.proxy = pg.SignalProxy(self._p_v.scene().sigMouseMoved, rateLimit=60, slot=self._mouse_moved)
-        
-        self._win.nextRow()
 
-        # Gate variables — row 1
-        self._p_g = self._win.addPlot(
-            title=self._title_html("Gate Variables  m, h, n", "#A6E3A1"))
+        self.proxy = pg.SignalProxy(self._p_v.scene().sigMouseMoved, rateLimit=60, slot=self._mouse_moved)
+
+        # Gate variables — plot 1
+        self._p_g = pg.PlotWidget(title=self._title_html("Gate Variables  m, h, n", "#A6E3A1"))
         self._p_g.setLabel('left', 'probability  [0–1]', color='#CDD6F4')
         self._p_g.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_g.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_g.setXLink(self._p_v)
         self._p_g.setYRange(-0.05, 1.05)
-        self._p_g.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
-        self._win.nextRow()
+        self._p_g.setMouseEnabled(x=True, y=True)
+        self._p_g.setBackground('#0D1117')
 
-        # Currents — row 2
-        self._p_i = self._win.addPlot(
-            title=self._title_html("Ion Currents  (soma)", "#FAB387"))
+        # Currents — plot 2
+        self._p_i = pg.PlotWidget(title=self._title_html("Ion Currents  (soma)", "#FAB387"))
         self._p_i.setLabel('left', 'I', units='µA/cm²', color='#CDD6F4')
         self._p_i.setLabel('bottom', 'Time', units='ms', color='#CDD6F4')
         self._p_i.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_i.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_i.setXLink(self._p_v)
-        self._p_i.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
-        self._win.nextRow()
+        self._p_i.setMouseEnabled(x=True, y=True)
+        self._p_i.setBackground('#0D1117')
 
-        # Calcium — row 3
-        self._p_ca = self._win.addPlot(
-            title=self._title_html("Intracellular Calcium [Ca²+]_i", "#F38BA8"))
+        # Calcium — plot 3
+        self._p_ca = pg.PlotWidget(title=self._title_html("Intracellular Calcium [Ca²+]_i", "#F38BA8"))
         self._p_ca.setLabel('left', '[Ca²+]_i', units='nM', color='#CDD6F4')
         self._p_ca.setLabel('bottom', 'Time', units='ms', color='#CDD6F4')
         self._p_ca.showGrid(x=True, y=True, alpha=self._grid_alpha)
         self._p_ca.addLegend(offset=(10, 10), labelTextColor='#CDD6F4')
         self._p_ca.setXLink(self._p_v)
-        self._p_ca.setMouseEnabled(x=True, y=True)  # Enable zoom/pan
+        self._p_ca.setMouseEnabled(x=True, y=True)
+        self._p_ca.setBackground('#0D1117')
 
-        # Row stretch: V(t) is tallest (3), gates (1.5), currents (4) - enlarged, calcium (1)
-        self._win.ci.layout.setRowStretchFactor(0, 3)
-        self._win.ci.layout.setRowStretchFactor(1, 1.5)
-        self._win.ci.layout.setRowStretchFactor(2, 4)
-        self._win.ci.layout.setRowStretchFactor(3, 1)
+        # Add plots to vertical splitter
+        self._plot_splitter.addWidget(self._p_v)
+        self._plot_splitter.addWidget(self._p_g)
+        self._plot_splitter.addWidget(self._p_i)
+        self._plot_splitter.addWidget(self._p_ca)
 
-        self._plot_container = QWidget()
-        plot_layout = QVBoxLayout(self._plot_container)
-        plot_layout.setContentsMargins(0, 0, 0, 0)
-        plot_layout.setSpacing(0)
-        plot_layout.addWidget(self._win)
+        # Initial sizes: [400, 150, 200, 100] — V(t) gets most space
+        self._plot_splitter.setSizes([400, 150, 200, 100])
+
+        # Store for layout profile changes
+        self._default_splitter_sizes = [400, 150, 200, 100]
+        self._compact_splitter_sizes = [300, 100, 150, 80]
+        self._expanded_splitter_sizes = [500, 200, 300, 150]
 
         self._plot_scroll = QScrollArea()
         self._plot_scroll.setWidgetResizable(True)
@@ -430,10 +437,17 @@ class OscilloscopeWidget(QWidget):
         self._plot_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._plot_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._plot_scroll.setStyleSheet("QScrollArea { background: #0D1117; border: none; }")
+        self._plot_container = QWidget()
+        self._plot_container.setMinimumHeight(_OSC_HEIGHT_PROFILES["Fit"])
+        self._plot_container.setStyleSheet("background:#0D1117;")
+        plot_container_layout = QVBoxLayout(self._plot_container)
+        plot_container_layout.setContentsMargins(0, 0, 0, 0)
+        plot_container_layout.setSpacing(0)
+        plot_container_layout.addWidget(self._plot_splitter)
         self._plot_scroll.setWidget(self._plot_container)
 
-        splitter.addWidget(self._plot_scroll)
-        splitter.setStretchFactor(0, 10)
+        main_splitter.addWidget(self._plot_scroll)
+        main_splitter.setStretchFactor(0, 10)
 
         # ── Scrollable Checkbox panel ─────────────────────────────────
         scroll = QScrollArea()
@@ -630,11 +644,11 @@ class OscilloscopeWidget(QWidget):
         cb_layout.addStretch()
 
         scroll.setWidget(cb_widget)
-        splitter.addWidget(scroll)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([800, 240])  # Initial sizes
-        
-        root.addWidget(splitter)
+        main_splitter.addWidget(scroll)
+        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setSizes([800, 240])  # Initial sizes
+
+        root.addWidget(main_splitter)
         self._update_row_visibility()
         self._apply_plot_layout_profile()
 
@@ -705,7 +719,7 @@ class OscilloscopeWidget(QWidget):
         self._update_row_visibility()
 
     def _update_row_visibility(self):
-        """Collapse plot rows entirely if all their checkboxes are disabled."""
+        """Show/hide plot rows based on checkbox states and resize splitter."""
         any_g = any(cb.isChecked() for cb in self._cb_g.values())
         self._p_g.setVisible(any_g)
 
@@ -714,6 +728,8 @@ class OscilloscopeWidget(QWidget):
 
         any_ca = self._cb_ca['calcium'].isChecked() if 'calcium' in self._cb_ca else False
         self._p_ca.setVisible(any_ca)
+
+        # Resize splitter to redistribute space after visibility changes
         self._apply_plot_layout_profile()
 
     def _on_view_settings_changed(self, *_):

@@ -52,6 +52,10 @@ class ConfigManager(QObject):
     def current_preset_name(self) -> str:
         """Get the current preset name."""
         return self._current_preset_name
+
+    def mark_custom_config(self, label: str = "Custom Config") -> None:
+        """Mark the active configuration as file-loaded or manually customized."""
+        self._current_preset_name = label
     
     def load_preset(self, name: str) -> bool:
         """
@@ -144,6 +148,7 @@ class ConfigManager(QObject):
                         setattr(target_obj, field_name, source_val)
             
             _deep_update(self.config, new_cfg)
+            self.mark_custom_config()
             
             # Handle dual stimulation tab if present
             if self.config.dual_stimulation is not None and self._dual_stim_widget:

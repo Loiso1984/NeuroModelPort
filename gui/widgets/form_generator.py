@@ -6,16 +6,28 @@ from PySide6.QtCore import Qt
 from typing import Literal, get_args, get_origin, Iterable
 import logging
 from pydantic import BaseModel
+from gui.pydantic_form_meta import default_priority_for_field
 
 
 class PydanticFormWidget(QWidget):
-    def __init__(self, pydantic_instance: BaseModel, title: str = "", parent=None, on_change=None, hidden_fields: Iterable[str] | None = None):
+    def __init__(
+        self,
+        pydantic_instance: BaseModel,
+        title: str = "",
+        parent=None,
+        on_change=None,
+        hidden_fields: Iterable[str] | None = None,
+        field_priorities: dict[str, str] | None = None,
+    ):
         super().__init__(parent)
         self.instance = pydantic_instance
         self.on_change = on_change
         self.widgets_map = {}
         self.labels_map = {}
         self.hidden_fields = set(hidden_fields or ())
+        self.field_priorities = dict(field_priorities or {})
+        self._priority_filter = "all"
+        self._search_filter = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -152,6 +164,46 @@ class PydanticFormWidget(QWidget):
             is_dc = current_mode == "Classic (DC)"
             self.widgets_map["input_frequency"].setEnabled(not is_dc)
             self.widgets_map["input_frequency"].setStyleSheet("color: #888;" if is_dc else "")
+        self._apply_visibility_filters()
+
+    def _field_priority(self, field_name: str) -> str:
+        return self.field_priorities.get(field_name, default_priority_for_field(field_name))
+
+    def _field_matches_search(self, field_name: str) -> bool:
+        if not self._search_filter:
+            return True
+        query = self._search_filter.lower()
+        field_info = type(self.instance).model_fields.get(field_name)
+        description = getattr(field_info, "description", "") or ""
+        return query in field_name.lower() or query in description.lower()
+
+    def _field_matches_priority(self, field_name: str) -> bool:
+        if self._priority_filter in ("", "all"):
+            return True
+        priority = self._field_priority(field_name)
+        if self._priority_filter == "basic":
+            return priority in {"critical", "basic"}
+        return priority == self._priority_filter
+
+    def _apply_visibility_filters(self) -> None:
+        for field_name, widget in self.widgets_map.items():
+            visible = (
+                field_name not in self.hidden_fields
+                and self._field_matches_search(field_name)
+                and self._field_matches_priority(field_name)
+            )
+            widget.setVisible(visible)
+            label = self.labels_map.get(field_name)
+            if label is not None:
+                label.setVisible(visible)
+
+    def set_priority_filter(self, priority: str) -> None:
+        self._priority_filter = str(priority or "all").lower()
+        self._apply_visibility_filters()
+
+    def set_search_filter(self, text: str) -> None:
+        self._search_filter = str(text or "").strip()
+        self._apply_visibility_filters()
 
     def _set_field(self, field_name, value):
         setattr(self.instance, field_name, value)
@@ -203,3 +255,4 @@ class PydanticFormWidget(QWidget):
         # Safety check for hidden_fields set
         if not isinstance(self.hidden_fields, set):
             self.hidden_fields = set(self.hidden_fields)
+        self._apply_visibility_filters()

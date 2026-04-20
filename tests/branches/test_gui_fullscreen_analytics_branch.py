@@ -15,9 +15,12 @@ from PySide6.QtWidgets import QApplication
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.models import FullModelConfig
+from core.morphology import MorphologyBuilder
 from core.presets import apply_preset
+from core.analysis import full_analysis
 from core.solver import NeuronSolver
 from gui.analytics import AnalyticsWidget
+from gui.main_window import MainWindow
 
 
 def test_analytics_fullscreen_opens_and_keeps_tab_index():
@@ -47,8 +50,33 @@ def test_analytics_fullscreen_opens_and_keeps_tab_index():
         w.close()
 
 
+def test_main_window_single_result_populates_analytics_immediately():
+    app = QApplication.instance() or QApplication([])
+    cfg = FullModelConfig()
+    apply_preset(cfg, "A: Squid Giant Axon (HH 1952)")
+    cfg.stim.t_sim = 40.0
+    cfg.stim.dt_eval = 0.2
+    cfg.stim.jacobian_mode = "native_hines"
+    res = NeuronSolver(cfg).run_single()
+    morph = MorphologyBuilder.build(cfg)
+    stats = full_analysis(res, compute_lyapunov=False)
+
+    win = MainWindow()
+    try:
+        win._on_simulation_done({"single": res, "stats": stats, "morph": morph})
+        app.processEvents()
+        assert win.analytics._last_result is res
+        assert win.analytics._last_stats is stats
+        assert win.analytics.passport_view.toPlainText().strip()
+    finally:
+        win.close()
+
+
 def _run_as_script() -> int:
-    tests = [test_analytics_fullscreen_opens_and_keeps_tab_index]
+    tests = [
+        test_analytics_fullscreen_opens_and_keeps_tab_index,
+        test_main_window_single_result_populates_analytics_immediately,
+    ]
     passed = 0
     for fn in tests:
         try:
