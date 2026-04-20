@@ -416,20 +416,19 @@ def run_native_loop(
     diverged = 0  # Initialize divergence flag
 
     for step in range(n_steps):
-        # ── Record output (main trajectory only) ──
+        # ── Record output BEFORE physics (main trajectory only) ──
+        # v12.8 FIX: Record accumulated stimulus from PREVIOUS step
+        # This fixes the 1-step lag bug
         if step % every == 0 and out_idx < n_out:
             t_out[out_idx] = t
             for s in range(n_state):
                 y_out[s, out_idx] = y[s]
-            # v12.2: Record effective stimulus current for soma (compartment 0)
-            # Value is accumulated during physics loop below
-            i_stim_out[out_idx] = i_stim_soma_accum
-            # v12.7: Record LLE convergence curve during simulation
+            i_stim_out[out_idx] = i_stim_soma_accum  # From previous step (or 0.0 for step 0)
             if calc_lle:
                 lle_out[out_idx] = current_lle
             out_idx += 1
-
-        # Reset accumulator for this step's stimulus computation
+        
+        # Reset accumulator AFTER recording
         i_stim_soma_accum = 0.0
 
         # ─────────────────────────────────────────────────────────────
@@ -933,12 +932,16 @@ def run_native_loop(
             lle_t_next_renorm = t + lle_t_evolve  # Use absolute time, not incremental
 
     # ── Final sample ──
+    # v12.8 FIX: Also record i_stim and lle for final state
     if out_idx < n_out:
         t_out[out_idx] = t
         for s in range(n_state):
             y_out[s, out_idx] = y[s]
-        if calc_lle and t > 0.0 and lle_count > 0:
-            lle_out[out_idx] = lle_accum / t
+        # Record final stimulus (already accumulated during last step)
+        i_stim_out[out_idx] = i_stim_soma_accum
+        # Record final LLE estimate
+        if calc_lle:
+            lle_out[out_idx] = current_lle if not np.isnan(current_lle) else (lle_accum / t if t > 1e-12 and lle_count > 0 else np.nan)
         out_idx += 1
 
     # Return empty LLE array if not computed to avoid confusion with zero values

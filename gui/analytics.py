@@ -349,6 +349,17 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = 2000) -> tupl
     if n <= max_points or max_points <= 0:
         return t, y
 
+    # v12.8 FIX: Handle NaN values by creating a mask
+    # NaN can occur in LLE data during transient period
+    nan_mask = ~np.isnan(y)
+    if not np.any(nan_mask):
+        # All NaN - return as-is
+        return t, y
+    
+    # Work with masked array for min/max operations
+    y_masked = np.where(nan_mask, y, np.inf)  # NaN -> inf for min (excluded)
+    y_masked_max = np.where(nan_mask, y, -np.inf)  # NaN -> -inf for max (excluded)
+
     # Each chunk contributes 2 points (min and max)
     n_chunks = max_points // 2
     chunk_size = max(1, n // n_chunks)
@@ -357,13 +368,22 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = 2000) -> tupl
     indices = []
     for i in range(0, n, chunk_size):
         end = min(i + chunk_size, n)
-        chunk = y[i:end]
-        min_idx = i + int(np.argmin(chunk))
-        max_idx = i + int(np.argmax(chunk))
+        chunk_min = y_masked[i:end]
+        chunk_max = y_masked_max[i:end]
+        # v12.8 FIX: Use nanargmin/nanargmax to handle potential NaN
+        if np.all(~nan_mask[i:end]):
+            # All NaN in this chunk - skip
+            continue
+        min_idx = i + int(np.nanargmin(chunk_min)) if np.any(np.isfinite(chunk_min)) else i
+        max_idx = i + int(np.nanargmax(chunk_max)) if np.any(np.isfinite(chunk_max)) else i
         indices.append(min_idx)
         indices.append(max_idx)
 
     # Sort indices to maintain temporal order
+    if len(indices) == 0:
+        # All chunks were NaN - return at least first and last point
+        return t[[0, -1]], y[[0, -1]]
+    
     indices = np.unique(np.array(indices, dtype=np.int64))
 
     # Always include the last point for trace continuity
@@ -3444,7 +3464,20 @@ class AnalyticsWidget(QTabWidget):
         ax1.axvline(spike_t, color='#F9E2AF', ls='--', lw=1.5)
         _configure_ax_interactive(ax1, title='Spike overview', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)
 
-        dvdt_win = np.gradient(v_win, t_win) if len(t_win) > 1 else np.zeros_like(v_win)
+        # v12.8 FIX: Handle duplicate time points for np.gradient
+        if len(t_win) > 1:
+            _, unique_idx = np.unique(t_win, return_index=True)
+            if len(unique_idx) < len(t_win):
+                t_win_clean = t_win[np.sort(unique_idx)]
+                v_win_clean = v_win[np.sort(unique_idx)]
+                dvdt_win = np.gradient(v_win_clean, t_win_clean)
+                # Interpolate back to original points
+                if len(dvdt_win) != len(v_win):
+                    dvdt_win = np.interp(t_win, t_win_clean, dvdt_win)
+            else:
+                dvdt_win = np.gradient(v_win, t_win)
+        else:
+            dvdt_win = np.zeros_like(v_win)
         ax2.plot(t_win, v_win, color='#89B4FA', lw=2.0, label='V aligned to peak')
         ax2b = ax2.twinx()
         self._spike_mech_twin_ax = ax2b
@@ -4045,7 +4078,11 @@ class AnalyticsWidget(QTabWidget):
                     I_bal_padded = np.zeros_like(t)
                     I_bal_padded[:I_bal.size] = I_bal
                     I_bal = I_bal_padded
-            err = float(np.max(np.abs(I_bal)))
+            # v12.8 FIX: Replace inf with NaN (inf can occur from dV/dt with very small dt)
+            I_bal = np.where(np.isinf(I_bal), np.nan, I_bal)
+            # v12.8 FIX: Use nanmax to handle NaN values gracefully
+            # NaN can occur in initial conditions or with LLE subspace masking
+            err = float(np.nanmax(np.abs(I_bal))) if not np.all(np.isnan(I_bal)) else 0.0
         except Exception as e:
             I_bal = np.zeros_like(t)
             err = 0.0
@@ -4057,7 +4094,11 @@ class AnalyticsWidget(QTabWidget):
             logging.warning(f"I_bal shape {I_bal.shape} doesn't match t {t.shape}, skipping energy balance error plot")
             _set_line_data(self._balance_lines["abs_err"])
         else:
-            _set_line_data(self._balance_lines["abs_err"], t, np.abs(I_bal) + 1e-12, name="energy_balance_error")
+            # v12.8: Ensure no inf values for semilogy (replace with small positive)
+            plot_data = np.abs(I_bal)
+            plot_data = np.where(np.isnan(plot_data), 1e-12, plot_data)  # NaN -> small positive
+            plot_data = np.where(plot_data < 1e-12, 1e-12, plot_data)  # Ensure positive for log scale
+            _set_line_data(self._balance_lines["abs_err"], t, plot_data, name="energy_balance_error")
         ax1.set_ylabel('|Error| (µA/cmÂ˛)')
         ax1.set_title(f'Current Balance Error (log) — max|error| = {err:.5f} µA/cmÂ˛  '
                       f'{"✓ Good" if err < 0.05 else "⚠ Check solver"}')

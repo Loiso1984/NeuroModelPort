@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
         """v12.7: Native QToolBars for clean cockpit layout."""
         # Main Toolbar (Run, Stoch, Sweep, etc.)
         self.main_toolbar = QToolBar("Main", self)
+        self.main_toolbar.setObjectName("main_toolbar")  # v12.8 FIX: Required for saveState
         self.main_toolbar.setMovable(False)
         self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
@@ -360,6 +361,7 @@ class MainWindow(QMainWindow):
 
         # Settings Toolbar (Preset, Lang, Mode)
         self.settings_toolbar = QToolBar("Settings", self)
+        self.settings_toolbar.setObjectName("settings_toolbar")  # v12.8 FIX: Required for saveState
         self.settings_toolbar.setMovable(False)
         self.addToolBar(Qt.TopToolBarArea, self.settings_toolbar)
 

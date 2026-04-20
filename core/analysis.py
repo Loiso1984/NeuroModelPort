@@ -244,9 +244,17 @@ def spike_threshold(V: np.ndarray, t: np.ndarray,
     Classic electrophysiology definition (Hille 2001).
     """
     # Validate time array for gradient calculation
-    if len(t) < 2 or len(np.unique(t)) < 2:
+    # v12.8 FIX: Remove duplicate time points to prevent np.gradient divide by zero
+    if len(t) < 2:
         return np.nan
-    dvdt = np.gradient(V, t)
+    _, unique_idx = np.unique(t, return_index=True)
+    if len(unique_idx) < len(t):
+        # Has duplicates - use only unique points
+        t_clean = t[np.sort(unique_idx)]
+        V_clean = V[np.sort(unique_idx)]
+        dvdt = np.gradient(V_clean, t_clean)
+    else:
+        dvdt = np.gradient(V, t)
     max_dvdt = np.max(dvdt)
     if max_dvdt < 0.5:          # no fast depolarisation
         return np.nan
@@ -665,8 +673,12 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     else:
         # Backward Euler gradient (consistent with Hines solver): dV = (V_new - V_old) / dt
         dt = float(t[1] - t[0]) if len(t) > 1 else 0.05
-        dV = np.diff(V)
-        dVdt = np.concatenate([[0.0], dV]) / dt
+        # v12.8 FIX: Guard against zero or very small dt
+        if dt < 1e-12:
+            dVdt = np.zeros_like(V)
+        else:
+            dV = np.diff(V)
+            dVdt = np.concatenate([[0.0], dV]) / dt
 
     # Total ionic current at soma only (index 0 for multi-compartment arrays).
     I_ion_soma = np.zeros_like(V, dtype=float)
@@ -1764,10 +1776,22 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         V_ahp = after_hyperpolarization(V, t, int(peak_idx[0]))
 
     # Validate time array for gradient calculation
-    if len(t) < 2 or len(np.unique(t)) < 2:
+    # v12.8 FIX: Remove duplicate time points to prevent np.gradient divide by zero
+    if len(t) < 2:
         dvdt = np.zeros_like(V)
     else:
-        dvdt = np.gradient(V, t)
+        # Find unique time points (keeping last occurrence for duplicates)
+        _, unique_idx = np.unique(t, return_index=True)
+        if len(unique_idx) < len(t):
+            # Has duplicates - use only unique points
+            t_clean = t[np.sort(unique_idx)]
+            V_clean = V[np.sort(unique_idx)]
+            dvdt = np.gradient(V_clean, t_clean)
+            # Interpolate back to original time points if needed
+            if len(dvdt) != len(V):
+                dvdt = np.interp(t, t_clean, dvdt)
+        else:
+            dvdt = np.gradient(V, t)
     dvdt_max = float(np.max(dvdt))
     dvdt_min = float(np.min(dvdt))
 
