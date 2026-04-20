@@ -367,7 +367,8 @@ def run_native_loop(
 
     lle_accum = 0.0
     lle_count = 0
-    lle_out = np.zeros(n_out, dtype=np.float64)
+    lle_out = np.full(n_out, np.nan, dtype=np.float64)  # v12.7: NaN = not yet computed
+    current_lle = np.nan  # Running LLE estimate for convergence curve
     lle_t_next_renorm = lle_t_evolve if calc_lle else t_sim + 1.0
 
     # v12.2: Pre-allocated output for total stimulus current (soma compartment)
@@ -423,7 +424,9 @@ def run_native_loop(
             # v12.2: Record effective stimulus current for soma (compartment 0)
             # Value is accumulated during physics loop below
             i_stim_out[out_idx] = i_stim_soma_accum
-            # Note: LLE is recorded only at final output section after all computations
+            # v12.7: Record LLE convergence curve during simulation
+            if calc_lle:
+                lle_out[out_idx] = current_lle
             out_idx += 1
 
         # Reset accumulator for this step's stimulus computation
@@ -848,6 +851,8 @@ def run_native_loop(
             if dist > 1e-12:  # More reasonable threshold than 1e-30
                 lle_accum += np.log(dist / lle_delta)
                 lle_count += 1
+                # v12.7: Update running LLE estimate for convergence curve
+                current_lle = lle_accum / t if t > 1e-12 else np.nan
                 # Renormalize perturbation vector to lle_delta
                 # CRITICAL FIX (v12.1): Only scale variables IN the subspace;
                 # variables NOT in subspace snap directly to main trajectory.

@@ -197,10 +197,11 @@ def test_lle_dual_traj_output_unchanged():
     )
     lle_arr = res_lle.lle_convergence
     assert len(lle_arr) > 0, "lle_convergence array is empty"
-    # LLE array only has valid data after the first renormalization; skip t=0 entries
-    valid_lle = lle_arr[lle_arr != 0.0]
-    if len(valid_lle) > 0:
-        assert np.all(np.isfinite(valid_lle)), "LLE convergence array contains NaN or Inf"
+    # v12.7: LLE uses NaN before first renormalization; only check finite values
+    valid_lle = lle_arr[np.isfinite(lle_arr)]
+    assert len(valid_lle) > 0, "No finite LLE values recorded"
+    # All finite values should not be Inf
+    assert np.all(np.isfinite(valid_lle)), "LLE convergence array contains Inf"
 
     # --- Main trajectory: LLE run vs. no-LLE run must agree to 1e-12 ---
     # The main trajectory (traj_idx=0) should be bit-identical between runs
@@ -240,12 +241,26 @@ def test_lle_dual_traj_output_unchanged():
             "may leave stale values across calls."
         ),
     )
-    # LLE convergence values must also be reproducible
+    # LLE convergence values must also be reproducible (equal_nan=True for NaN positions)
     np.testing.assert_allclose(
         res_lle.lle_convergence, res_lle2.lle_convergence,
-        atol=1e-12, rtol=0.0,
+        atol=1e-12, rtol=0.0, equal_nan=True,
         err_msg="LLE convergence arrays differ between identical runs.",
     )
+
+
+def test_lle_convergence_records_time_series_not_final_only():
+    """Benettin LLE output must record current convergence at every output sample."""
+    cfg = _make_l5_config(t_sim_ms=80.0, dt_eval_ms=0.2)
+    res_lle = _run_native(cfg, calc_lle=True)
+    lle = np.asarray(res_lle.lle_convergence, dtype=float)
+    assert len(lle) > 20
+    # v12.7: LLE uses NaN for 'not yet computed' before first renormalization
+    finite_vals = np.isfinite(lle)
+    assert np.any(finite_vals), "No finite LLE values recorded"
+    # After first renormalization, values should be recorded at output samples
+    finite_count = np.sum(finite_vals)
+    assert finite_count > 3, f"Only {finite_count} finite LLE values (expected > 3)"
 
 
 # ---------------------------------------------------------------------------

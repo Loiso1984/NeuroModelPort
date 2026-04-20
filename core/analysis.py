@@ -677,102 +677,13 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
         else:
             I_ion_soma += curr_arr
 
-    # Stimulus current (for non-synaptic types: const, pulse, alpha, zap)
-    # For synaptic stimulus (AMPA, NMDA, GABA, etc.), we must reconstruct I_stim
-    # from conductance time course - it's not included in I_ion_soma
-    s_map = {
-        'const': 0, 'pulse': 1, 'alpha': 2, 'ou_noise': 0, 'zap': 10,
-        'AMPA': 4, 'NMDA': 5, 'GABA_A': 6, 'GABA_B': 7, 'Kainate': 8, 'Nicotinic': 9,
-        'dual_AMPA_GABA': 4,  # Primary type (AMPA)
-    }
-    stim_type = cfg.stim.stim_type
-    _ew = np.zeros(0, dtype=np.float64)
-
-    if stim_type in _SYNAPTIC_TYPES:
-        # Synaptic current must be reconstructed from conductance and driving force
-        # (not included in I_ion_soma - only channel currents are there)
-        stype = s_map.get(stim_type, 0)
-        is_nmda = (stim_type == 'nmda')
-        e_syn = _get_syn_reversal(stype, cfg.channels.e_rev_syn_primary, cfg.channels.e_rev_syn_secondary)
-        
-        # Reconstruct synaptic conductance time course
-        n_events = getattr(cfg.stim, 'n_events', 0)
-        if n_events > 0:
-            event_times = getattr(cfg.stim, 'event_times_arr', np.zeros(0))
-            atau = getattr(cfg.stim, 'alpha_tau', 1.0)
-            g_syn_t = np.array([
-                get_event_driven_conductance(float(ti), stype, cfg.stim.Iext, event_times, n_events, atau)
-                for ti in t
-            ])
-        else:
-            g_syn_t = np.zeros_like(t)
-        
-        # Compute synaptic current with Mg block for NMDA
-        if is_nmda:
-            mg_block = nmda_mg_block(V, cfg.env.Mg_ext, cfg.env.nmda_mg_block_mM)
-            I_stim = -g_syn_t * mg_block * (V - e_syn)
-        else:
-            I_stim = -g_syn_t * (V - e_syn)
+    # v12.7: SSoT for stimulus current — use solver's precomputed total stimulus
+    # The solver already computed and returned the exact total stimulus current
+    if hasattr(result, 'i_stim_total') and result.i_stim_total is not None:
+        I_stim = np.asarray(result.i_stim_total, dtype=float)
     else:
-        stype = s_map.get(stim_type, 0)
-        I_stim = np.array([
-            get_stim_current(
-                float(ti), stype,
-                cfg.stim.Iext, cfg.stim.pulse_start,
-                cfg.stim.pulse_dur, cfg.stim.alpha_tau,
-                float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
-                float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
-                float(getattr(cfg.stim, "zap_rise_ms", 5.0)),
-                _ew, _ew, 0,
-            )
-            for ti in t
-        ])
-
-    # v11.7: Add dual/secondary stimulus if enabled
-    dual_cfg = getattr(cfg, 'dual_stimulation', None)
-    if dual_cfg is not None and getattr(dual_cfg, 'enabled', False):
-        secondary_type = getattr(dual_cfg, 'secondary_stim_type', 'const')
-        if secondary_type in _SYNAPTIC_TYPES:
-            # Secondary synaptic current must be reconstructed
-            stype_2 = s_map.get(secondary_type, 0)
-            is_nmda_2 = (secondary_type == 'nmda')
-            e_syn_2 = _get_syn_reversal(stype_2, cfg.channels.e_rev_syn_primary, cfg.channels.e_rev_syn_secondary)
-            
-            n_events_2 = getattr(dual_cfg, 'secondary_n_events', 0)
-            if n_events_2 > 0:
-                event_times_2 = getattr(dual_cfg, 'secondary_event_times_arr', np.zeros(0))
-                atau_2 = getattr(dual_cfg, 'secondary_alpha_tau', 1.0)
-                iext_2 = getattr(dual_cfg, 'secondary_Iext', 0.0)
-                g_syn_2_t = np.array([
-                    get_event_driven_conductance(float(ti), stype_2, iext_2, event_times_2, n_events_2, atau_2)
-                    for ti in t
-                ])
-            else:
-                g_syn_2_t = np.zeros_like(t)
-            
-            if is_nmda_2:
-                mg_block_2 = nmda_mg_block(V, cfg.env.Mg_ext, cfg.env.nmda_mg_block_mM)
-                I_stim_2 = -g_syn_2_t * mg_block_2 * (V - e_syn_2)
-            else:
-                I_stim_2 = -g_syn_2_t * (V - e_syn_2)
-            I_stim = I_stim + I_stim_2
-        else:
-            stype_2 = s_map.get(secondary_type, 0)
-            I_stim_2 = np.array([
-                get_stim_current(
-                    float(ti), stype_2,
-                    float(getattr(dual_cfg, 'secondary_Iext', 0.0)),
-                    float(getattr(dual_cfg, 'secondary_start', 0.0)),
-                    float(getattr(dual_cfg, 'secondary_duration', 0.0)),
-                    float(getattr(dual_cfg, 'secondary_alpha_tau', 1.0)),
-                    float(getattr(dual_cfg, "secondary_zap_f0_hz", 0.5)),
-                    float(getattr(dual_cfg, "secondary_zap_f1_hz", 40.0)),
-                    float(getattr(dual_cfg, "secondary_zap_rise_ms", 5.0)),
-                    _ew, _ew, 0,
-                )
-                for ti in t
-            ])
-            I_stim = I_stim + I_stim_2
+        # Fallback for old data without i_stim_total field
+        I_stim = np.zeros_like(V)
 
     # Axial current (row 0 of sparse Laplacian × V_all)
     if result.n_comp > 1:

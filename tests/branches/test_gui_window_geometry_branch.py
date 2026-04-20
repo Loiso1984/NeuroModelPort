@@ -14,6 +14,7 @@ pytest.importorskip("pydantic")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QToolBar
 
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
@@ -41,7 +42,9 @@ def test_clean_start_uses_named_default_preset_and_visible_primary_docks():
                 assert w._sidebar_preset_combo.currentText().startswith("A:")
                 assert w._dock_params.isVisible()
                 assert w._dock_analytics.isVisible()
-                assert w.oscilloscope.parent() is w.centralWidget()
+                assert w.centralWidget() is w.oscilloscope
+                assert isinstance(w.main_toolbar, QToolBar)
+                assert isinstance(w.settings_toolbar, QToolBar)
             finally:
                 w.close()
         finally:
@@ -114,12 +117,36 @@ def test_desktop_and_debug_layouts_allow_wide_parameter_panel():
             os.chdir(old_cwd)
 
 
+def test_live_slider_stops_pending_analytics_timer():
+    app = _app()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            w = MainWindow()
+            w.show()
+            app.processEvents()
+            try:
+                # Guard: ensure live sliders are initialized
+                assert len(w._live_sliders) > 0, "Live sliders not initialized"
+                w._analytics_debounce_timer.start(5000)
+                assert w._analytics_debounce_timer.isActive()
+                w._on_live_slider_moved(0, w._live_sliders[0].value())
+                assert not w._analytics_debounce_timer.isActive()
+                assert w._live_timer.isActive()
+            finally:
+                w.close()
+        finally:
+            os.chdir(old_cwd)
+
+
 def _run_as_script() -> int:
     tests = [
         test_clean_start_uses_named_default_preset_and_visible_primary_docks,
         test_restored_config_without_preset_identity_is_marked_custom,
         test_layout_guard_recovers_hidden_primary_docks_for_laptop,
         test_desktop_and_debug_layouts_allow_wide_parameter_panel,
+        test_live_slider_stops_pending_analytics_timer,
     ]
     passed = 0
     for fn in tests:

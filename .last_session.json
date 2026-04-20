@@ -24,7 +24,7 @@
   },
   "channels": {
     "Cm": 1.0,
-    "gNa_max": 120.0,
+    "gNa_max": -30.39999999999999,
     "gK_max": 45.0,
     "gL": 0.1,
     "ENa": 55.0,
@@ -99,7 +99,7 @@
     "dt_eval": 0.05,
     "jacobian_mode": "native_hines",
     "stim_type": "const",
-    "Iext": 40.0,
+    "Iext": 500.0,
     "pulse_start": 10.0,
     "pulse_dur": 1.0,
     "alpha_tau": 1.0,

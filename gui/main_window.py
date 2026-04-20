@@ -195,18 +195,25 @@ class MainWindow(QMainWindow):
         self._analytics_generation = 0
         self._pending_analytics_generation = 0
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        self._central_shell = central
-        self._main_layout = QVBoxLayout(central)
-        self._main_layout.setContentsMargins(4, 4, 4, 4)
-        self._main_layout.setSpacing(4)
-        self._main_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-        central.setMinimumSize(0, 0)
+        # v12.7: Create oscilloscope first (will be set as central widget)
+        self.oscilloscope = OscilloscopeWidget()
+        self.oscilloscope.delay_target_changed.connect(self._on_delay_target_changed)
+        self._delay_target_name, self._delay_custom_index = (
+            self.oscilloscope.get_delay_target_selection()
+        )
+        self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
+        # v12.7: Re-sync local values — oscilloscope clamps them to valid range
+        self._delay_target_name, self._delay_custom_index = (
+            self.oscilloscope.get_delay_target_selection()
+        )
+        
+        # v12.7: Set oscilloscope as TRUE central widget for proper scaling
+        self.setCentralWidget(self.oscilloscope)
         self.setMinimumSize(980, 680)
 
-        self._setup_top_bar()
-        self._setup_cockpit()
+        # v12.7: Setup toolbars and docks
+        self._setup_toolbars()
+        self._setup_cockpit_docks()
         self._setup_view_menu()
         self._setup_status_bar()
         self._wire_service_signals()
@@ -243,348 +250,190 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
     # ─────────────────────────────────────────────────────────────────
-    #  TOP BAR
+    #  TOOLBARS (v12.7 Cockpit Paradigm)
     # ─────────────────────────────────────────────────────────────────
-    def _setup_top_bar(self):
-        # Create a two-row layout to prevent overlap
-        top_container = QWidget()
-        top_layout = QVBoxLayout(top_container)
-        top_layout.setSpacing(4)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Row 1: Main action buttons
-        row1 = QHBoxLayout()
-        row1.setSpacing(6)
+    def _setup_toolbars(self):
+        """v12.7: Native QToolBars for clean cockpit layout."""
+        # Main Toolbar (Run, Stoch, Sweep, etc.)
+        self.main_toolbar = QToolBar("Main", self)
+        self.main_toolbar.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
-        # ── Run button ──────────────────────────────────────────────
-        self.btn_run = QPushButton("RUN SIMULATION")
-        self.btn_run.setMinimumHeight(38)
-        self.btn_run.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 14px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #40A060, stop:1 #2E7D32);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #4CAF70; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
+        # Run button
+        self.btn_run = QPushButton("RUN")
+        self.btn_run.setToolTip("Run simulation")
         self.btn_run.clicked.connect(self._on_run_button_clicked)
+        self.main_toolbar.addWidget(self.btn_run)
 
-        # ── Stochastic button ────────────────────────────────────────
-        self.btn_stoch = QPushButton("STOCHASTIC")
-        self.btn_stoch.setMinimumHeight(38)
-        self.btn_stoch.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 12px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #6050A0, stop:1 #40306A);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #7060B0; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
-        self.btn_stoch.setToolTip("Run stochastic simulation (Langevin gate & membrane noise via Native Hines)")
-        self.btn_stoch.clicked.connect(lambda: self.sim_controller.run_stochastic(self.config_manager.config, 1, on_success=self._on_stoch_done, on_error=self._on_sim_error))
-
-        # ── Sweep button ─────────────────────────────────────────────
-        self.btn_sweep = QPushButton("SWEEP")
-        self.btn_sweep.setMinimumHeight(38)
-        self.btn_sweep.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 12px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #0070A0, stop:1 #004E70);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #0080B0; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
-        self.btn_sweep.setToolTip("Run parametric sweep (configured in Analysis tab)")
-        self.btn_sweep.clicked.connect(self.run_sweep)
-
-        self.btn_fi = QPushButton("f-I")
-        self.btn_fi.setMinimumHeight(38)
-        self.btn_fi.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 12px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #2A8F7A, stop:1 #1D6758);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #33A18A; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
-        self.btn_fi.setToolTip("Run a dedicated f-I sweep over Iext with results opened in the f-I analytics tab")
-        self.btn_fi.clicked.connect(self.run_fi_curve)
-
-        # ── SD / ExcMap buttons ───────────────────────────────────────
-        self.btn_sd = QPushButton("S-D")
-        self.btn_sd.setMinimumHeight(38)
-        self.btn_sd.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 12px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #906030, stop:1 #603010);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #A07040; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
-        self.btn_sd.setToolTip("Compute Strength-Duration curve (binary search)")
-        self.btn_sd.clicked.connect(self.run_sd_curve)
-
-        self.btn_excmap = QPushButton("EXCIT. MAP")
-        self.btn_excmap.setMinimumHeight(38)
-        self.btn_excmap.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 12px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #208080, stop:1 #106060);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #30A0A0; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
-        self.btn_excmap.setToolTip("Compute 2-D excitability map (I x duration)")
-        self.btn_excmap.clicked.connect(self.run_excmap)
-
-        # ── Cancel button (hidden until computation starts) ──────────
+        # Cancel button
         self.btn_cancel = QPushButton("CANCEL")
-        self.btn_cancel.setMinimumHeight(38)
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                font-weight: bold;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #CC3030, stop:1 #991818);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #FF4040; }
-        """)
-        self.btn_cancel.setToolTip("Cancel the running computation")
+        self.btn_cancel.setToolTip("Cancel running computation")
         self.btn_cancel.clicked.connect(self._request_cancel)
         self.btn_cancel.setVisible(False)
         self._cancel_requested = False
+        self.main_toolbar.addWidget(self.btn_cancel)
 
-        # ── Hines solver toggle ──────────────────────────────────────
+        self.main_toolbar.addSeparator()
+
+        # Hines toggle
         self.btn_hines = QPushButton("HINES")
-        self.btn_hines.setMinimumHeight(38)
         self.btn_hines.setCheckable(True)
         self.btn_hines.setChecked(False)
-        self.btn_hines.setStyleSheet("""
-            QPushButton {
-                background: #313244; color: #89DCEB; border-radius: 5px;
-                border: 1px solid #45475A;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: #3E3F5E; }
-            QPushButton:disabled { color: #555568; }
-        """)
-        self.btn_hines.setToolTip("Toggle native Hines solver (O(N) vs SciPy BDF)")
+        self.btn_hines.setToolTip("Toggle native Hines solver")
         self.btn_hines.clicked.connect(self._on_hines_toggled)
+        self.main_toolbar.addWidget(self.btn_hines)
 
-        # ── Jacobian mode selector (when Hines is OFF) ──────────────────
+        # Jacobian selector
         self.combo_jacobian = QComboBox()
         self.combo_jacobian.addItems(["dense_fd", "sparse_fd", "analytic_sparse"])
-        self.combo_jacobian.setToolTip("Jacobian mode for SciPy BDF solver")
-        self.combo_jacobian.setMinimumHeight(38)
-        self.combo_jacobian.setMaximumWidth(120)
+        self.combo_jacobian.setToolTip("Jacobian mode for SciPy BDF")
+        self.combo_jacobian.setMaximumWidth(100)
         self.combo_jacobian.currentTextChanged.connect(self._on_jacobian_changed)
+        self.main_toolbar.addWidget(self.combo_jacobian)
 
-        # ── Export buttons ─────────────────────────────────────
-        self.btn_export = QPushButton("CSV")
+        self.main_toolbar.addSeparator()
+
+        # Analysis buttons
+        self.btn_stoch = QPushButton("STOCH")
+        self.btn_stoch.setToolTip("Stochastic simulation")
+        self.btn_stoch.clicked.connect(lambda: self.sim_controller.run_stochastic(
+            self.config_manager.config, 1, on_success=self._on_stoch_done, on_error=self._on_sim_error))
+        self.main_toolbar.addWidget(self.btn_stoch)
+
+        self.btn_sweep = QPushButton("SWEEP")
+        self.btn_sweep.setToolTip("Parameter sweep")
+        self.btn_sweep.clicked.connect(self.run_sweep)
+        self.main_toolbar.addWidget(self.btn_sweep)
+
+        self.btn_fi = QPushButton("f-I")
+        self.btn_fi.setToolTip("Frequency-Current curve")
+        self.btn_fi.clicked.connect(self.run_fi_curve)
+        self.main_toolbar.addWidget(self.btn_fi)
+
+        self.btn_sd = QPushButton("S-D")
+        self.btn_sd.setToolTip("Strength-Duration curve")
+        self.btn_sd.clicked.connect(self.run_sd_curve)
+        self.main_toolbar.addWidget(self.btn_sd)
+
+        self.btn_excmap = QPushButton("EXCMAP")
+        self.btn_excmap.setToolTip("Excitability map")
+        self.btn_excmap.clicked.connect(self.run_excmap)
+        self.main_toolbar.addWidget(self.btn_excmap)
+
+        self.main_toolbar.addSeparator()
+
+        # Export buttons
         self.btn_export_plot = QPushButton("Plot")
-        self.btn_export_plot.setMinimumHeight(38)
+        self.btn_export_plot.setToolTip("Export plot")
         self.btn_export_plot.setEnabled(False)
-        self.btn_export_plot.setStyleSheet("""
-            QPushButton {
-                background: #313244; color: #A6E3A1; border-radius: 5px;
-                border: 1px solid #45475A;
-            }
-            QPushButton:hover  { background: #3E3F5E; }
-            QPushButton:disabled { color: #555568; }
-        """)
         self.btn_export_plot.clicked.connect(self.export_plot)
+        self.main_toolbar.addWidget(self.btn_export_plot)
 
-        self.btn_export.setMinimumHeight(38)
+        self.btn_export = QPushButton("CSV")
+        self.btn_export.setToolTip("Export CSV")
         self.btn_export.setEnabled(False)
-        self.btn_export.setStyleSheet("""
-            QPushButton {
-                background: #313244; color: #89DCEB; border-radius: 5px;
-                border: 1px solid #45475A;
-            }
-            QPushButton:hover  { background: #3E3F5E; }
-            QPushButton:disabled { color: #555568; }
-        """)
         self.btn_export.clicked.connect(self.export_csv)
+        self.main_toolbar.addWidget(self.btn_export)
 
         self.btn_export_nml = QPushButton("NeuroML")
-        self.btn_export_nml.setMinimumHeight(38)
-        self.btn_export_nml.setToolTip("Export model config to NeuroML 2.2 XML (Stage 6.4)")
-        self.btn_export_nml.setStyleSheet("""
-            QPushButton {
-                background: #313244; color: #CBA6F7; border-radius: 5px;
-                font-size: 12px; font-weight: bold;
-            }
-            QPushButton:hover { background: #45475A; }
-        """)
+        self.btn_export_nml.setToolTip("Export to NeuroML")
         self.btn_export_nml.clicked.connect(self.export_neuroml)
+        self.main_toolbar.addWidget(self.btn_export_nml)
 
-        # ── Save/Load Config buttons ─────────────────────────────
+        self.main_toolbar.addSeparator()
+
+        # Config buttons
         self.btn_save_config = QPushButton("Save")
-        self.btn_save_config.setMinimumHeight(38)
-        self.btn_save_config.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 12px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #28A745, stop:1 #20893D);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #36A349; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
-        self.btn_save_config.setToolTip("Save current configuration to JSON file")
+        self.btn_save_config.setToolTip("Save config")
         self.btn_save_config.clicked.connect(self.save_config_as)
+        self.main_toolbar.addWidget(self.btn_save_config)
 
         self.btn_load_config = QPushButton("Open")
-        self.btn_load_config.setMinimumHeight(38)
-        self.btn_load_config.setStyleSheet("""
-            QPushButton {
-                font-weight: bold; font-size: 12px;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #6F42C1, stop:1 #4A1E61);
-                color: white; border-radius: 5px;
-            }
-            QPushButton:hover { background: #8B5CF6; }
-            QPushButton:disabled { background: #555568; color: #888; }
-        """)
-        self.btn_load_config.setToolTip("Load configuration from JSON file")
+        self.btn_load_config.setToolTip("Load config")
         self.btn_load_config.clicked.connect(self.load_config_from)
+        self.main_toolbar.addWidget(self.btn_load_config)
 
         self.btn_more_actions = QPushButton("Actions")
-        self.btn_more_actions.setMinimumHeight(38)
-        self.btn_more_actions.setStyleSheet(
-            "QPushButton { background:#313244; color:#CDD6F4; border-radius:5px; "
-            "border:1px solid #45475A; font-weight:bold; }"
-            "QPushButton:hover { background:#45475A; }"
-        )
+        self.btn_more_actions.setToolTip("More actions")
         self._build_more_actions_menu()
+        self.main_toolbar.addWidget(self.btn_more_actions)
 
-        # ── Sidebar toggle button ──────────────────────────────
-        self.btn_toggle_sidebar = QPushButton("<")
-        self.btn_toggle_sidebar.setFixedWidth(30)
-        self.btn_toggle_sidebar.setFixedHeight(38)
-        self.btn_toggle_sidebar.setToolTip("Show / hide parameters panel")
-        self.btn_toggle_sidebar.setStyleSheet(
-            "QPushButton { background:#313244; color:#89B4FA; border-radius:5px; font-size:14px; }"
-            "QPushButton:hover { background:#45475A; }"
-        )
-        self.btn_toggle_sidebar.clicked.connect(self._toggle_sidebar)
+        # Settings Toolbar (Preset, Lang, Mode)
+        self.settings_toolbar = QToolBar("Settings", self)
+        self.settings_toolbar.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, self.settings_toolbar)
 
-        # ── Window size preset button ────────────────────────────
-        self.btn_window_size = QPushButton("Size")
-        self.btn_window_size.setFixedWidth(30)
-        self.btn_window_size.setFixedHeight(38)
-        self.btn_window_size.setToolTip("Window size preset (for laptops)")
-        self.btn_window_size.setStyleSheet(
-            "QPushButton { background:#313244; color:#CBA6F7; border-radius:5px; font-size:14px; }"
-            "QPushButton:hover { background:#45475A; }"
-        )
-        self.btn_window_size.clicked.connect(self._show_window_size_menu)
-
-        # Add row 1 buttons
-        row1.addWidget(self.btn_run, 4)
-        row1.addWidget(self.btn_cancel, 2)
-        row1.addWidget(self.btn_hines, 2)
-        row1.addWidget(self.combo_jacobian, 1)
-        row1.addWidget(self.btn_stoch, 2)
-        row1.addWidget(self.btn_sweep, 2)
-        row1.addWidget(self.btn_fi, 1)
-        row1.addWidget(self.btn_sd, 2)
-        row1.addWidget(self.btn_excmap, 2)
-        row1.addWidget(self.btn_export_plot, 2)
-        row1.addWidget(self.btn_export, 2)
-        row1.addWidget(self.btn_export_nml, 2)
-        row1.addWidget(self.btn_save_config, 2)
-        row1.addWidget(self.btn_load_config, 2)
-        row1.addWidget(self.btn_more_actions, 2)
-        row1.addWidget(self.btn_window_size)
-        row1.addWidget(self.btn_toggle_sidebar)
-        row1.addStretch()
-        
-        # Row 2: Preset, Language, and Sparkline
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-
-        # ── Preset selector ───────────────────────────────────────────
+        # Preset selector
         self.lbl_preset = QLabel("Preset:")
+        self.settings_toolbar.addWidget(self.lbl_preset)
         self.combo_presets = QComboBox()
-        self.combo_presets.setMinimumWidth(200)
+        self.combo_presets.setMinimumWidth(160)
         self.combo_presets.addItems(["— Select preset —"] + get_preset_names())
         self.combo_presets.currentTextChanged.connect(self.load_preset)
+        self.settings_toolbar.addWidget(self.combo_presets)
 
-        # ── Language selector ─────────────────────────────────────────
+        self.settings_toolbar.addSeparator()
+
+        # Language selector
         self.lbl_lang = QLabel("Lang:")
+        self.settings_toolbar.addWidget(self.lbl_lang)
         self.combo_lang = QComboBox()
         self.combo_lang.addItems(["EN", "RU"])
         self.combo_lang.setCurrentText("EN")
         self.combo_lang.currentTextChanged.connect(self.change_language)
+        self.settings_toolbar.addWidget(self.combo_lang)
 
-        # ── Experience mode selector ───────────────────────────────
-        self.lbl_mode = QLabel("Mode:")
+        self.settings_toolbar.addSeparator()
+
+        # Mode selector
+        self.settings_toolbar.addWidget(QLabel("Mode:"))
         self.combo_mode = QComboBox()
         self.combo_mode.addItems(["🔬 Microscope", "🌉 Bridge", "🧪 Research"])
         self.combo_mode.setCurrentText("🌉 Bridge")
         self.combo_mode.currentTextChanged.connect(self._toggle_ui_complexity)
+        self.settings_toolbar.addWidget(self.combo_mode)
 
-        # ── Sparkline (mini Vm trace) ──────────────────────────
+        self.settings_toolbar.addSeparator()
+
+        # Sidebar toggle
+        self.btn_toggle_sidebar = QPushButton("Sidebar")
+        self.btn_toggle_sidebar.setToolTip("Toggle parameters panel")
+        self.btn_toggle_sidebar.setCheckable(True)
+        self.btn_toggle_sidebar.setChecked(True)
+        self.btn_toggle_sidebar.clicked.connect(self._toggle_sidebar)
+        self.settings_toolbar.addWidget(self.btn_toggle_sidebar)
+
+        # Window size preset button
+        self.btn_window_size = QPushButton("Size")
+        self.btn_window_size.setToolTip("Window size preset (for laptops)")
+        self.btn_window_size.clicked.connect(self._show_window_size_menu)
+        self.settings_toolbar.addWidget(self.btn_window_size)
+
+        # Sparkline (compact Vm preview)
         self._sparkline = pg.PlotWidget()
-        self._sparkline.setFixedHeight(36)
-        self._sparkline.setMinimumWidth(150)
+        self._sparkline.setFixedSize(120, 28)
         self._sparkline.hideAxis('left')
         self._sparkline.hideAxis('bottom')
         self._sparkline.setBackground('#0D1117')
-        self._sparkline.setToolTip("Latest somatic Vm trace")
+        self._sparkline.setToolTip("Latest Vm trace")
         self._sparkline_curve = self._sparkline.plot([], [], pen=pg.mkPen('#89B4FA', width=1))
-
-        row2.addWidget(self.lbl_preset)
-        row2.addWidget(self.combo_presets, 2)
-        row2.addWidget(self.lbl_lang)
-        row2.addWidget(self.combo_lang)
-        row2.addWidget(self.lbl_mode)
-        row2.addWidget(self.combo_mode)
-        row2.addWidget(self._sparkline, 1)
-        row2.addStretch()
-
-        top_layout.addLayout(row1)
-        top_layout.addLayout(row2)
-        self._main_layout.addWidget(top_container)
+        self.settings_toolbar.addWidget(self._sparkline)
 
     # ─────────────────────────────────────────────────────────────────
-    #  TABS  +  COLLAPSIBLE SIDEBAR
+    #  DOCK WIDGETS (v12.7 Cockpit Docks)
     # ─────────────────────────────────────────────────────────────────
-    def _setup_cockpit(self):
+    def _setup_cockpit_docks(self):
         """
-        v13.0 Cockpit Layout — Dock-based professional interface.
+        v12.7: Dock-based professional interface.
         
-        Replaces QTabWidget with QDockWidget architecture for maximum flexibility.
-        All major panels become detachable, nestable, and tabbable docks.
-        
-        Dock Layout:
-        - Central: Oscilloscope (primary visualization)
+        Oscilloscope is now the TRUE central widget (set in __init__).
+        Docks surround the central visualization:
         - Left: Parameters (sidebar with forms)
         - Right: Live Controls (sliders), Topology (heatmap)
         - Bottom: Analytics (matplotlib tabs)
         - Floating: Stimulation Studio, Axon Biophysics, Guide
         """
-        # ── Central Widget: Oscilloscope ────────────────────────────
-        self.oscilloscope = OscilloscopeWidget()
-        self.oscilloscope.delay_target_changed.connect(self._on_delay_target_changed)
-        self._delay_target_name, self._delay_custom_index = (
-            self.oscilloscope.get_delay_target_selection()
-        )
-        self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
-        self._main_layout.addWidget(self.oscilloscope, 1)
+        # Note: Oscilloscope is already created and set as central widget in __init__
 
         # ── Dock 1: Parameters (Left) ───────────────────────────────
         self._dock_params = QDockWidget("Parameters", self)
@@ -812,6 +661,10 @@ class MainWindow(QMainWindow):
             self._refresh_all_forms()
             self._sync_hines_button_state()
             self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
+            # Re-sync local values after oscilloscope clamps them
+            self._delay_target_name, self._delay_custom_index = (
+                self.oscilloscope.get_delay_target_selection()
+            )
             self.topology.draw_neuron(self.config_manager.config)
             self._status("Restored previous session as custom configuration.")
             return
@@ -863,16 +716,16 @@ class MainWindow(QMainWindow):
         return platform.lower() in {"offscreen", "minimal"}
 
     def _ensure_usable_layout(self) -> None:
+        """v12.7: Ensure oscilloscope is central widget and docks are visible."""
         self._apply_layout_preset(preset_for_width(max(1, self.width())).name, resize_window=False)
         if hasattr(self, "_dock_params"):
             self._dock_params.setVisible(True)
             self._dock_params.raise_()
         if hasattr(self, "_dock_analytics"):
             self._dock_analytics.setVisible(True)
-        if self.centralWidget() is not getattr(self, "_central_shell", None):
-            self.setCentralWidget(self._central_shell)
-        if self.oscilloscope.parent() is None:
-            self._main_layout.addWidget(self.oscilloscope, 1)
+        # v12.7: Oscilloscope is always the central widget in cockpit paradigm
+        if self.centralWidget() is not self.oscilloscope:
+            self.setCentralWidget(self.oscilloscope)
         self.oscilloscope.raise_()
 
     def _build_sidebar_panel(self):
@@ -1611,6 +1464,10 @@ class MainWindow(QMainWindow):
             slider.blockSignals(False)
             return
 
+        # v12.7: Debounce Fix - Stop analytics timer during slider movement
+        # Prevent race between solver and heavy analytics during rapid slider changes
+        if self._analytics_debounce_timer.isActive():
+            self._analytics_debounce_timer.stop()
         # Debounced auto-run if HINES mode is active
         self._live_timer.start()
 
@@ -1974,6 +1831,10 @@ class MainWindow(QMainWindow):
         self._sync_hines_button_state()
         self._refresh_all_forms()
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
+        # Re-sync local values after oscilloscope clamps them to valid range
+        self._delay_target_name, self._delay_custom_index = (
+            self.oscilloscope.get_delay_target_selection()
+        )
         
         # --- ФИКС: Синхронизируем виджет с пресетом, а не сбрасываем его ---
         if self.config_manager.config.dual_stimulation is not None:
@@ -2177,14 +2038,16 @@ class MainWindow(QMainWindow):
         return "\n".join(lines)
 
     def _toggle_sidebar(self):
-        """Toggle sidebar visibility."""
-        if self._sidebar_visible:
-            self._sidebar_frame.hide()
-            self.btn_toggle_sidebar.setText(">")
-        else:
+        """v12.7: Toggle sidebar visibility with checkable toolbar button."""
+        # Use button state as source of truth
+        show = self.btn_toggle_sidebar.isChecked()
+        self._sidebar_visible = show
+        if show:
             self._sidebar_frame.show()
-            self.btn_toggle_sidebar.setText("<")
-        self._sidebar_visible = not self._sidebar_visible
+            self._dock_params.show()
+        else:
+            self._sidebar_frame.hide()
+            self._dock_params.hide()
     
     def _show_window_size_menu(self):
         """Show layout preset menu for laptop-first responsive shell."""
@@ -2580,7 +2443,10 @@ class MainWindow(QMainWindow):
                     self._pending_morph_for_analytics = result.get('morph')  # may be None from some paths
                     self.analytics.mark_analysis_pending(res)
                     self._analytics_debounce_timer.stop()
-                    self._analytics_debounce_timer.start(300)  # 300ms debounce
+                    # v12.7: Only start analytics debounce if user has finished moving slider
+                    # (live timer is NOT active). This prevents analytics choke during rapid changes.
+                    if not self._live_timer.isActive():
+                        self._analytics_debounce_timer.start(300)  # 300ms debounce
 
                 dual_cfg = self.dual_stim_widget.config if self.dual_stim_widget.config.enabled else None
                 self.topology.draw_neuron(
