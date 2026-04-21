@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import inspect
 
 
-def test_chaos_tab_exposes_only_native_benettin_controls():
-    from PySide6.QtWidgets import QApplication, QComboBox, QSpinBox, QDoubleSpinBox
+def test_chaos_tab_is_plot_only_without_lle_launch_controls():
+    from PySide6.QtWidgets import QApplication, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox
     from gui.analytics import AnalyticsWidget
 
     _ = QApplication.instance() or QApplication([])
@@ -13,25 +12,61 @@ def test_chaos_tab_exposes_only_native_benettin_controls():
     try:
         tab = analytics._build_tab_chaos()
         assert analytics.ax_chaos is not None
-        assert hasattr(analytics, "_chaos_subspace_combo")
-        assert analytics._chaos_subspace_combo.findText("Voltage Only") >= 0
-        assert analytics._chaos_subspace_combo.findText("Voltage + Gates") >= 0
-        assert analytics._chaos_subspace_combo.findText("Full State") >= 0
+        assert not hasattr(analytics, "_btn_compute_lle")
+        assert not hasattr(analytics, "_btn_chaos_compute_lle")
+        assert not hasattr(analytics, "_chaos_subspace_combo")
         assert not hasattr(analytics, "_chaos_embed_spin")
         assert not hasattr(analytics, "_chaos_pair_mode")
-        assert len(tab.findChildren(QComboBox)) == 1
+        assert not tab.findChildren(QComboBox)
         assert not tab.findChildren(QSpinBox)
         assert not tab.findChildren(QDoubleSpinBox)
+        assert not [btn for btn in tab.findChildren(QPushButton) if "LLE" in btn.text()]
     finally:
         analytics.close()
 
 
-def test_run_with_lle_enabled_passes_subspace_mode_to_controller():
+def test_debug_lte_tab_is_removed():
+    from PySide6.QtWidgets import QApplication
+    from gui.analytics import AnalyticsWidget
+
+    _ = QApplication.instance() or QApplication([])
+    analytics = AnalyticsWidget()
+    try:
+        titles = [spec["title"] for spec in analytics._all_tab_specs.values()]
+        assert "Debug LTE" not in titles
+        assert not hasattr(analytics, "_build_tab_debug")
+        assert not hasattr(analytics, "_update_debug")
+    finally:
+        analytics.close()
+
+
+def test_lle_results_tab_is_visible_and_focusable_from_filters():
+    from PySide6.QtWidgets import QApplication
+    from gui.analytics import AnalyticsWidget
+
+    _ = QApplication.instance() or QApplication([])
+    analytics = AnalyticsWidget()
+    try:
+        titles = [spec["title"] for spec in analytics._all_tab_specs.values()]
+        assert "Lyapunov (LLE)" in titles
+
+        analytics._combo_category.setCurrentText("Physics")
+        assert "Lyapunov (LLE)" not in [analytics.tabText(i) for i in range(analytics.count())]
+
+        assert analytics.show_lle_tab() is True
+        assert analytics.currentWidget() is not None
+        assert analytics.tabText(analytics.currentIndex()) == "Lyapunov (LLE)"
+        assert hasattr(analytics, "ax_chaos")
+    finally:
+        analytics.close()
+
+
+def test_experiment_studio_lle_passes_pydantic_subspace_to_controller(monkeypatch):
+    from PySide6.QtWidgets import QApplication
     from gui.main_window import MainWindow
 
-    class Combo:
-        def currentText(self):
-            return "Voltage + Gates"
+    _ = QApplication.instance() or QApplication([])
+    win = MainWindow()
 
     class Controller:
         def __init__(self):
@@ -40,25 +75,39 @@ def test_run_with_lle_enabled_passes_subspace_mode_to_controller():
         def run_single(self, _cfg, **kwargs):
             self.kwargs = kwargs
 
-    cfg = SimpleNamespace(stim=SimpleNamespace(calc_lle=False))
-    win = MainWindow.__new__(MainWindow)
-    win.config_manager = SimpleNamespace(config=cfg)
-    win.analytics = SimpleNamespace(_chaos_subspace_combo=Combo())
-    win.sim_controller = Controller()
-    win._status = lambda _msg: None
+    try:
+        win.sim_controller = Controller()
+        monkeypatch.setattr(win, "_preflight_validate", lambda: True)
+        monkeypatch.setattr(win, "_sync_dual_stim_into_config", lambda: False)
+        monkeypatch.setattr(win, "_sync_hines_button_state", lambda: None)
+        monkeypatch.setattr(win, "_lock_ui", lambda _busy: None)
+        monkeypatch.setattr(win, "_status", lambda _msg: None)
 
-    MainWindow._run_with_lle_enabled(win)
+        win.exp_lle_subspace_combo.setCurrentText("Custom")
+        win.exp_lle_delta_spin.setValue(1e-5)
+        win.exp_lle_evolve_spin.setValue(2.0)
+        win.exp_lle_custom_gates_edit.setText("m, h, s")
+        win.exp_lle_custom_ca_check.setChecked(True)
+        win._sync_experiment_studio_to_config()
+        win._run_lle_experiment()
 
-    assert cfg.stim.calc_lle is True
-    assert win.sim_controller.kwargs["compute_lyapunov"] is True
-    assert win.sim_controller.kwargs["lle_subspace_mode"] == 1
+        assert win.config_manager.config.analysis.lle_subspace == "Custom"
+        assert win.config_manager.config.analysis.lle_custom_gates == "m, h, s"
+        assert win.config_manager.config.stim.jacobian_mode == "native_hines"
+        assert win.sim_controller.kwargs["compute_lyapunov"] is True
+        assert win.sim_controller.kwargs["lle_subspace_mode"] == 3
+    finally:
+        win.close()
 
 
-def test_simulation_controller_routes_native_lle_to_run_native():
+def test_simulation_controller_routes_lle_to_native_with_pydantic_params():
     from gui.simulation_controller import SimulationController
 
     sig = inspect.signature(SimulationController.run_single)
     assert "lle_subspace_mode" in sig.parameters
 
     source = inspect.getsource(SimulationController.run_single)
-    assert "solver.run_native(config, calc_lle=True, lle_subspace_mode=int(lle_subspace_mode))" in source
+    assert "solver.run_native(" in source
+    assert "calc_lle=True" in source
+    assert "lle_delta=float(getattr(config.analysis" in source
+    assert "lle_t_evolve=float(getattr(config.analysis" in source

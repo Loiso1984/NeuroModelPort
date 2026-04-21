@@ -1935,11 +1935,11 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         lyap_raw = estimate_ftle_lle(
             V,
             t,
-            embedding_dim=getattr(ana, "lyapunov_embedding_dim", 3),
-            lag_steps=getattr(ana, "lyapunov_lag_steps", 2),
-            min_separation_ms=getattr(ana, "lyapunov_min_separation_ms", 10.0),
-            fit_start_ms=getattr(ana, "lyapunov_fit_start_ms", 5.0),
-            fit_end_ms=getattr(ana, "lyapunov_fit_end_ms", 40.0),
+            embedding_dim=3,
+            lag_steps=2,
+            min_separation_ms=10.0,
+            fit_start_ms=5.0,
+            fit_end_ms=40.0,
             is_stochastic=bool(
                 getattr(cfg.stim, "stoch_gating", False)
                 or getattr(cfg.stim, "synaptic_train_type", "none") == "poisson"

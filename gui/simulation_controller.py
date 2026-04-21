@@ -86,8 +86,14 @@ class SimulationController(QObject):
         
         def run_simulation():
             solver = NeuronSolver(config)
-            if compute_lyapunov and getattr(config.stim, "jacobian_mode", "") == "native_hines":
-                result = solver.run_native(config, calc_lle=True, lle_subspace_mode=int(lle_subspace_mode))
+            if compute_lyapunov:
+                result = solver.run_native(
+                    config,
+                    calc_lle=True,
+                    lle_delta=float(getattr(config.analysis, "lle_delta", 1e-6)),
+                    lle_t_evolve=float(getattr(config.analysis, "lle_t_evolve_ms", 1.0)),
+                    lle_subspace_mode=int(lle_subspace_mode),
+                )
             else:
                 result = solver.run_single()
             
@@ -101,8 +107,8 @@ class SimulationController(QObject):
             # Post-process physics (current reconstruction, ATP estimates)
             solver._post_process_physics(result, morph)
             
-            # Full analysis (spike detection, statistics, LLE if requested)
-            stats = full_analysis(result, compute_lyapunov=compute_lyapunov)
+            # Native Benettin LLE is already attached to result.lle_convergence.
+            stats = full_analysis(result, compute_lyapunov=False)
             
             return {
                 'single': result,

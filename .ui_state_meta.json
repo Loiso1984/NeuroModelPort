@@ -1,1 +1,1 @@
-{"version": 1, "layout_engine": "dock-shell-v1", "qt_platform": "windows"}
+{"version": 2, "layout_engine": "experiment-studio-dock-shell-v2", "qt_platform": "windows", "dock_object_names": ["dock_analytics", "dock_axon", "dock_experiment", "dock_guide", "dock_live", "dock_params", "dock_stim", "dock_topology"]}

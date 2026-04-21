@@ -17,7 +17,7 @@ Analytical tabs using matplotlib embedded in Qt:
  12. Spectrogram         - STFT of soma Vm
  13. Impedance Z(f)      - membrane frequency response (|Z|, phase)
 
-Lyapunov computation is explicit via `Compute LLE` action.
+Lyapunov computation is launched from Experiment Studio and visualized here.
 """
 
 import logging
@@ -26,7 +26,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget,
                                 QLabel, QTextEdit, QHBoxLayout,
                                 QSizePolicy, QScrollArea, QPushButton, QMainWindow, QComboBox)
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
 import matplotlib
@@ -529,9 +529,6 @@ class FullscreenPlotViewer(QMainWindow):
 class AnalyticsWidget(QTabWidget):
     """Main analytics widget — updated by MainWindow after each run."""
     
-    # v12.2: Signal emitted when user requests LLE computation with full rerun
-    computeLleRequested = Signal()
-
     def __init__(self, parent=None):
         """
         Initialize the AnalyticsWidget instance, setting internal state and constructing the tab UI.
@@ -558,7 +555,7 @@ class AnalyticsWidget(QTabWidget):
             5: 'Spectral', 6: 'Spectral', 7: 'Spectral',
             8: 'Sweep', 9: 'Sweep', 10: 'Sweep', 11: 'Sweep',
             12: 'Physics', 13: 'Physics', 14: 'Physics', 15: 'Physics', 18: 'Physics',
-            19: 'Debug',
+            19: 'Physics', 21: 'Physics',
         }
         self._all_tab_specs = {}  # Store all tab specs for rebuilding
         self._tab_figures = {}  # Store figures for fullscreen access
@@ -624,12 +621,6 @@ class AnalyticsWidget(QTabWidget):
 
         corner_l.addSpacing(10)
 
-        self._btn_compute_lle = QPushButton("Compute LLE")
-        self._btn_compute_lle.setToolTip("Run Lyapunov/LLE analysis explicitly for the latest simulation")
-        self._btn_compute_lle.setEnabled(False)
-        self._btn_compute_lle.clicked.connect(self._compute_lle_now)
-        corner_l.addWidget(self._btn_compute_lle)
-
         self._btn_fullscreen = QPushButton("Fullscreen")
         self._btn_fullscreen.setToolTip("Open analytics in a maximized window")
         self._btn_fullscreen.clicked.connect(self.open_fullscreen)
@@ -647,7 +638,7 @@ class AnalyticsWidget(QTabWidget):
         self._all_tab_specs: dict[int, dict] = {
             1:  {'builder': '_build_tab_spike_mech', 'updater': '_update_spike_mechanism', 'title': 'Spike Mechanism', 'needs_stats': True},
             2:  {'builder': '_build_tab_phase',      'updater': '_update_phase',           'title': 'Phase Plane', 'needs_stats': True},
-            3:  {'builder': '_build_tab_chaos',      'updater': '_update_chaos',           'title': 'Chaos & LLE', 'needs_stats': True},
+            3:  {'builder': '_build_tab_chaos',      'updater': '_update_chaos',           'title': 'Lyapunov (LLE)'},
             4:  {'builder': '_build_tab_kymo',       'updater': '_update_kymo',            'title': 'Kymograph'},
             5:  {'builder': '_build_tab_spectro',    'updater': '_update_spectrogram',     'title': 'Spectrogram'},
             6:  {'builder': '_build_tab_impedance',  'updater': '_update_impedance',       'title': 'Impedance'},
@@ -664,7 +655,6 @@ class AnalyticsWidget(QTabWidget):
             17: {'builder': '_build_tab_isi_dist',    'updater': '_update_isi_dist',       'title': 'ISI Distribution', 'needs_stats': True},
             18: {'builder': '_build_tab_fingerprint', 'updater': '_update_fingerprint',   'title': 'Fingerprint', 'needs_stats': True},
             19: {'builder': '_build_tab_csd',         'updater': '_update_csd',            'title': 'CSD', 'needs_morph': True},
-            20: {'builder': '_build_tab_debug',       'updater': '_update_debug',          'title': 'Debug LTE'},
             21: {'builder': '_build_tab_metabolic',   'updater': '_update_metabolic',      'title': 'Metabolic', 'needs_stats': True},
         }
         self._tab_specs = self._all_tab_specs.copy()  # Current visible tabs
@@ -701,6 +691,25 @@ class AnalyticsWidget(QTabWidget):
                 if self.widget(i) == current_widget:
                     self.setCurrentIndex(i)
                     break
+
+    def show_lle_tab(self) -> bool:
+        """Select and build the native Benettin LLE results tab."""
+        if hasattr(self, "_combo_category") and self._combo_category.currentText() != "All":
+            self._combo_category.setCurrentText("All")
+
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, _LazyPlaceholder) and widget._spec_key == 3:
+                self.setCurrentIndex(i)
+                if self.widget(i) is widget:
+                    self._on_tab_changed(i)
+                return True
+            if self.tabText(i) == "Lyapunov (LLE)":
+                self.setCurrentIndex(i)
+                if self._last_result is not None and hasattr(self, "fig_chaos"):
+                    self._update_chaos(self._last_result, self._last_stats)
+                return True
+        return False
 
     # ─────────────────────────────────────────────────────────────────
     #  LAZY TAB ACTIVATION
@@ -1632,37 +1641,15 @@ class AnalyticsWidget(QTabWidget):
         self.ax_chaos = self.fig_chaos.add_subplot(1, 1, 1)
         _set_canvas_margins(self.fig_chaos, left=0.08, right=0.97, top=0.92, bottom=0.10)
         self.cvs_chaos = cvs
-        self._tab_figures['Chaos & LLE'] = self.fig_chaos
+        self._tab_figures['Lyapunov (LLE)'] = self.fig_chaos
         self._chaos_texts: dict[str, object] = {}
-
-        controls = QWidget()
-        layout = QHBoxLayout(controls)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        label = QLabel('Benettin subspace:')
-        label.setStyleSheet('color:#CDD6F4; font-size:11px;')
-        layout.addWidget(label)
-
-        self._chaos_subspace_combo = QComboBox()
-        self._chaos_subspace_combo.addItems(["Voltage Only", "Voltage + Gates", "Full State"])
-        self._chaos_subspace_combo.setToolTip('State subspace used for native Benettin renormalization')
-        layout.addWidget(self._chaos_subspace_combo)
-
-        self._btn_chaos_compute_lle = QPushButton("Compute LLE")
-        self._btn_chaos_compute_lle.setToolTip("Rerun the simulation with native Benettin LLE enabled")
-        self._btn_chaos_compute_lle.setEnabled(self._last_result is not None)
-        self._btn_chaos_compute_lle.clicked.connect(self._compute_lle_now)
-        layout.addWidget(self._btn_chaos_compute_lle)
-        layout.addStretch(1)
-
         return _tab_with_toolbar(
             cvs,
-            fullscreen_callback=lambda: self._open_fullscreen_plot('Chaos & LLE'),
-            extra_widget=controls,
+            fullscreen_callback=lambda: self._open_fullscreen_plot('Lyapunov (LLE)'),
             scroll_canvas=True,
             min_canvas_height=760,
         )
+
 
     def _build_tab_modulation(self) -> QWidget:
         self.fig_mod, cvs = _mpl_fig(1, 1, figsize=(8.8, 7.2), tight=False)
@@ -1805,22 +1792,6 @@ class AnalyticsWidget(QTabWidget):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         return scroll
-
-    def _build_tab_debug(self) -> QWidget:
-        """Build the Debug LTE (Local Truncation Error) Monitor tab."""
-        self.fig_debug, cvs = _mpl_fig(2, 1, figsize=(10.0, 9.0), tight=False)
-        self._debug_axes = [self.fig_debug.add_subplot(2, 1, k) for k in range(1, 3)]
-        _set_canvas_margins(self.fig_debug, left=0.08, right=0.94, top=0.95, bottom=0.08, hspace=0.34, wspace=0.20)
-        self.cvs_debug = cvs
-        self._tab_figures['Debug LTE'] = self.fig_debug
-        self._lte_lines = None
-        self._lte_threshold_line = None
-        return _tab_with_toolbar(
-            cvs,
-            fullscreen_callback=lambda: self._open_fullscreen_plot('Debug LTE'),
-            scroll_canvas=True,
-            min_canvas_height=920,
-        )
 
     def _build_tab_metabolic(self) -> QWidget:
         """Build Metabolic Trajectory tab showing [Na+]i, [K+]o, and ATP dynamics."""
@@ -1979,9 +1950,6 @@ class AnalyticsWidget(QTabWidget):
             stats = full_analysis(result, compute_lyapunov=False)
 
         self._last_stats = stats
-        self._btn_compute_lle.setEnabled(True)
-        if hasattr(self, '_btn_chaos_compute_lle'):
-            self._btn_chaos_compute_lle.setEnabled(True)
         self._set_passport_status(result, stats)
 
         # Tab 0 — always built
@@ -2001,7 +1969,6 @@ class AnalyticsWidget(QTabWidget):
         self._update_equil(result)
         self._update_fingerprint(result, stats)
         self._update_csd(result)
-        self._update_debug(result)
         if result.morph:
             self._update_energy_balance(result)
         self._update_spike_shape(result, stats)
@@ -2015,9 +1982,6 @@ class AnalyticsWidget(QTabWidget):
         """Show a non-empty Analytics state while background analysis is running."""
         self._last_result = result
         self._last_stats = None
-        self._btn_compute_lle.setEnabled(False)
-        if hasattr(self, '_btn_chaos_compute_lle'):
-            self._btn_chaos_compute_lle.setEnabled(False)
         self._set_passport_status(result, None)
         self.passport_view.setPlainText(
             "Simulation complete.\n\n"
@@ -2048,17 +2012,6 @@ class AnalyticsWidget(QTabWidget):
         self._passport_status_label.setText(
             f"Analysis ready | {n_comp} compartments | {t_end:.1f} ms | spikes={n_spikes} | {freq_text}"
         )
-    def _compute_lle_now(self):
-        """Emit signal to trigger full simulation rerun with LLE enabled.
-        
-        v12.2: Changed from post-hoc analysis to full rerun honesty.
-        MainWindow connects computeLleRequested to run with calc_lle=True.
-        """
-        if self._last_result is None:
-            return
-        # Emit signal - MainWindow will handle the full rerun with calc_lle=True
-        self.computeLleRequested.emit()
-
     # ─────────────────────────────────────────────────────────────────
     #  0 — NEURON PASSPORT DASHBOARD
     # ─────────────────────────────────────────────────────────────────
@@ -2346,7 +2299,7 @@ class AnalyticsWidget(QTabWidget):
             'DYNAMICAL STABILITY (LLE/FTLE)',
         ]
         if lyap_class == 'disabled':
-            lines.append('LLE not computed. Use "Compute LLE" button.')
+            lines.append('LLE not computed. Launch "Lyapunov Exponent (LLE)" from Experiment Studio.')
         else:
             lines += [
                 f'Class={lyap_class} | LLE={_fmt(lyap_lle_s, "+.4f", "1/s")}',
@@ -2879,8 +2832,8 @@ class AnalyticsWidget(QTabWidget):
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_currents(self._last_result)
 
-    def _update_chaos(self, result, stats: dict):
-        """Update Chaos & LLE tab from native Benettin convergence only."""
+    def _update_chaos(self, result, stats: dict | None = None):
+        """Update Lyapunov tab from native Benettin convergence only."""
         if not hasattr(self, 'fig_chaos'):
             return
 
@@ -2888,39 +2841,67 @@ class AnalyticsWidget(QTabWidget):
         ax.clear()
 
         lle_raw = getattr(result, 'lle_convergence', None)
-        calc_lle = bool(getattr(getattr(result, 'config', None).stim, 'calc_lle', False)) if getattr(result, 'config', None) is not None else False
-        if lle_raw is not None:
-            lle = np.asarray(lle_raw, dtype=float).reshape(-1)
-        else:
-            lle = np.zeros(0, dtype=float)
+        lle = np.asarray(lle_raw, dtype=float).reshape(-1) if lle_raw is not None else np.zeros(0, dtype=float)
+        t = np.asarray(getattr(result, 't', []), dtype=float).reshape(-1)
+        n = min(t.size, lle.size)
+        finite = np.isfinite(t[:n]) & np.isfinite(lle[:n]) if n > 0 else np.zeros(0, dtype=bool)
 
-        if calc_lle and lle.size > 0:
-            t = np.asarray(result.t, dtype=float).reshape(-1)
-            n = min(t.size, lle.size)
-            finite = np.isfinite(t[:n]) & np.isfinite(lle[:n])
-            if np.any(finite):
-                ax.plot(t[:n][finite], lle[:n][finite], color='#89B4FA', lw=2.2, label='Benettin LLE')
-                final_lle = float(lle[:n][finite][-1])
-                ax.text(
-                    0.02, 0.96,
-                    f"Final LLE = {final_lle:+.6g} 1/ms\nSubspace = {self._current_chaos_subspace_text()}",
-                    transform=ax.transAxes, ha='left', va='top', fontsize=10,
-                    bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9),
-                    color='#CDD6F4',
+        if n > 0 and np.any(finite):
+            t_plot = t[:n][finite]
+            lle_plot = lle[:n][finite]
+            ax.axhspan(0, 100, color='#F38BA8', alpha=0.10, label='Chaotic region')
+            ax.axhspan(-100, 0, color='#A6E3A1', alpha=0.10, label='Stable region')
+            transient_end_ms = float(t_plot[0] + 0.2 * (t_plot[-1] - t_plot[0])) if t_plot.size > 1 else float(t_plot[0])
+            ax.axvline(x=transient_end_ms, color='gray', linestyle='--', lw=1.2, alpha=0.8, label='Transient end')
+            ax.plot(t_plot, lle_plot, color='#89B4FA', lw=2.2, label='Benettin LLE')
+
+            tail_start = int(max(0, np.floor(0.70 * len(lle_plot))))
+            tail = lle_plot[tail_start:]
+            mean_lle = float(np.nanmean(tail)) if tail.size else float(lle_plot[-1])
+            if mean_lle > 0.001:
+                predictability_horizon = 1.0 / mean_lle
+                expert = (
+                    f"?? EXPERT ANALYSIS:\n"
+                    f"System is CHAOTIC (LLE = {mean_lle:.4f} 1/ms).\n"
+                    f"Predictability Horizon: ~{predictability_horizon:.1f} ms.\n"
+                    f"Phase lock is impossible."
                 )
-                _configure_ax_interactive(
-                    ax,
-                    title='Native Benettin LLE Convergence',
-                    xlabel='Time (ms)',
-                    ylabel='LLE estimate (1/ms)',
-                    show_legend=True,
+                edge = '#F38BA8'
+            elif mean_lle < -0.001:
+                expert = (
+                    f"?? EXPERT ANALYSIS:\n"
+                    f"System is STABLE (LLE = {mean_lle:.4f} 1/ms).\n"
+                    f"Trajectory converges to a limit cycle or resting state."
                 )
-                self.cvs_chaos.draw_idle()
-                return
+                edge = '#A6E3A1'
+            else:
+                expert = (
+                    f"?? EXPERT ANALYSIS:\n"
+                    f"System is NEAR-NEUTRAL (LLE = {mean_lle:.4f} 1/ms).\n"
+                    f"Longer runs or a narrower subspace may be needed."
+                )
+                edge = '#F9E2AF'
+
+            ax.text(
+                0.02, 0.96,
+                expert,
+                transform=ax.transAxes, ha='left', va='top', fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.94, edgecolor=edge, linewidth=1.4),
+                color='#CDD6F4',
+            )
+            _configure_ax_interactive(
+                ax,
+                title='Native Benettin LLE Convergence',
+                xlabel='Time (ms)',
+                ylabel='LLE estimate (1/ms)',
+                show_legend=True,
+            )
+            self.cvs_chaos.draw_idle()
+            return
 
         ax.text(
             0.5, 0.5,
-            'LLE not computed. Select a subspace metric and click Compute LLE to rerun the simulation.',
+            'LLE not computed. Select "Lyapunov Exponent (LLE)" in Experiment Studio and launch the experiment.',
             ha='center', va='center', transform=ax.transAxes, fontsize=12, color='#89B4FA',
             wrap=True,
         )
@@ -2933,10 +2914,6 @@ class AnalyticsWidget(QTabWidget):
         )
         self.cvs_chaos.draw_idle()
 
-    def _current_chaos_subspace_text(self) -> str:
-        if hasattr(self, '_chaos_subspace_combo'):
-            return self._chaos_subspace_combo.currentText()
-        return 'Voltage Only'
 
     def _spike_mech_current_limit(self) -> int | None:
         if not hasattr(self, '_spike_mech_current_scope'):
@@ -4915,106 +4892,6 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     #  14 — DEBUG LTE (Local Truncation Error) Monitor
     # ─────────────────────────────────────────────────────────────────
-    def _update_debug(self, result):
-        """Update the Debug LTE (Local Truncation Error) Monitor tab."""
-        if not hasattr(self, 'fig_debug'):
-            return
-
-        ax_lte, ax_dt = self._debug_axes
-        t = result.t
-
-        # Check if we have the necessary data for LTE computation
-        if hasattr(result, 'solver_residual') and result.solver_residual is not None:
-            lte_data = np.asarray(result.solver_residual)
-        else:
-            # Fallback: compute a proxy from voltage derivative discontinuity
-            if len(t) > 2:
-                V = result.v_soma
-                dt = np.median(np.diff(t))
-                # Estimate residual from second derivative
-                d2V = np.gradient(np.gradient(V, dt), dt)
-                # Scale by dt for a proxy of truncation error
-                lte_data = np.abs(d2V) * (dt ** 2) / 2.0
-            else:
-                lte_data = np.zeros_like(t)
-
-        # Plot LTE over time
-        if self._lte_lines is None:
-            self._lte_lines = ax_lte.plot(t, lte_data, color='#F38BA8', lw=1.5)[0]
-        else:
-            self._lte_lines.set_data(t, lte_data)
-
-        ax_lte.set_xlabel('Time (ms)')
-        ax_lte.set_ylabel('LTE (mV)')
-        ax_lte.set_title('Local Truncation Error Monitor')
-        ax_lte.grid(alpha=0.3)
-
-        # Add threshold warning line at 1.0 mV
-        if self._lte_threshold_line is None:
-            self._lte_threshold_line = ax_lte.axhline(y=1.0, color='#FAB387', linestyle='--', linewidth=2, label='Warning threshold (1.0 mV)')
-        ax_lte.legend(fontsize=9)
-
-        # Check for excessive error and suggest adaptive timestep
-        max_lte = np.max(lte_data) if len(lte_data) > 0 else 0.0
-        mean_lte = np.mean(lte_data) if len(lte_data) > 0 else 0.0
-        current_dt = np.median(np.diff(t)) if len(t) > 1 else 0.05
-
-        # Smart adaptive timestep calculation
-        # LTE ∝ dt² for second-order methods, so to achieve target LTE:
-        # dt_new = dt_old * sqrt(target_LTE / max_LTE)
-        target_lte = 0.5  # Target max LTE (half of warning threshold)
-        if max_lte > target_lte:
-            suggested_dt = current_dt * np.sqrt(target_lte / max_lte)
-            # Round to reasonable precision
-            suggested_dt = max(0.001, round(suggested_dt, 4))  # Min 1 µs
-
-            warning_text = (
-                f'⚠ High LTE: {max_lte:.2f} mV (mean: {mean_lte:.3f} mV)\n'
-                f'   Current dt: {current_dt:.3f} ms\n'
-                f'   ➤ Suggested dt: {suggested_dt:.4f} ms\n'
-                f'   (for target LTE < {target_lte} mV)'
-            )
-            warning_color = '#F38BA8'
-        else:
-            # LTE is acceptable - show status
-            safety_margin = target_lte / max(max_lte, 0.01)
-            warning_text = (
-                f'✅ LTE OK: {max_lte:.3f} mV max\n'
-                f'   Safety margin: {safety_margin:.1f}×\n'
-                f'   dt can be ↑ by {np.sqrt(safety_margin):.1f}×'
-            )
-            warning_color = '#A6E3A1'
-
-        # Remove old warning text if exists
-        for txt in ax_lte.texts:
-            if hasattr(txt, '_lte_warning'):
-                txt.remove()
-
-        # Add new warning/status text
-        lte_text = ax_lte.text(
-            0.02, 0.98, warning_text,
-            transform=ax_lte.transAxes, fontsize=10, color=warning_color,
-            va='top', fontfamily='monospace',
-            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9, edgecolor=warning_color)
-        )
-        lte_text._lte_warning = True  # Mark for future removal
-
-        # Plot dt vs time in second panel
-        dt_arr = np.diff(t)
-        dt_arr = np.append(dt_arr, dt_arr[-1])  # Make same length as t
-        if hasattr(self, '_dt_lines') and self._dt_lines is not None:
-            self._dt_lines.set_data(t, dt_arr)
-        else:
-            self._dt_lines = ax_dt.plot(t, dt_arr, color='#89B4FA', lw=1.5)[0]
-
-        ax_dt.set_xlabel('Time (ms)')
-        ax_dt.set_ylabel('dt (ms)')
-        ax_dt.set_title('Integration Time Step')
-        ax_dt.grid(alpha=0.3)
-
-        _set_canvas_margins(self.fig_debug, left=0.08, right=0.94, top=0.95, bottom=0.08, hspace=0.34, wspace=0.20)
-        self.cvs_debug.draw_idle()
-
     def open_fullscreen(self):
         """Open analytics clone in a maximized window preserving current tab/data."""
         idx = int(self.currentIndex())

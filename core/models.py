@@ -428,12 +428,20 @@ class AnalysisParams(BaseModel):
     excmap_D_max: float = Field(default=5.0,   description="Excitability map: max duration (ms)")
     excmap_ND:    int   = Field(default=15,   ge=2, description="Excitability map: duration resolution")
 
-    # Lyapunov / FTLE analysis parameters (execution is action-driven)
-    lyapunov_embedding_dim: int = Field(default=3, ge=2, le=8, description="Delay-embedding dimension for FTLE/LLE")
-    lyapunov_lag_steps: int = Field(default=2, ge=1, le=50, description="Delay-embedding lag in samples")
-    lyapunov_min_separation_ms: float = Field(default=10.0, ge=0.0, description="Minimum temporal separation for neighbor search (ms)")
-    lyapunov_fit_start_ms: float = Field(default=5.0, ge=0.0, description="Linear-fit window start for FTLE/LLE (ms)")
-    lyapunov_fit_end_ms: float = Field(default=40.0, gt=0.0, description="Linear-fit window end for FTLE/LLE (ms)")
+    # Native Benettin LLE parameters (execution is routed through Experiment Studio)
+    lle_delta: float = Field(default=1e-6, description="Perturbation amplitude for Benettin LLE")
+    lle_t_evolve_ms: float = Field(default=1.0, description="Re-orthonormalization interval (ms)")
+    lle_subspace: Literal['Voltage Only', 'Voltage + Gates', 'Full State', 'Custom'] = Field(
+        default='Voltage Only',
+        description="State variables to include in LLE distance metric",
+    )
+    lle_custom_v: bool = Field(default=True, description="Include Voltage in Custom LLE")
+    lle_custom_gates: str = Field(
+        default="m, h, n",
+        description="Comma-separated gates to include (e.g., 'm, h, n, s')",
+    )
+    lle_custom_ca: bool = Field(default=False, description="Include Calcium in Custom LLE")
+    lle_custom_atp: bool = Field(default=False, description="Include ATP in Custom LLE")
 
     # Non-FFT modulatory contribution analysis (default OFF)
     enable_modulation_decomposition: bool = Field(default=False, description="Enable phase-based modulation analysis")

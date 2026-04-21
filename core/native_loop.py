@@ -48,9 +48,17 @@ def set_numba_random_seed(seed: int) -> None:
 
 @njit(cache=True)
 def _reflect_unit_interval(value: float) -> float:
-    """Reflect a stochastic gate value into [0, 1] without absorbing variance."""
+    """Reflect a stochastic gate value into [0, 1] without absorbing variance.
+
+    Non-finite inputs (NaN, +/-Inf) are replaced with 0.5 (midpoint of the
+    valid interval) to prevent propagation of non-finite values through the
+    LLE perturbation state. Reflecting a finite value preserves variance;
+    the 0.5 sentinel is a documented safe-fallback for a corrupted gate.
+    """
+    # Guard against NaN/Inf: clamp to midpoint of valid interval to avoid
+    # amplifying non-finite values through the reflection loop.
     if not np.isfinite(value):
-        return np.nan
+        return 0.5
     reflected = value
     for _ in range(64):
         if reflected >= 0.0 and reflected <= 1.0:

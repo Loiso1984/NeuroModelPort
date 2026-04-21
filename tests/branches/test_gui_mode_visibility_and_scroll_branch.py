@@ -46,9 +46,10 @@ def test_sweep_param_control_is_visible_and_editable():
     win = MainWindow()
     try:
         app.processEvents()
-        assert hasattr(win, "_sweep_param_combo")
-        assert win._sweep_param_combo.isEditable()
-        assert win._sweep_param_combo.currentText() == "stim.Iext"
+        assert hasattr(win, "combo_experiment_type")
+        assert hasattr(win, "exp_sweep_param_combo")
+        assert win.exp_sweep_param_combo.isEditable()
+        assert win.exp_sweep_param_combo.currentText() == "stim.Iext"
     finally:
         win.close()
 

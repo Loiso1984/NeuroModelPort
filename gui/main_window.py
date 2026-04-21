@@ -5,6 +5,7 @@ Tabs: Parameters | Oscilloscope | Analytics | Topology | Guide
 Run modes: Standard | Monte-Carlo | Sweep | S-D Curve | Excit. Map | Stochastic
 """
 import csv
+import copy
 import logging
 import os
 from pathlib import Path
@@ -16,7 +17,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QMessageBox, QApplication, QFileDialog,
     QGroupBox, QToolBar, QProgressDialog, QLayout, QSizePolicy,
     QFrame, QSplitter, QSlider, QTextEdit, QDockWidget, QMenuBar,
-    QLineEdit,
+    QLineEdit, QStackedWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
+    QCheckBox,
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from PySide6.QtGui import QIcon, QAction
@@ -44,6 +46,21 @@ from gui.ui_layout import LAYOUT_PRESETS, preset_for_width
 
 # v13.0: Module-level logger
 logger = logging.getLogger(__name__)
+
+_UI_STATE_VERSION = 2
+_UI_LAYOUT_ENGINE = "experiment-studio-dock-shell-v2"
+_EXPECTED_DOCK_OBJECT_NAMES = frozenset(
+    {
+        "dock_params",
+        "dock_experiment",
+        "dock_live",
+        "dock_analytics",
+        "dock_topology",
+        "dock_stim",
+        "dock_axon",
+        "dock_guide",
+    }
+)
 
 # ─────────────────────────────────────────────────────────────────────
 #  LIVE DECK PARAMETER REGISTRY
@@ -197,6 +214,7 @@ class MainWindow(QMainWindow):
         # Generation counter to prevent race conditions with stale analytics
         self._analytics_generation = 0
         self._pending_analytics_generation = 0
+        self._focus_lle_after_run = False
         self._progress_dialog = None
 
         # v12.7: Create oscilloscope first (will be set as central widget)
@@ -306,35 +324,6 @@ class MainWindow(QMainWindow):
         self.combo_jacobian.setMaximumWidth(100)
         self.combo_jacobian.currentTextChanged.connect(self._on_jacobian_changed)
         self.main_toolbar.addWidget(self.combo_jacobian)
-
-        self.main_toolbar.addSeparator()
-
-        # Analysis buttons
-        self.btn_stoch = QPushButton("STOCH")
-        self.btn_stoch.setToolTip("Stochastic simulation")
-        self.btn_stoch.clicked.connect(lambda: self.sim_controller.run_stochastic(
-            self.config_manager.config, 1, on_success=self._on_stoch_done, on_error=self._on_sim_error))
-        self.main_toolbar.addWidget(self.btn_stoch)
-
-        self.btn_sweep = QPushButton("SWEEP")
-        self.btn_sweep.setToolTip("Parameter sweep")
-        self.btn_sweep.clicked.connect(self.run_sweep)
-        self.main_toolbar.addWidget(self.btn_sweep)
-
-        self.btn_fi = QPushButton("f-I")
-        self.btn_fi.setToolTip("Frequency-Current curve")
-        self.btn_fi.clicked.connect(self.run_fi_curve)
-        self.main_toolbar.addWidget(self.btn_fi)
-
-        self.btn_sd = QPushButton("S-D")
-        self.btn_sd.setToolTip("Strength-Duration curve")
-        self.btn_sd.clicked.connect(self.run_sd_curve)
-        self.main_toolbar.addWidget(self.btn_sd)
-
-        self.btn_excmap = QPushButton("EXCMAP")
-        self.btn_excmap.setToolTip("Excitability map")
-        self.btn_excmap.clicked.connect(self.run_excmap)
-        self.main_toolbar.addWidget(self.btn_excmap)
 
         self.main_toolbar.addSeparator()
 
@@ -471,6 +460,19 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_params)
         self.tab_params = self._sidebar_frame  # backward compat
 
+        self._dock_experiment = QDockWidget("Experiment Studio", self)
+        self._dock_experiment.setObjectName("dock_experiment")
+        self._dock_experiment.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea |
+            Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self._experiment_frame = QFrame()
+        self._experiment_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._build_experiment_studio_panel()
+        self._dock_experiment.setWidget(self._experiment_frame)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_experiment)
+        self.tabifyDockWidget(self._dock_params, self._dock_experiment)
+
         # ── Dock 2: Live Control Deck (Right) ───────────────────────
         self._dock_live = QDockWidget("🎛️ Live Controls", self)
         self._dock_live.setObjectName("dock_live")
@@ -543,9 +545,6 @@ class MainWindow(QMainWindow):
         # Connect oscilloscope to analytics
         self.oscilloscope.time_highlighted.connect(self.analytics.highlight_time)
         
-        # v12.2: Connect LLE compute request to full simulation rerun
-        self.analytics.computeLleRequested.connect(self._run_with_lle_enabled)
-
         # ── Dock 4: Topology (Right, tabbed with Live Controls) ───────
         self._dock_topology = QDockWidget("Topology", self)
         self._dock_topology.setObjectName("dock_topology")
@@ -638,11 +637,12 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
         actions = [
-            ("Stochastic", lambda: self.btn_stoch.click()),
-            ("Sweep", lambda: self.btn_sweep.click()),
-            ("f-I Curve", lambda: self.btn_fi.click()),
-            ("S-D Curve", lambda: self.btn_sd.click()),
-            ("Excitability Map", lambda: self.btn_excmap.click()),
+            ("Open Experiment Studio", lambda: self._dock_experiment.setVisible(True)),
+            ("Stochastic", self.run_stochastic),
+            ("Sweep", self.run_sweep),
+            ("f-I Curve", self.run_fi_curve),
+            ("S-D Curve", self.run_sd_curve),
+            ("Excitability Map", self.run_excmap),
             ("Export NeuroML", lambda: self.btn_export_nml.click()),
             ("Analytics Workspace", self._focus_analytics_workspace),
             ("Open Stimulation Studio", lambda: self._dock_stim.setVisible(True)),
@@ -653,15 +653,7 @@ class MainWindow(QMainWindow):
         self.btn_more_actions.setMenu(menu)
 
     def _set_secondary_actions_visible(self, visible: bool) -> None:
-        for widget in (
-            self.btn_stoch,
-            self.btn_sweep,
-            self.btn_fi,
-            self.btn_sd,
-            self.btn_excmap,
-            self.btn_export_nml,
-        ):
-            widget.setVisible(visible)
+        self.btn_export_nml.setVisible(visible)
         self.btn_more_actions.setVisible(not visible)
 
     def _sync_preset_combo_text(self, text: str) -> None:
@@ -697,7 +689,7 @@ class MainWindow(QMainWindow):
                 with open(".dock_geometry.bin", "rb") as f:
                     self.restoreGeometry(f.read())
                 with open(".dock_state.bin", "rb") as f:
-                    restored = bool(self.restoreState(f.read()))
+                    restored = bool(self.restoreState(f.read(), _UI_STATE_VERSION))
             except Exception as exc:
                 logger.warning("Failed to restore dock state: %s", exc)
                 restored = False
@@ -715,11 +707,14 @@ class MainWindow(QMainWindow):
             import json
             with open(".ui_state_meta.json", "r", encoding="utf-8") as f:
                 meta = json.load(f)
-            return (
-                meta.get("version") == 1
-                and meta.get("layout_engine") == "dock-shell-v1"
-                and meta.get("qt_platform") not in {"offscreen", "minimal"}
-            )
+            if meta.get("version") != _UI_STATE_VERSION:
+                return False
+            if meta.get("layout_engine") != _UI_LAYOUT_ENGINE:
+                return False
+            if meta.get("qt_platform") in {"offscreen", "minimal"}:
+                return False
+            saved_docks = set(meta.get("dock_object_names") or [])
+            return _EXPECTED_DOCK_OBJECT_NAMES.issubset(saved_docks)
         except Exception as exc:
             logger.warning("Ignoring invalid UI state metadata: %s", exc)
             return False
@@ -850,11 +845,6 @@ class MainWindow(QMainWindow):
             on_change=self._on_morph_field_changed,
         )
         self.form_env = PydanticFormWidget(self.config_manager.config.env, "Environment")
-        self.form_ana = PydanticFormWidget(
-            self.config_manager.config.analysis,
-            "Analysis / Sweep / Map",
-        )
-
         # Group 0: Preset Modes (variations)
         grp_modes = QGroupBox("Preset Modes")
         modes_layout = QVBoxLayout(grp_modes)
@@ -891,64 +881,272 @@ class MainWindow(QMainWindow):
         chan_layout.addWidget(self.form_chan)
         c_layout.addWidget(grp_chan)
 
-        # Group 4: Analysis Settings
-        self.grp_ana = QGroupBox("Analysis Settings")
-        ana_layout = QVBoxLayout(self.grp_ana)
-        ana_layout.setSpacing(4)
-        sweep_selector = QWidget()
-        sweep_selector_layout = QVBoxLayout(sweep_selector)
-        sweep_selector_layout.setContentsMargins(0, 0, 0, 0)
-        sweep_selector_layout.setSpacing(4)
-        sweep_row = QHBoxLayout()
-        sweep_row.setContentsMargins(0, 0, 0, 0)
-        sweep_row.setSpacing(6)
-        sweep_row.addWidget(QLabel("Sweep parameter:"))
-        self._sweep_param_combo = QComboBox()
-        self._sweep_param_combo.setEditable(True)
-        self._sweep_param_combo.addItems(_SWEEP_PARAM_SUGGESTIONS)
-        self._sweep_param_combo.setCurrentText(self._canonical_sweep_param(self.config_manager.config.analysis.sweep_param))
-        self._sweep_param_combo.currentTextChanged.connect(self._on_sweep_param_changed)
-        sweep_row.addWidget(self._sweep_param_combo, 1)
-        btn_iext = QPushButton("Use Iext")
-        btn_iext.setMaximumWidth(80)
-        btn_iext.clicked.connect(lambda: self._sweep_param_combo.setCurrentText("stim.Iext"))
-        sweep_row.addWidget(btn_iext)
-        sweep_selector_layout.addLayout(sweep_row)
-        self._sweep_param_help = QLabel("")
-        self._sweep_param_help.setWordWrap(True)
-        self._sweep_param_help.setStyleSheet("color:#BAC2DE; font-size:11px;")
-        sweep_selector_layout.addWidget(self._sweep_param_help)
-        ana_layout.addWidget(sweep_selector)
-        ana_layout.addWidget(self.form_ana)
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
 
-        # Auto-Rheobase Search button
-        btn_find_threshold = QPushButton("🔍 Find Threshold (Auto-Rheobase)")
-        btn_find_threshold.setStyleSheet("""
+    def _build_experiment_studio_panel(self):
+        """Build the unified Experiment Studio dock."""
+        layout = QVBoxLayout(self._experiment_frame)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        title = QLabel("Experiment Studio")
+        title.setStyleSheet("font-weight:bold; color:#89B4FA; font-size:15px;")
+        layout.addWidget(title)
+
+        subtitle = QLabel("Choose one protocol, tune only its relevant parameters, then launch.")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("color:#BAC2DE; font-size:11px;")
+        layout.addWidget(subtitle)
+
+        self.combo_experiment_type = QComboBox()
+        self.combo_experiment_type.addItems([
+            "Standard Simulation",
+            "Stochastic Simulation",
+            "Parameter Sweep",
+            "f-I Curve",
+            "Strength-Duration",
+            "Excitability Map",
+            "Auto-Rheobase",
+            "Lyapunov Exponent (LLE)",
+        ])
+        self.combo_experiment_type.setStyleSheet(
+            "QComboBox { background:#313244; color:#CDD6F4; border:1px solid #45475A; "
+            "border-radius:6px; padding:6px; font-weight:bold; }"
+        )
+        layout.addWidget(self.combo_experiment_type)
+
+        self.experiment_stack = QStackedWidget()
+        layout.addWidget(self.experiment_stack, 1)
+
+        self._build_experiment_pages()
+        self.combo_experiment_type.currentIndexChanged.connect(self.experiment_stack.setCurrentIndex)
+
+        self.btn_launch_experiment = QPushButton("🚀 LAUNCH EXPERIMENT")
+        self.btn_launch_experiment.setMinimumHeight(44)
+        self.btn_launch_experiment.setStyleSheet("""
             QPushButton {
-                background: #313244;
-                color: #89B4FA;
-                border: 1px solid #45475A;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
+                background:#A6E3A1; color:#11111B; border:none; border-radius:8px;
+                padding:10px 14px; font-weight:900; font-size:14px;
             }
-            QPushButton:hover {
-                background: #45475A;
-                color: #A6E3A1;
-            }
+            QPushButton:hover { background:#94E2D5; }
+            QPushButton:pressed { background:#89DCEB; }
         """)
-        btn_find_threshold.clicked.connect(self._on_find_threshold_clicked)
-        ana_layout.addWidget(btn_find_threshold)
+        self.btn_launch_experiment.clicked.connect(self._on_launch_experiment_clicked)
+        layout.addWidget(self.btn_launch_experiment)
 
+    def _build_experiment_pages(self):
+        ana = self.config_manager.config.analysis
+
+        def page_with_label(text: str) -> QWidget:
+            page = QWidget()
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(0, 0, 0, 0)
+            label = QLabel(text)
+            label.setWordWrap(True)
+            label.setStyleSheet("color:#CDD6F4; background:#1E1E2E; border:1px solid #45475A; border-radius:6px; padding:8px;")
+            lay.addWidget(label)
+            lay.addStretch(1)
+            return page
+
+        def double_spin(value: float, lo: float, hi: float, decimals: int = 3) -> QDoubleSpinBox:
+            spin = QDoubleSpinBox()
+            spin.setRange(lo, hi)
+            spin.setDecimals(decimals)
+            spin.setValue(float(value))
+            spin.setKeyboardTracking(False)
+            return spin
+
+        def int_spin(value: int, lo: int, hi: int) -> QSpinBox:
+            spin = QSpinBox()
+            spin.setRange(lo, hi)
+            spin.setValue(int(value))
+            spin.setKeyboardTracking(False)
+            return spin
+
+        self.experiment_stack.addWidget(page_with_label(
+            "Runs the current configuration once. Use this for baseline traces, current balance, and normal analytics."
+        ))
+
+        self.exp_stoch_trials_spin = int_spin(getattr(ana, "mc_trials", 1), 1, 1000)
+        page = QWidget(); form = QFormLayout(page)
+        form.addRow("Trials", self.exp_stoch_trials_spin)
+        form.addRow(QLabel("Uses stochastic gating/noise through the solver path."))
+        self.experiment_stack.addWidget(page)
+
+        page = QWidget(); form = QFormLayout(page)
+        self.exp_sweep_param_combo = QComboBox(); self.exp_sweep_param_combo.setEditable(True)
+        self.exp_sweep_param_combo.addItems(_SWEEP_PARAM_SUGGESTIONS)
+        self.exp_sweep_param_combo.setCurrentText(self._canonical_sweep_param(ana.sweep_param))
+        self.exp_sweep_min_spin = double_spin(ana.sweep_min, -1e6, 1e6, 4)
+        self.exp_sweep_max_spin = double_spin(ana.sweep_max, -1e6, 1e6, 4)
+        self.exp_sweep_steps_spin = int_spin(ana.sweep_steps, 2, 1000)
+        form.addRow("Parameter", self.exp_sweep_param_combo)
+        form.addRow("Min", self.exp_sweep_min_spin)
+        form.addRow("Max", self.exp_sweep_max_spin)
+        form.addRow("Steps", self.exp_sweep_steps_spin)
+        self.experiment_stack.addWidget(page)
+
+        page = QWidget(); form = QFormLayout(page)
+        self.exp_fi_min_spin = double_spin(ana.sweep_min, 0.0, 1e6, 4)
+        self.exp_fi_max_spin = double_spin(max(ana.sweep_max, ana.sweep_min + 1.0), 0.0, 1e6, 4)
+        self.exp_fi_steps_spin = int_spin(max(ana.sweep_steps, 8), 2, 1000)
+        form.addRow("Iext min", self.exp_fi_min_spin)
+        form.addRow("Iext max", self.exp_fi_max_spin)
+        form.addRow("Steps", self.exp_fi_steps_spin)
+        self.experiment_stack.addWidget(page)
+
+        self.experiment_stack.addWidget(page_with_label(
+            "Computes the strength-duration curve with binary threshold searches. Dual stimulation is disabled for this protocol."
+        ))
+
+        page = QWidget(); form = QFormLayout(page)
+        self.exp_exc_i_min_spin = double_spin(ana.excmap_I_min, 0.0, 1e6, 3)
+        self.exp_exc_i_max_spin = double_spin(ana.excmap_I_max, 0.0, 1e6, 3)
+        self.exp_exc_ni_spin = int_spin(ana.excmap_NI, 2, 200)
+        self.exp_exc_d_min_spin = double_spin(ana.excmap_D_min, 0.001, 1e5, 3)
+        self.exp_exc_d_max_spin = double_spin(ana.excmap_D_max, 0.001, 1e5, 3)
+        self.exp_exc_nd_spin = int_spin(ana.excmap_ND, 2, 200)
+        form.addRow("I min", self.exp_exc_i_min_spin)
+        form.addRow("I max", self.exp_exc_i_max_spin)
+        form.addRow("I samples", self.exp_exc_ni_spin)
+        form.addRow("Duration min", self.exp_exc_d_min_spin)
+        form.addRow("Duration max", self.exp_exc_d_max_spin)
+        form.addRow("Duration samples", self.exp_exc_nd_spin)
+        self.experiment_stack.addWidget(page)
+
+        page = QWidget(); lay = QVBoxLayout(page); lay.setContentsMargins(0, 0, 0, 0)
+        label = QLabel("Binary search for rheobase. The result can be applied to stim.Iext after completion.")
+        label.setWordWrap(True); label.setStyleSheet("color:#CDD6F4;")
+        lay.addWidget(label)
         self._lbl_rheobase_result = QLabel("")
         self._lbl_rheobase_result.setWordWrap(True)
         self._lbl_rheobase_result.setStyleSheet("color:#A6E3A1; font-size:11px;")
-        ana_layout.addWidget(self._lbl_rheobase_result)
+        lay.addWidget(self._lbl_rheobase_result)
+        lay.addStretch(1)
+        self.experiment_stack.addWidget(page)
 
-        c_layout.addWidget(self.grp_ana)
+        page = QWidget(); form = QFormLayout(page)
+        self.exp_lle_delta_spin = double_spin(ana.lle_delta, 1e-12, 1.0, 10)
+        self.exp_lle_evolve_spin = double_spin(ana.lle_t_evolve_ms, 1e-6, 1e6, 4)
+        self.exp_lle_subspace_combo = QComboBox()
+        self.exp_lle_subspace_combo.addItems(["Voltage Only", "Voltage + Gates", "Full State", "Custom"])
+        self.exp_lle_subspace_combo.setCurrentText(ana.lle_subspace)
+        self.exp_lle_custom_v_check = QCheckBox("Voltage")
+        self.exp_lle_custom_v_check.setChecked(ana.lle_custom_v)
+        self.exp_lle_custom_gates_edit = QLineEdit(ana.lle_custom_gates)
+        self.exp_lle_custom_ca_check = QCheckBox("Calcium")
+        self.exp_lle_custom_ca_check.setChecked(ana.lle_custom_ca)
+        self.exp_lle_custom_atp_check = QCheckBox("ATP")
+        self.exp_lle_custom_atp_check.setChecked(ana.lle_custom_atp)
+        self.exp_lle_custom_group = QWidget()
+        custom_form = QFormLayout(self.exp_lle_custom_group)
+        custom_form.setContentsMargins(0, 0, 0, 0)
+        custom_form.addRow("Include voltage", self.exp_lle_custom_v_check)
+        custom_form.addRow("Gates", self.exp_lle_custom_gates_edit)
+        custom_form.addRow("Include calcium", self.exp_lle_custom_ca_check)
+        custom_form.addRow("Include ATP", self.exp_lle_custom_atp_check)
+        form.addRow("Perturbation delta", self.exp_lle_delta_spin)
+        form.addRow("Renormalize every ms", self.exp_lle_evolve_spin)
+        form.addRow("Subspace", self.exp_lle_subspace_combo)
+        self.exp_lle_custom_label = QLabel("Custom metric")
+        form.addRow(self.exp_lle_custom_label, self.exp_lle_custom_group)
+        self.exp_lle_subspace_combo.currentTextChanged.connect(self._on_lle_subspace_changed)
+        self.experiment_stack.addWidget(page)
+        self._on_lle_subspace_changed(self.exp_lle_subspace_combo.currentText())
 
-        scroll.setWidget(content)
-        layout.addWidget(scroll)
+    def _on_lle_subspace_changed(self, text: str):
+        custom = text == "Custom"
+        if hasattr(self, "exp_lle_custom_group"):
+            self.exp_lle_custom_group.setVisible(custom)
+        if hasattr(self, "exp_lle_custom_label"):
+            self.exp_lle_custom_label.setVisible(custom)
+        for widget in (
+            getattr(self, "exp_lle_custom_v_check", None),
+            getattr(self, "exp_lle_custom_gates_edit", None),
+            getattr(self, "exp_lle_custom_ca_check", None),
+            getattr(self, "exp_lle_custom_atp_check", None),
+        ):
+            if widget is not None:
+                widget.setVisible(custom)
+
+    def _sync_experiment_studio_to_config(self):
+        ana = self.config_manager.config.analysis
+        if hasattr(self, "exp_stoch_trials_spin"):
+            ana.mc_trials = int(self.exp_stoch_trials_spin.value())
+        if hasattr(self, "exp_sweep_param_combo"):
+            ana.sweep_param = self._canonical_sweep_param(self.exp_sweep_param_combo.currentText())
+            ana.sweep_min = float(self.exp_sweep_min_spin.value())
+            ana.sweep_max = float(self.exp_sweep_max_spin.value())
+            ana.sweep_steps = int(self.exp_sweep_steps_spin.value())
+        if hasattr(self, "exp_exc_i_min_spin"):
+            ana.excmap_I_min = float(self.exp_exc_i_min_spin.value())
+            ana.excmap_I_max = float(self.exp_exc_i_max_spin.value())
+            ana.excmap_NI = int(self.exp_exc_ni_spin.value())
+            ana.excmap_D_min = float(self.exp_exc_d_min_spin.value())
+            ana.excmap_D_max = float(self.exp_exc_d_max_spin.value())
+            ana.excmap_ND = int(self.exp_exc_nd_spin.value())
+        if hasattr(self, "exp_lle_delta_spin"):
+            ana.lle_delta = float(self.exp_lle_delta_spin.value())
+            ana.lle_t_evolve_ms = float(self.exp_lle_evolve_spin.value())
+            ana.lle_subspace = self.exp_lle_subspace_combo.currentText()
+            ana.lle_custom_v = bool(self.exp_lle_custom_v_check.isChecked())
+            ana.lle_custom_gates = self.exp_lle_custom_gates_edit.text()
+            ana.lle_custom_ca = bool(self.exp_lle_custom_ca_check.isChecked())
+            ana.lle_custom_atp = bool(self.exp_lle_custom_atp_check.isChecked())
+
+    def _on_launch_experiment_clicked(self):
+        self._sync_experiment_studio_to_config()
+        kind = self.combo_experiment_type.currentText()
+        if kind == "Standard Simulation":
+            if not self._preflight_validate():
+                return
+            self._sync_dual_stim_into_config()
+            self.sim_controller.run_single(
+                self.config_manager.config,
+                on_success=self._on_simulation_done,
+                on_error=self._on_sim_error,
+            )
+        elif kind == "Stochastic Simulation":
+            self.run_stochastic()
+        elif kind == "Parameter Sweep":
+            self.run_sweep()
+        elif kind == "f-I Curve":
+            ana = self.config_manager.config.analysis
+            ana.sweep_min = float(self.exp_fi_min_spin.value())
+            ana.sweep_max = float(self.exp_fi_max_spin.value())
+            ana.sweep_steps = int(self.exp_fi_steps_spin.value())
+            self.run_fi_curve()
+        elif kind == "Strength-Duration":
+            self.run_sd_curve()
+        elif kind == "Excitability Map":
+            self.run_excmap()
+        elif kind == "Auto-Rheobase":
+            self._on_find_threshold_clicked()
+        elif kind == "Lyapunov Exponent (LLE)":
+            self._run_lle_experiment()
+
+    def _run_lle_experiment(self):
+        if not self._preflight_validate():
+            return
+        self._sync_dual_stim_into_config()
+        cfg = self.config_manager.config
+        cfg.stim.jacobian_mode = "native_hines"
+        self._sync_hines_button_state()
+        self._lock_ui(True)
+        self._focus_lle_after_run = True
+        self._status("Running native Benettin LLE experiment...")
+        QApplication.processEvents()
+        mode = {"Voltage Only": 0, "Voltage + Gates": 1, "Full State": 2, "Custom": 3}.get(
+            cfg.analysis.lle_subspace, 0
+        )
+        self.sim_controller.run_single(
+            cfg,
+            on_success=self._on_simulation_done,
+            on_error=self._on_sim_error,
+            compute_lyapunov=True,
+            lle_subspace_mode=mode,
+        )
 
     def _build_live_deck_panel(self):
         """Build the Live Control Deck panel (now separate dock)."""
@@ -1175,9 +1373,14 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_dock_params'):
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_params)
             self._dock_params.setVisible(True)
+        if hasattr(self, '_dock_experiment'):
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_experiment)
+            self._dock_experiment.setVisible(True)
         if hasattr(self, '_dock_live'):
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_live)
             self._dock_live.setVisible(True)
+        if hasattr(self, '_dock_params') and hasattr(self, '_dock_experiment'):
+            self.tabifyDockWidget(self._dock_params, self._dock_experiment)
         if hasattr(self, '_dock_params') and hasattr(self, '_dock_live'):
             self.tabifyDockWidget(self._dock_params, self._dock_live)
         if hasattr(self, '_dock_analytics'):
@@ -1216,6 +1419,8 @@ class MainWindow(QMainWindow):
             self._dock_axon.setVisible(preset.float_stimulation)
         if hasattr(self, "_dock_live"):
             self._dock_live.setVisible(True)
+        if hasattr(self, "_dock_experiment"):
+            self._dock_experiment.setVisible(True)
         if hasattr(self, "_dock_topology"):
             self._dock_topology.setVisible(preset.name != "Laptop")
         if hasattr(self, "_sb"):
@@ -1235,11 +1440,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, '_dock_axon'):
                 self._dock_axon.setVisible(False)
             
-            # Hide morphology and analysis groups in sidebar
+            # Hide morphology-heavy controls in sidebar
             if hasattr(self, 'grp_morph'):
                 self.grp_morph.setVisible(False)
-            if hasattr(self, 'grp_ana'):
-                self.grp_ana.setVisible(False)
             
             # Force single-compartment mode
             self.config_manager.config.morphology.single_comp = True
@@ -1247,7 +1450,7 @@ class MainWindow(QMainWindow):
             
         elif mode == "🌉 Bridge":
             # Show all docks
-            for dock_name in ('_dock_params', '_dock_live', '_dock_analytics', 
+            for dock_name in ('_dock_params', '_dock_experiment', '_dock_live', '_dock_analytics', 
                               '_dock_topology', '_dock_stim', '_dock_axon', '_dock_guide'):
                 dock = getattr(self, dock_name, None)
                 if dock:
@@ -1256,12 +1459,10 @@ class MainWindow(QMainWindow):
             # Show all sidebar groups
             if hasattr(self, 'grp_morph'):
                 self.grp_morph.setVisible(True)
-            if hasattr(self, 'grp_ana'):
-                self.grp_ana.setVisible(True)
             
         elif mode == "🧪 Research":
             # Identical to Bridge for now (future SWC/Network support)
-            for dock_name in ('_dock_params', '_dock_live', '_dock_analytics',
+            for dock_name in ('_dock_params', '_dock_experiment', '_dock_live', '_dock_analytics',
                               '_dock_topology', '_dock_stim', '_dock_axon', '_dock_guide'):
                 dock = getattr(self, dock_name, None)
                 if dock:
@@ -1269,8 +1470,6 @@ class MainWindow(QMainWindow):
             
             if hasattr(self, 'grp_morph'):
                 self.grp_morph.setVisible(True)
-            if hasattr(self, 'grp_ana'):
-                self.grp_ana.setVisible(True)
 
     def _val_to_live_slider(self, param_name: str, row_i: int | None = None) -> int:
         # Try custom path resolution first
@@ -1345,27 +1544,18 @@ class MainWindow(QMainWindow):
         return text
 
     def _refresh_sweep_param_ui(self):
-        if not hasattr(self, "_sweep_param_combo"):
-            return
         ana = self.config_manager.config.analysis
         canonical = self._canonical_sweep_param(getattr(ana, "sweep_param", "stim.Iext"))
         ana.sweep_param = canonical
-        self._sweep_param_combo.blockSignals(True)
-        self._sweep_param_combo.setCurrentText(canonical)
-        self._sweep_param_combo.blockSignals(False)
+        combo = getattr(self, "exp_sweep_param_combo", None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentText(canonical)
+            combo.blockSignals(False)
         obj, attr = self._resolve_param(canonical)
-        if obj is None or attr is None:
-            self._sweep_param_help.setText(
-                "Enter a dotted path like stim.Iext or channels.gNa_max. Short names are accepted and normalized."
-            )
-            self._sweep_param_combo.setStyleSheet("color:#F38BA8;")
-        else:
-            current_value = getattr(obj, attr)
-            self._sweep_param_help.setText(
-                f"Current target: {canonical} = {float(current_value):.4g}. "
-                "This field drives both the top SWEEP button and the dedicated f-I run."
-            )
-            self._sweep_param_combo.setStyleSheet("")
+        if combo is not None:
+            combo.setStyleSheet("color:#F38BA8;" if obj is None or attr is None else "")
+
 
     def _apply_form_ux_filters(self, *_args):
         search = self._form_search.text() if hasattr(self, "_form_search") else ""
@@ -2101,14 +2291,19 @@ class MainWindow(QMainWindow):
                 with open(".dock_geometry.bin", "wb") as f:
                     f.write(self.saveGeometry())
                 with open(".dock_state.bin", "wb") as f:
-                    f.write(self.saveState())
+                    f.write(self.saveState(_UI_STATE_VERSION))
                 import json
                 with open(".ui_state_meta.json", "w", encoding="utf-8") as f:
                     json.dump(
                         {
-                            "version": 1,
-                            "layout_engine": "dock-shell-v1",
+                            "version": _UI_STATE_VERSION,
+                            "layout_engine": _UI_LAYOUT_ENGINE,
                             "qt_platform": QApplication.platformName(),
+                            "dock_object_names": sorted(
+                                dock.objectName()
+                                for dock in self.findChildren(QDockWidget)
+                                if dock.objectName()
+                            ),
                         },
                         f,
                     )
@@ -2184,11 +2379,6 @@ class MainWindow(QMainWindow):
     def retranslate_ui(self):
         self.setWindowTitle(T.tr('app_title'))
         self.btn_run.setText(T.tr('btn_run'))
-        self.btn_stoch.setText(T.tr('btn_stoch'))
-        self.btn_sweep.setText(T.tr('btn_sweep'))
-        self.btn_fi.setText("f-I")
-        self.btn_sd.setText(T.tr('btn_sd'))
-        self.btn_excmap.setText(T.tr('btn_excmap'))
         self.btn_export.setText(T.tr('btn_export'))
         self.lbl_preset.setText(T.tr('preset_label'))
         self.lbl_lang.setText(T.tr('lbl_language'))
@@ -2203,8 +2393,9 @@ class MainWindow(QMainWindow):
     #  SIMULATION HELPERS
     # ─────────────────────────────────────────────────────────────────
     def _lock_ui(self, busy: bool):
-        for btn in (self.btn_run, self.btn_stoch, self.btn_sweep, self.btn_fi,
-                    self.btn_sd, self.btn_excmap):
+        for btn in (self.btn_run, getattr(self, "btn_launch_experiment", None)):
+            if btn is None:
+                continue
             btn.setEnabled(not busy)
         self.btn_cancel.setVisible(busy)
         if not busy:
@@ -2217,6 +2408,7 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setEnabled(False)
 
     def _on_sim_error(self, msg: str):
+        self._focus_lle_after_run = False
         if self._progress_dialog is not None:
             self._progress_dialog.close()
             self._progress_dialog = None
@@ -2401,32 +2593,6 @@ class MainWindow(QMainWindow):
             on_error=self._on_sim_error,
         )
 
-    def _run_with_lle_enabled(self):
-        """Run simulation with LLE computation enabled (v12.2).
-
-        Triggered by "Compute LLE" button click. Performs full rerun
-        with calc_lle=True for accurate Lyapunov exponent calculation.
-        """
-        self._is_live_run = False
-        self._status("Running simulation with LLE computation...")
-        cfg = self.config_manager.config
-        # Enable LLE in config (stored in stim section, not analysis)
-        cfg.stim.calc_lle = True
-        subspace_text = "Voltage Only"
-        if hasattr(self, "analytics") and hasattr(self.analytics, "_chaos_subspace_combo"):
-            subspace_text = self.analytics._chaos_subspace_combo.currentText()
-        lle_subspace_mode = {
-            "Voltage Only": 0,
-            "Voltage + Gates": 1,
-            "Full State": 2,
-        }.get(subspace_text, 0)
-        self.sim_controller.run_single(
-            cfg,
-            on_success=self._on_simulation_done,
-            on_error=self._on_sim_error,
-            compute_lyapunov=True,
-            lle_subspace_mode=lle_subspace_mode,
-        )
 
     def _on_simulation_done(self, result: dict):
         """
@@ -2444,12 +2610,14 @@ class MainWindow(QMainWindow):
         """
         try:
             result = self._normalize_worker_payload(result)
+            focus_lle_results = False
             if 'mc_results' in result:
                 self.oscilloscope.update_plots_mc(result['mc_results'])
                 self._status(f"MC done - {len(result['mc_results'])} trials.")
             elif 'single' in result:
                 res = result['single']
                 self._last_result = res
+                focus_lle_results = bool(self._focus_lle_after_run)
                 # Check for divergence (v12.0)
                 if getattr(res, 'diverged', False):
                     self._status("Simulation diverged: check for non-physical parameters (e.g. zero resistance or infinite conductance)")
@@ -2504,7 +2672,12 @@ class MainWindow(QMainWindow):
 
             # Only switch to oscilloscope on manual runs, not live timer updates
             if not self._is_live_run:
+                self._dock_analytics.setVisible(True)
                 self._dock_analytics.raise_()
+                if focus_lle_results and hasattr(self.analytics, "show_lle_tab"):
+                    self.analytics.show_lle_tab()
+                    self._focus_lle_after_run = False
+                    self._status("LLE experiment complete - Lyapunov tab updated.")
                 self.oscilloscope.raise_()
         except Exception as e:
             QMessageBox.critical(self, "Simulation Error", str(e))
@@ -2611,7 +2784,7 @@ class MainWindow(QMainWindow):
         # Run stochastic simulation through SimulationController
         self.sim_controller.run_stochastic(
             self.config_manager.config,
-            1,
+            int(getattr(self.config_manager.config.analysis, "mc_trials", 1)),
             on_success=self._on_stoch_done,
             on_error=self._on_sim_error
         )

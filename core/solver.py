@@ -26,7 +26,16 @@ logger = logging.getLogger(__name__)
 
 # LLE subspace mode mapping for native solver (Numba-compatible ints)
 # 0=v_only, 1=v_and_gates, 2=full_state, 3=custom
-_LLE_MODE_MAP = {"v_only": 0, "v_and_gates": 1, "full_state": 2, "custom": 3}
+_LLE_MODE_MAP = {
+    "v_only": 0,
+    "v_and_gates": 1,
+    "full_state": 2,
+    "custom": 3,
+    "Voltage Only": 0,
+    "Voltage + Gates": 1,
+    "Full State": 2,
+    "Custom": 3,
+}
 
 
 def _compute_soma_stimulus_trace(t_arr: np.ndarray, y_mat: np.ndarray, physics_params) -> np.ndarray:
@@ -1224,9 +1233,14 @@ class NeuronSolver:
             detects numerical divergence the returned result contains the partial output
             and has `res.diverged = True`.
         """
-        from core.native_loop import run_native_loop, set_numba_random_seed
+        from core.native_loop import make_lle_subspace_mask, run_native_loop, set_numba_random_seed
 
         cfg = custom_config or self.config
+        if calc_lle:
+            lle_delta = float(getattr(cfg.analysis, "lle_delta", lle_delta))
+            lle_t_evolve = float(getattr(cfg.analysis, "lle_t_evolve_ms", lle_t_evolve))
+            if lle_subspace_mode == "v_only":
+                lle_subspace_mode = getattr(cfg.analysis, "lle_subspace", lle_subspace_mode)
 
         morph  = MorphologyBuilder.build(cfg)
         n_comp = morph["N_comp"]
@@ -1621,6 +1635,50 @@ class NeuronSolver:
             lle_subspace_mode_int = _LLE_MODE_MAP.get(lle_subspace_mode, 0)
         else:
             lle_subspace_mode_int = int(lle_subspace_mode)
+
+        if calc_lle and lle_subspace_mode_int == 3 and lle_custom_mask is None:
+            custom_gates_raw = getattr(cfg.analysis, "lle_custom_gates", "")
+            custom_gates = [
+                gate.strip().lower()
+                for gate in str(custom_gates_raw).split(",")
+                if gate.strip()
+            ]
+            lle_custom_mask = make_lle_subspace_mask(
+                n_comp,
+                physics.state_offsets,
+                include_v=bool(getattr(cfg.analysis, "lle_custom_v", True)),
+                include_gates=custom_gates,
+                include_ca=bool(getattr(cfg.analysis, "lle_custom_ca", False)),
+                include_atp=bool(getattr(cfg.analysis, "lle_custom_atp", False)),
+            )
+
+        # Python-side validation for LLE custom mask / weights — must run BEFORE
+        # entering the @njit loop so a malformed mask produces a clean Python
+        # traceback instead of a cryptic Numba IndexError or silent OOB read.
+        n_state_expected = int(y0.shape[0])
+        if calc_lle and lle_subspace_mode_int == 3 and lle_custom_mask is not None:
+            mask_arr = np.asarray(lle_custom_mask)
+            if mask_arr.ndim != 1 or mask_arr.shape[0] != n_state_expected:
+                raise ValueError(
+                    f"lle_custom_mask length ({mask_arr.shape[0] if mask_arr.ndim == 1 else mask_arr.shape}) "
+                    f"must match n_state ({n_state_expected})"
+                )
+            # Ensure boolean dtype for the jit kernel's truthy indexing
+            if mask_arr.dtype != np.bool_:
+                lle_custom_mask = mask_arr.astype(np.bool_)
+            else:
+                lle_custom_mask = mask_arr
+        if lle_weights is not None:
+            w_arr = np.asarray(lle_weights)
+            if w_arr.ndim != 1 or w_arr.shape[0] != n_state_expected:
+                raise ValueError(
+                    f"lle_weights length ({w_arr.shape[0] if w_arr.ndim == 1 else w_arr.shape}) "
+                    f"must match n_state ({n_state_expected})"
+                )
+            if w_arr.dtype != np.float64:
+                lle_weights = w_arr.astype(np.float64)
+            else:
+                lle_weights = w_arr
 
         t_out, y_out, diverged, lle_arr, i_stim_arr = run_native_loop(
             y0.astype(np.float64),
