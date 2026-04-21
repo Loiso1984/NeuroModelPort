@@ -295,8 +295,12 @@ def compute_metabolism_and_pump(
     elif na_i_val >= NA_I_MAX_M_M and dnai > 0.0:
         dnai = -abs(dnai) * 0.5
 
-    # ── K_o drift: outward K flux - pump influx (2 K+/cycle) + clearance ──
-    dko = ion_drift_gain * (max(0.0, i_k_total) - 2.0 * max(0.0, i_pump))
+    # ── K_o drift: signed K+ flux - pump influx (2 K+/cycle) + clearance ──
+    # Mass-conservation fix: do NOT clamp i_k_total at 0. When V < E_K during AHP /
+    # deep hyperpolarization, K+ currents are inward (negative) and must deplete K_o.
+    # Clamping produced a one-way "mass leak" over long sweeps. Pump stays clamped
+    # (compute_na_k_pump_current returns >=0 under MM kinetics: strictly outward Na+).
+    dko = ion_drift_gain * (i_k_total - 2.0 * max(0.0, i_pump))
     dko -= (k_o_val - k_o_rest_mM) / max(k_o_clearance_tau_ms, 1e-12)
     if k_o_val <= K_O_MIN_M_M and dko < 0.0:
         dko = abs(dko) * 0.5
@@ -700,10 +704,23 @@ def compute_ionic_conductances_scalar(
         g_ca = gca * (si ** 2) * ui
         if use_ghk:
             i_ca = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
-            # 1e-3 mV central step avoids cancellation while staying local for GHK linearization.
+            # Central 1e-3 mV step for GHK linearization. Safeguard: if |vi| < eps_v the
+            # stencil would straddle the GHK Taylor-expansion boundary at V=0, producing
+            # a spurious ~10^3x jump in g_ca_slope and freezing the BDF step size.
+            # Shift both sample points to the same sign-side of zero in that regime.
             eps_v = 1e-3
-            i_ca_p = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(vi + eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
-            i_ca_m = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(vi - eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
+            if vi >= 0.0:
+                v_minus_ica = vi - eps_v
+                if v_minus_ica < eps_v:
+                    v_minus_ica = eps_v
+                v_plus_ica = v_minus_ica + 2.0 * eps_v
+            else:
+                v_plus_ica = vi + eps_v
+                if v_plus_ica > -eps_v:
+                    v_plus_ica = -eps_v
+                v_minus_ica = v_plus_ica - 2.0 * eps_v
+            i_ca_p = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(v_plus_ica, ca_i_val, ca_ext, 2.0, t_kelvin)
+            i_ca_m = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(v_minus_ica, ca_i_val, ca_ext, 2.0, t_kelvin)
             g_ca_slope = (i_ca_p - i_ca_m) / (2.0 * eps_v)
             if not np.isfinite(g_ca_slope) or g_ca_slope <= 0.0:
                 g_ca_slope = g_ca
@@ -730,10 +747,23 @@ def compute_ionic_conductances_scalar(
         g_tca = gtca * (pi ** 2) * qi
         if use_ghk:
             i_tca = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
-            # 1e-3 mV central step avoids cancellation while staying local for GHK linearization.
+            # Central 1e-3 mV step for GHK linearization. Safeguard: if |vi| < eps_v the
+            # stencil would straddle the GHK Taylor-expansion boundary at V=0, producing
+            # a spurious ~10^3x jump in g_tca_slope and freezing the BDF step size.
+            # Shift both sample points to the same sign-side of zero in that regime.
             eps_v = 1e-3
-            i_tca_p = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(vi + eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
-            i_tca_m = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(vi - eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
+            if vi >= 0.0:
+                v_minus_itca = vi - eps_v
+                if v_minus_itca < eps_v:
+                    v_minus_itca = eps_v
+                v_plus_itca = v_minus_itca + 2.0 * eps_v
+            else:
+                v_plus_itca = vi + eps_v
+                if v_plus_itca > -eps_v:
+                    v_plus_itca = -eps_v
+                v_minus_itca = v_plus_itca - 2.0 * eps_v
+            i_tca_p = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(v_plus_itca, ca_i_val, ca_ext, 2.0, t_kelvin)
+            i_tca_m = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(v_minus_itca, ca_i_val, ca_ext, 2.0, t_kelvin)
             g_tca_slope = (i_tca_p - i_tca_m) / (2.0 * eps_v)
             if not np.isfinite(g_tca_slope) or g_tca_slope <= 0.0:
                 g_tca_slope = g_tca

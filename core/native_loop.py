@@ -294,6 +294,11 @@ def run_native_loop(
             f"lle_custom_mask length ({len(lle_custom_mask)}) must match n_state ({n_state})"
         )
 
+    # Task 3: Benettin LLE under Langevin gating measures RNG entropy, not deterministic
+    # chaos. Suppress perturbation + renormalization compute whenever stoch_gating is on;
+    # lle_out stays NaN-filled and callers get an out_idx-sized NaN array back.
+    _lle_active = calc_lle and not physics.stoch_gating
+
     # ── Unpack conductance and temperature-scaling matrices ──
     (gna_v, gk_v, gl_v, gih_v, gca_v, ga_v,
      gsk_v, gtca_v, gim_v, gnap_v, gnar_v) = unpack_conductances(physics.gbar_mat, n_comp)
@@ -392,8 +397,8 @@ def run_native_loop(
     y = y0.copy()
 
     # ── LLE trajectory management (Benettin algorithm) ──
-    n_traj = 2 if calc_lle else 1
-    if calc_lle:
+    n_traj = 2 if _lle_active else 1
+    if _lle_active:
         y_pert = y0.copy()
         y_pert[0] += lle_delta  # perturb V_soma
     else:
@@ -403,7 +408,7 @@ def run_native_loop(
     lle_count = 0
     lle_out = np.full(n_out, np.nan, dtype=np.float64)  # v12.7: NaN = not yet computed
     current_lle = np.nan  # Running LLE estimate for convergence curve
-    lle_t_next_renorm = lle_t_evolve if calc_lle else t_sim + 1.0
+    lle_t_next_renorm = lle_t_evolve if _lle_active else t_sim + 1.0
 
     # v12.2: Pre-allocated output for total stimulus current (soma compartment)
     # Records the actual effective stimulus applied to soma (compartment 0)
@@ -788,7 +793,7 @@ def run_native_loop(
                 y_out[s, out_idx] = y[s]
             # v12.8 FIX: Record average stimulus over the output interval
             i_stim_out[out_idx] = i_stim_soma_accum / i_stim_soma_count if i_stim_soma_count > 0 else 0.0
-            if calc_lle:
+            if _lle_active:
                 lle_out[out_idx] = current_lle
                 # v13.5: Record butterfly trace and instantaneous divergence
                 v_pert_out[out_idx] = y_pert[off_v]  # Soma voltage of perturbed trajectory
@@ -802,7 +807,7 @@ def run_native_loop(
         # ─────────────────────────────────────────────────────────────
         # 9. Benettin re-orthonormalization (periodic)
         # ─────────────────────────────────────────────────────────────
-        if calc_lle and t >= lle_t_next_renorm:
+        if _lle_active and t >= lle_t_next_renorm:
             dist_sq = 0.0
 
             # Subspace-aware distance calculation
@@ -971,17 +976,20 @@ def run_native_loop(
         # Record final stimulus using the same interval-average convention
         i_stim_out[out_idx] = i_stim_soma_accum / i_stim_soma_count if i_stim_soma_count > 0 else 0.0
         # Record final LLE estimate and butterfly data
-        if calc_lle:
+        if _lle_active:
             lle_out[out_idx] = current_lle if not np.isnan(current_lle) else (lle_accum / t if t > 1e-12 and lle_count > 0 else np.nan)
             v_pert_out[out_idx] = y_pert[off_v]
             div_local_out[out_idx] = current_div_local
         out_idx += 1
 
-    # Return empty LLE array if not computed to avoid confusion with zero values
+    # Return empty LLE array if not computed to avoid confusion with zero values.
+    # When calc_lle was requested but suppressed by stoch_gating, lle_result is an
+    # out_idx-sized NaN array (lle_out stays NaN-initialized); butterfly/divergence
+    # are empty because no perturbed trajectory was evolved.
     lle_result = lle_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
     i_stim_result = i_stim_out[:out_idx]  # v12.2: Stimulus current for analysis
     # v13.5: Return butterfly trace and local divergence (empty if LLE not computed)
-    v_pert_result = v_pert_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
-    div_local_result = div_local_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
+    v_pert_result = v_pert_out[:out_idx] if _lle_active else np.zeros(0, dtype=np.float64)
+    div_local_result = div_local_out[:out_idx] if _lle_active else np.zeros(0, dtype=np.float64)
     return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_result, i_stim_result, v_pert_result, div_local_result
 

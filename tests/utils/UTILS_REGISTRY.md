@@ -36,6 +36,8 @@ These scripts are kept for historical comparison or compatibility, but should no
   Reason: legacy validation generation script.
 - `validate_alpha_targets_v10_1.py`
   Reason: legacy target checker.
+- `validate_all_presets.py`
+  Reason: legacy all-preset validator retained for compatibility checks only.
 - `parallel_mode_sweep.py`
   Reason: exploratory helper; not part of active deterministic gate.
 - `validate_stimulus_location_routes.py`

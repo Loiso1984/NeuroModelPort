@@ -5,7 +5,6 @@ Tabs: Parameters | Oscilloscope | Analytics | Topology | Guide
 Run modes: Standard | Monte-Carlo | Sweep | S-D Curve | Excit. Map | Stochastic
 """
 import csv
-import copy
 import logging
 import os
 from pathlib import Path
@@ -27,8 +26,6 @@ import pyqtgraph as pg
 from gui.locales import T
 from gui.simulation_controller import SimulationController
 from gui.config_manager import ConfigManager
-from core.models import FullModelConfig
-from core.solver import NeuronSolver
 from core.errors import SimulationParameterError
 from core.presets import get_preset_names, apply_synaptic_stimulus
 from core.validation import validate_simulation_config, build_preset_mode_warnings
@@ -667,7 +664,7 @@ class MainWindow(QMainWindow):
             combo.blockSignals(False)
 
     def _restore_session_or_default(self) -> None:
-        if os.path.exists(".last_session.json") and self.config_manager.load_config_from(".last_session.json"):
+        if self.config_manager.load_last_session(".last_session.json"):
             self.config = self.config_manager.config
             self._sync_preset_combo_text(self.config_manager.current_preset_name or "Custom Config")
             self._refresh_all_forms()
@@ -883,6 +880,45 @@ class MainWindow(QMainWindow):
 
         scroll.setWidget(content)
         layout.addWidget(scroll)
+
+        self._live_passport_frame = QFrame(self._sidebar_frame)
+        self._live_passport_frame.setObjectName("live_passport")
+        self._live_passport_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._live_passport_frame.setStyleSheet(
+            "QFrame#live_passport {"
+            "background:#1f2538; border:1px solid #45475a; border-radius:6px; padding:6px;"
+            "}"
+            "QFrame#live_passport QLabel { color:#cdd6f4; font-size:11px; }"
+            "QFrame#live_passport QLabel.passport_value { color:#a6e3a1; font-weight:600; }"
+        )
+        passport_layout = QFormLayout(self._live_passport_frame)
+        passport_layout.setContentsMargins(8, 6, 8, 6)
+        passport_layout.setSpacing(4)
+
+        title = QLabel("Live Passport")
+        title.setStyleSheet("color:#89b4fa; font-weight:700;")
+        passport_layout.addRow(title)
+
+        self._passport_spikes_value = QLabel("-")
+        self._passport_freq_value = QLabel("-")
+        self._passport_vpeak_value = QLabel("-")
+        self._passport_atp_value = QLabel("-")
+        for widget in (
+            self._passport_spikes_value,
+            self._passport_freq_value,
+            self._passport_vpeak_value,
+            self._passport_atp_value,
+        ):
+            widget.setProperty("class", "passport_value")
+            widget.setObjectName("passport_value")
+            widget.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        passport_layout.addRow("Spikes", self._passport_spikes_value)
+        passport_layout.addRow("Freq (Hz)", self._passport_freq_value)
+        passport_layout.addRow("V-Peak", self._passport_vpeak_value)
+        passport_layout.addRow("ATP-Min", self._passport_atp_value)
+        layout.addWidget(self._live_passport_frame)
+        self._set_live_passport_values(None, None, None, None)
 
     def _build_experiment_studio_panel(self):
         """Build the unified Experiment Studio dock."""
@@ -1789,6 +1825,105 @@ class MainWindow(QMainWindow):
     def _status(self, msg: str):
         self._sb.showMessage(msg)
 
+    def _set_live_passport_values(self, spikes, freq_hz, v_peak_mv, atp_min_mM):
+        """Render compact simulation metrics in the sidebar passport."""
+        if not hasattr(self, "_passport_spikes_value"):
+            return
+
+        def _fmt_int(value):
+            if value is None:
+                return "-"
+            try:
+                return str(int(value))
+            except Exception:
+                return "-"
+
+        def _fmt_float(value, suffix, digits=2):
+            if value is None:
+                return "-"
+            try:
+                val = float(value)
+            except Exception:
+                return "-"
+            if not np.isfinite(val):
+                return "-"
+            return f"{val:.{digits}f} {suffix}".strip()
+
+        self._passport_spikes_value.setText(_fmt_int(spikes))
+        self._passport_freq_value.setText(_fmt_float(freq_hz, "Hz", digits=2))
+        self._passport_vpeak_value.setText(_fmt_float(v_peak_mv, "mV", digits=2))
+        self._passport_atp_value.setText(_fmt_float(atp_min_mM, "mM", digits=3))
+
+        atp_color = "#cdd6f4"
+        if atp_min_mM is not None:
+            try:
+                atp_val = float(atp_min_mM)
+            except Exception:
+                atp_val = np.nan
+            if np.isfinite(atp_val):
+                atp_color = "#F38BA8" if atp_val < 0.5 else "#A6E3A1"
+        self._passport_atp_value.setStyleSheet(
+            f"color:{atp_color}; font-weight:600; font-size:11px;"
+        )
+
+    def _update_live_passport_from_result(self, result, stats: dict | None = None):
+        """Update sidebar passport from latest simulation payload."""
+        stats = stats or {}
+
+        n_spikes = stats.get("n_spikes")
+        if n_spikes is None:
+            spike_times = getattr(result, "spike_times", None)
+            if spike_times is not None:
+                n_spikes = len(spike_times)
+            elif hasattr(result, "n_spikes"):
+                n_spikes = getattr(result, "n_spikes")
+
+        freq_hz = stats.get("f_steady_hz")
+        if freq_hz is None or not np.isfinite(float(freq_hz)):
+            freq_hz = stats.get("f_initial_hz")
+        try:
+            freq_val = float(freq_hz) if freq_hz is not None else np.nan
+        except Exception:
+            freq_val = np.nan
+        if not np.isfinite(freq_val):
+            spike_times = getattr(result, "spike_times", None)
+            t = getattr(result, "t", None)
+            if spike_times is not None and t is not None and len(t) > 1:
+                duration_s = max(1e-9, float(t[-1] - t[0]) / 1000.0)
+                freq_val = float(len(spike_times)) / duration_s
+            else:
+                freq_val = np.nan
+
+        v_peak = stats.get("V_peak")
+        try:
+            v_peak_val = float(v_peak) if v_peak is not None else np.nan
+        except Exception:
+            v_peak_val = np.nan
+        if not np.isfinite(v_peak_val):
+            v_soma = getattr(result, "v_soma", None)
+            if v_soma is not None and len(v_soma) > 0:
+                v_peak_val = float(np.nanmax(np.asarray(v_soma, dtype=float)))
+            else:
+                v_peak_val = np.nan
+
+        atp_min = stats.get("atp_min_mM")
+        try:
+            atp_min_val = float(atp_min) if atp_min is not None else np.nan
+        except Exception:
+            atp_min_val = np.nan
+        if not np.isfinite(atp_min_val):
+            atp_level = getattr(result, "atp_level", None)
+            if atp_level is not None:
+                atp_arr = np.asarray(atp_level, dtype=float)
+                if atp_arr.size > 0:
+                    atp_min_val = float(np.nanmin(atp_arr))
+        self._set_live_passport_values(
+            n_spikes,
+            freq_val if np.isfinite(freq_val) else None,
+            v_peak_val if np.isfinite(v_peak_val) else None,
+            atp_min_val if np.isfinite(atp_min_val) else None,
+        )
+
     def _sync_stim_type_controls(self):
         """Show only stimulation parameters relevant for current stim_type."""
         # Primary stimulus type always comes from canonical config.stim.
@@ -2024,7 +2159,7 @@ class MainWindow(QMainWindow):
         
         Ignores placeholder names containing "—" or "Select". Synchronizes the preset selection controls without emitting signals, loads the preset into the configuration manager, performs preset-specific postprocessing (auto-selects the jacobian mode, updates the Hines toggle state), refreshes all form widgets, synchronizes oscilloscope delay controls, resets the dual-stimulation widget to its preset defaults, updates preset-mode controls, redraws the topology using the current delay focus, and updates the status bar with the applied preset name and active mode suffix.
         """
-        if "—" in name or "Select" in name:
+        if self.config_manager.is_placeholder_preset(name):
             return
         # Keep both preset combos in sync without re-firing
         for combo in (self.combo_presets, getattr(self, '_sidebar_preset_combo', None)):
@@ -2038,8 +2173,8 @@ class MainWindow(QMainWindow):
             except RuntimeError:
                 # Qt C++ object was deleted - skip this combo
                 pass
-        self.config_manager.load_preset(name)
-        self.config_manager.auto_select_jacobian_for_preset()
+        if not self.config_manager.apply_preset_runtime(name):
+            return
         self._sync_hines_button_state()
         self._refresh_all_forms()
         self.oscilloscope.sync_delay_controls_for_config(self.config_manager.config)
@@ -2049,12 +2184,6 @@ class MainWindow(QMainWindow):
         )
         
         # --- ФИКС: Синхронизируем виджет с пресетом, а не сбрасываем его ---
-        if self.config_manager.config.dual_stimulation is not None:
-            self.dual_stim_widget.config = self.config_manager.config.dual_stimulation
-            self.dual_stim_widget.update_ui_from_config()
-        else:
-            self.dual_stim_widget.load_default_preset()
-            
         self._sync_preset_mode_controls()
         self.topology.draw_neuron(
             self.config_manager.config,
@@ -2535,30 +2664,14 @@ class MainWindow(QMainWindow):
         # Sync dual stim config from widget to main config.
         self._sync_dual_stim_into_config()
 
-        # Capture config snapshot and flags for the simulation thread
-        run_mc = self.config_manager.config.analysis.run_mc
-        run_bif = self.config_manager.config.analysis.run_bifurcation
-        bif_param = self.config_manager.config.analysis.bif_param
-        mc_trials = self.config_manager.config.analysis.mc_trials
-
-        if run_mc:
-            self._status(f"Monte-Carlo ({mc_trials} trials)...")
+        launch = self.sim_controller.run_configured_simulation(
+            self.config_manager.config,
+            on_success=self._on_simulation_done,
+            on_error=self._on_sim_error,
+        )
+        if launch["mode"] == "mc":
+            self._status(f"Monte-Carlo ({launch['mc_trials']} trials)...")
         QApplication.processEvents()
-
-        # Run simulation through SimulationController
-        if run_mc:
-            self.sim_controller.run_monte_carlo(
-                self.config_manager.config,
-                mc_trials,
-                on_success=self._on_simulation_done,
-                on_error=self._on_sim_error
-            )
-        else:
-            self.sim_controller.run_single(
-                self.config_manager.config,
-                on_success=self._on_simulation_done,
-                on_error=self._on_sim_error
-            )
 
     def _on_compartment_selected(self, comp_idx: int):
         """Handle compartment selection from topology click."""
@@ -2587,11 +2700,7 @@ class MainWindow(QMainWindow):
     def _on_run_button_clicked(self):
         """Handle Run button click — reset live flag and start simulation."""
         self._is_live_run = False  # Ensure this is a manual run, not live timer
-        self.sim_controller.run_single(
-            self.config_manager.config,
-            on_success=self._on_simulation_done,
-            on_error=self._on_sim_error,
-        )
+        self.run_simulation()
 
 
     def _on_simulation_done(self, result: dict):
@@ -2616,6 +2725,7 @@ class MainWindow(QMainWindow):
                 self._status(f"MC done - {len(result['mc_results'])} trials.")
             elif 'single' in result:
                 res = result['single']
+                stats = result.get('stats')
                 self._last_result = res
                 focus_lle_results = bool(self._focus_lle_after_run)
                 # Check for divergence (v12.0)
@@ -2624,6 +2734,7 @@ class MainWindow(QMainWindow):
                     # Still update plots with partial result
                     self.oscilloscope.update_plots(res)
                     self.analytics.update_analytics(res)
+                    self._update_live_passport_from_result(res, stats)
                     self._lock_ui(False)
                     return
                 # v13.0: Immediate oscilloscope update (fast, 60FPS capable)
@@ -2631,7 +2742,6 @@ class MainWindow(QMainWindow):
 
                 # v13.0: Debounced analytics — restart timer if already running
                 # Increment generation to invalidate stale analytics
-                stats = result.get('stats')
                 if stats is not None:
                     self._analytics_generation += 1
                     self._pending_result_for_analytics = None
@@ -2660,6 +2770,7 @@ class MainWindow(QMainWindow):
                 )
                 self.axon_biophysics.plot_axon_data(res, self.config_manager.config)
                 self._update_sparkline(res)
+                self._update_live_passport_from_result(res, stats)
                 self.btn_export_plot.setEnabled(True)
                 self.btn_export.setEnabled(True)
                 self._status(
@@ -2781,12 +2892,10 @@ class MainWindow(QMainWindow):
 
         self._sync_dual_stim_into_config()
 
-        # Run stochastic simulation through SimulationController
-        self.sim_controller.run_stochastic(
+        self.sim_controller.run_stochastic_from_config(
             self.config_manager.config,
-            int(getattr(self.config_manager.config.analysis, "mc_trials", 1)),
             on_success=self._on_stoch_done,
-            on_error=self._on_sim_error
+            on_error=self._on_sim_error,
         )
 
     def _on_stoch_done(self, payload):
@@ -2809,21 +2918,15 @@ class MainWindow(QMainWindow):
             return
         self._sync_dual_stim_into_config()
 
-        import numpy as np
-        param_vals = np.linspace(ana.sweep_min, ana.sweep_max, ana.sweep_steps)
-
         self._lock_ui(True)
         self._status(f"Sweep: {ana.sweep_param}  [{ana.sweep_min}...{ana.sweep_max}]  "
                      f"{ana.sweep_steps} steps...")
         QApplication.processEvents()
 
-        # Run sweep through SimulationController
-        self.sim_controller.run_sweep(
+        self.sim_controller.run_sweep_from_config(
             self.config_manager.config,
-            ana.sweep_param,
-            param_vals,
             on_success=lambda res: self._on_sweep_done(res, ana.sweep_param),
-            on_error=self._on_sim_error
+            on_error=self._on_sim_error,
         )
 
     def run_fi_curve(self):
@@ -2853,11 +2956,7 @@ class MainWindow(QMainWindow):
     def run_sd_curve(self):
         if not self._preflight_validate():
             return
-        dual_enabled = self._sync_dual_stim_into_config()
-        cfg_for_sd = self.config_manager.config
-        if dual_enabled:
-            cfg_for_sd = copy.deepcopy(self.config_manager.config)
-            cfg_for_sd.dual_stimulation = None
+        cfg_for_sd, dual_enabled = self.config_manager.build_single_input_analysis_config()
 
         self._lock_ui(True)
         if dual_enabled:
@@ -2865,12 +2964,11 @@ class MainWindow(QMainWindow):
         else:
             self._status("Computing Strength-Duration curve (binary search)...")
         QApplication.processEvents()
-        # Run S-D curve through SimulationController
-        self.sim_controller.run_sd_curve(
+        self.sim_controller.run_sd_curve_from_config(
             cfg_for_sd,
             on_success=self._on_sd_done,
             on_error=self._on_sim_error,
-            on_progress=self._report_progress
+            on_progress=self._report_progress,
         )
 
     def _on_sd_done(self, sd):
@@ -2890,11 +2988,7 @@ class MainWindow(QMainWindow):
     def run_excmap(self):
         if not self._preflight_validate():
             return
-        dual_enabled = self._sync_dual_stim_into_config()
-        cfg_for_excmap = self.config_manager.config
-        if dual_enabled:
-            cfg_for_excmap = copy.deepcopy(self.config_manager.config)
-            cfg_for_excmap.dual_stimulation = None
+        cfg_for_excmap, dual_enabled = self.config_manager.build_single_input_analysis_config()
 
         ana = self.config_manager.config.analysis
         total = ana.excmap_NI * ana.excmap_ND
@@ -2907,12 +3001,11 @@ class MainWindow(QMainWindow):
         else:
             self._status(f"Excitability map {ana.excmap_NI}x{ana.excmap_ND} = {total} runs...")
         QApplication.processEvents()
-        # Run excitability map through SimulationController
-        self.sim_controller.run_excmap(
+        self.sim_controller.run_excmap_from_config(
             cfg_for_excmap,
             on_success=self._on_excmap_done,
             on_error=self._on_sim_error,
-            on_progress=self._report_progress
+            on_progress=self._report_progress,
         )
 
     def _on_excmap_done(self, exc):

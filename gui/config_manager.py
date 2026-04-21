@@ -57,6 +57,59 @@ class ConfigManager(QObject):
     def mark_custom_config(self, label: str = "Custom Config") -> None:
         """Mark the active configuration as file-loaded or manually customized."""
         self._current_preset_name = label
+
+    @staticmethod
+    def is_placeholder_preset(name: str) -> bool:
+        """Return True when preset text is a non-selectable UI placeholder."""
+        return "—" in name or "Select" in name
+
+    def sync_dual_widget_from_config(self, reset_if_missing: bool = False) -> None:
+        """Push current config.dual_stimulation into the dual-stim widget, if present."""
+        if self._dual_stim_widget is None:
+            return
+        if self.config.dual_stimulation is not None:
+            self._dual_stim_widget.config = self.config.dual_stimulation
+            self._dual_stim_widget.update_ui_from_config()
+            return
+        if reset_if_missing and hasattr(self._dual_stim_widget, "load_default_preset"):
+            self._dual_stim_widget.load_default_preset()
+
+    def apply_preset_runtime(self, name: str) -> bool:
+        """
+        Apply preset and synchronize runtime config-dependent services.
+
+        Returns True if preset was successfully applied.
+        """
+        if self.is_placeholder_preset(name):
+            return False
+        if not self.load_preset(name):
+            return False
+        self.auto_select_jacobian_for_preset()
+        self.sync_dual_widget_from_config(reset_if_missing=True)
+        return True
+
+    def load_last_session(self, file_path: str) -> bool:
+        """Load last-session JSON when present."""
+        path = Path(file_path).expanduser()
+        if not path.is_file():
+            return False
+        return self.load_config_from(str(path))
+
+    def build_single_input_analysis_config(self) -> tuple[FullModelConfig, bool]:
+        """
+        Prepare config for S-D/excitability analyses that must run with single input only.
+
+        Returns
+        -------
+        tuple[FullModelConfig, bool]
+            (config_for_analysis, dual_was_enabled)
+        """
+        dual_enabled = self.sync_dual_stim_into_config()
+        cfg_for_analysis = self.config
+        if dual_enabled:
+            cfg_for_analysis = copy.deepcopy(self.config)
+            cfg_for_analysis.dual_stimulation = None
+        return cfg_for_analysis, dual_enabled
     
     def load_preset(self, name: str) -> bool:
         """
@@ -72,7 +125,7 @@ class ConfigManager(QObject):
         bool
             True if preset was loaded, False if invalid name
         """
-        if "—" in name or "Select" in name:
+        if self.is_placeholder_preset(name):
             return False
         
         previous_config = copy.deepcopy(self.config)

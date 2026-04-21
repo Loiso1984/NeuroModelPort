@@ -1,0 +1,2613 @@
+{
+  "default_model": {
+    "calcium": {
+      "B_Ca": 0.001,
+      "Ca_ext_mM": 2.0,
+      "Ca_rest_mM": 5e-05,
+      "dynamic_Ca": false,
+      "tau_Ca_ms": 200.0
+    },
+    "channel_enable_flags": {
+      "enable_IA": false,
+      "enable_ICa": false,
+      "enable_IM": false,
+      "enable_ITCa": false,
+      "enable_Ih": false,
+      "enable_NaP": false,
+      "enable_NaR": false,
+      "enable_SK": false
+    },
+    "conductances_mS_per_cm2": {
+      "gA_max": 0.4,
+      "gCa_max": 1.0,
+      "gIM_max": 0.5,
+      "gIh_max": 0.02,
+      "gK_max": 36.0,
+      "gL": 0.3,
+      "gNaP_max": 0.1,
+      "gNaR_max": 0.2,
+      "gNa_max": 120.0,
+      "gSK_max": 2.0,
+      "gTCa_max": 2.0
+    },
+    "morphology": {
+      "Cm_trunk_mult": 1.0,
+      "N_ais": 2,
+      "N_b1": 4,
+      "N_b2": 4,
+      "N_trunk": 35,
+      "Ra_ohm_cm": 150.0,
+      "d_ais_cm": 0.00015,
+      "d_b1_cm": 0.00015,
+      "d_b2_cm": 0.0001,
+      "d_soma_cm": 0.005,
+      "d_trunk_cm": 0.0002,
+      "dx_cm": 0.002,
+      "gA_ais_mult": 3.0,
+      "gCa_ais_mult": 2.0,
+      "gIh_ais_mult": 1.0,
+      "gK_ais_mult": 5.0,
+      "gL_trunk_mult": 1.0,
+      "gNa_ais_mult": 40.0,
+      "gNa_trunk_mult": 1.0,
+      "l_ais_cm": 0.002,
+      "single_comp": false
+    },
+    "reversal_potentials_mV": {
+      "EK": -77.0,
+      "EL": -54.387,
+      "ENa": 50.0,
+      "E_Ca": 120.0,
+      "E_Ih": -30.0,
+      "e_rev_syn_primary": 0.0,
+      "e_rev_syn_secondary": -75.0
+    }
+  },
+  "generated_utc": "2026-04-21T19:45:49.603820+00:00",
+  "presets": {
+    "A: Squid Giant Axon (HH 1952)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 30.0,
+          "gL": 0.3,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 120.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.05,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -77.0,
+          "EL": -54.387,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "A",
+      "preset_name": "A: Squid Giant Axon (HH 1952)"
+    },
+    "B: Pyramidal L5 (Mainen 1996)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 120.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": true,
+          "enable_IM": true,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.03,
+          "gIM_max": 0.05,
+          "gIh_max": 0.02,
+          "gK_max": 6.0,
+          "gL": 0.02,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 48.0,
+          "gSK_max": 0.18,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 3,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -70.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "l5_mode",
+      "mode_variants": {
+        "high_ach": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 120.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.03,
+            "gIM_max": 0.0,
+            "gIh_max": 0.02,
+            "gK_max": 6.0,
+            "gL": 0.02,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 48.0,
+            "gSK_max": 0.6,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.002,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "normal": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 120.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": true,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.03,
+            "gIM_max": 0.05,
+            "gIh_max": 0.02,
+            "gK_max": 6.0,
+            "gL": 0.02,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 48.0,
+            "gSK_max": 0.18,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.002,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "B",
+      "preset_name": "B: Pyramidal L5 (Mainen 1996)"
+    },
+    "C: FS Interneuron (Wang-Buzsaki)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": true,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 45.0,
+          "gL": 0.1,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.4,
+          "gNa_max": 120.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.0015,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -65.0,
+          "ENa": 55.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "C",
+      "preset_name": "C: FS Interneuron (Wang-Buzsaki)"
+    },
+    "D: alpha-Motoneuron (Powers 2001)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 2e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 80.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": true,
+          "enable_ICa": true,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.25,
+          "gCa_max": 0.05,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 30.0,
+          "gL": 0.1,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 100.0,
+          "gSK_max": 1.2,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 10,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 70.0,
+          "d_ais_cm": 0.0004,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.007,
+          "d_trunk_cm": 0.0005,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.01,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -77.0,
+          "EL": -60.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "D",
+      "preset_name": "D: alpha-Motoneuron (Powers 2001)"
+    },
+    "E: Cerebellar Purkinje (De Schutter)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 60.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": true,
+          "enable_ICa": true,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": true,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.08,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 20.0,
+          "gL": 0.05,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.5,
+          "gNa_max": 75.0,
+          "gSK_max": 1.5,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 3,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.0025,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 15.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -85.0,
+          "EL": -68.0,
+          "ENa": 45.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "purkinje_mode",
+      "mode_variants": {
+        "climbing_fiber": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 60.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": true,
+            "enable_ICa": true,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": true,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.08,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 20.0,
+            "gL": 0.05,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.5,
+            "gNa_max": 75.0,
+            "gSK_max": 1.5,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0025,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 15.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -85.0,
+            "EL": -68.0,
+            "ENa": 45.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "tonic": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 60.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": true,
+            "enable_ICa": true,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": true,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.08,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 20.0,
+            "gL": 0.05,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.5,
+            "gNa_max": 75.0,
+            "gSK_max": 1.5,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0025,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 15.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -85.0,
+            "EL": -68.0,
+            "ENa": 45.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "E",
+      "preset_name": "E: Cerebellar Purkinje (De Schutter)"
+    },
+    "F: Multiple Sclerosis (Demyelination)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 120.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": true,
+          "enable_IM": true,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.03,
+          "gIM_max": 0.05,
+          "gIh_max": 0.02,
+          "gK_max": 6.0,
+          "gL": 0.02,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 48.0,
+          "gSK_max": 0.8,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 3.0,
+          "N_ais": 10,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 500.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 10.0,
+          "gNa_ais_mult": 50.0,
+          "gNa_trunk_mult": 0.8,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -70.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "F",
+      "preset_name": "F: Multiple Sclerosis (Demyelination)"
+    },
+    "G: Local Anesthesia (gNa Block)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 30.0,
+          "gL": 0.3,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 12.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.05,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -77.0,
+          "EL": -54.387,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "anesthesia_mode",
+      "mode_variants": {
+        "full_block": {
+          "calcium": {
+            "B_Ca": 0.001,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": false,
+            "tau_Ca_ms": 200.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": false,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 1.0,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 30.0,
+            "gL": 0.3,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 12.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 2,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 35,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.05,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": true
+          },
+          "reversal_potentials_mV": {
+            "EK": -77.0,
+            "EL": -54.387,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "partial_block": {
+          "calcium": {
+            "B_Ca": 0.001,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": false,
+            "tau_Ca_ms": 200.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": false,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 1.0,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 30.0,
+            "gL": 0.3,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 48.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 2,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 35,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.05,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": true
+          },
+          "reversal_potentials_mV": {
+            "EK": -77.0,
+            "EL": -54.387,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "G",
+      "preset_name": "G: Local Anesthesia (gNa Block)"
+    },
+    "H: Severe Hyperkalemia (High EK)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 32.0,
+          "gL": 0.3,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 120.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.05,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -60.0,
+          "EL": -54.387,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "H",
+      "preset_name": "H: Severe Hyperkalemia (High EK)"
+    },
+    "I: In Vitro Slice (Mammalian 23\u00b0C)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 120.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": true,
+          "enable_IM": true,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.03,
+          "gIM_max": 0.05,
+          "gIh_max": 0.02,
+          "gK_max": 6.0,
+          "gL": 0.02,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 48.0,
+          "gSK_max": 0.18,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 3,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -70.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "I",
+      "preset_name": "I: In Vitro Slice (Mammalian 23\u00b0C)"
+    },
+    "J: C-Fiber (Pain / Unmyelinated)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 10.0,
+          "gL": 0.1,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 80.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 0,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 200.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.001,
+          "d_trunk_cm": 8e-05,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -80.0,
+          "EL": -60.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "J",
+      "preset_name": "J: C-Fiber (Pain / Unmyelinated)"
+    },
+    "K: Thalamic Relay (Ih + ITCa + Burst)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 2e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 120.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": true,
+          "enable_Ih": true,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 12.0,
+          "gL": 0.05,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 90.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 1.2
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 5,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.0025,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 1.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -75.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -43.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "k_mode",
+      "mode_variants": {
+        "activated": {
+          "calcium": {
+            "B_Ca": 2e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 120.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": false,
+            "enable_IM": false,
+            "enable_ITCa": true,
+            "enable_Ih": true,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 1.0,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 12.0,
+            "gL": 0.05,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 90.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 2,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 5,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0025,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 1.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -60.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -43.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "baseline": {
+          "calcium": {
+            "B_Ca": 2e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 120.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": false,
+            "enable_IM": false,
+            "enable_ITCa": true,
+            "enable_Ih": true,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 1.0,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 12.0,
+            "gL": 0.05,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 90.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 1.2
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 2,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 5,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0025,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 1.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -75.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -43.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "delta_oscillator": {
+          "calcium": {
+            "B_Ca": 2e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 120.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": false,
+            "enable_IM": false,
+            "enable_ITCa": true,
+            "enable_Ih": true,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 1.0,
+            "gIM_max": 0.5,
+            "gIh_max": 0.018,
+            "gK_max": 12.0,
+            "gL": 0.05,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 90.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 1.2
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 2,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 5,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0025,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 1.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -77.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -43.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "K",
+      "preset_name": "K: Thalamic Relay (Ih + ITCa + Burst)"
+    },
+    "L: Hippocampal CA1 Pyramidal (Adapting)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 100.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": true,
+          "enable_ICa": true,
+          "enable_IM": true,
+          "enable_ITCa": false,
+          "enable_Ih": true,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.3,
+          "gCa_max": 0.08,
+          "gIM_max": 0.04,
+          "gIh_max": 0.02,
+          "gK_max": 8.0,
+          "gL": 0.05,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 56.0,
+          "gSK_max": 0.5,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 6,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -85.0,
+          "EL": -60.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -43.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "L",
+      "preset_name": "L: Hippocampal CA1 Pyramidal (Adapting)"
+    },
+    "M: Epilepsy (v10 SCN1A mutation)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 300.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": true,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": true,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.08,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 45.0,
+          "gL": 0.1,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.4,
+          "gNa_max": 180.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.0015,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -65.0,
+          "ENa": 55.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -40.0
+        }
+      },
+      "preset_code": "M",
+      "preset_name": "M: Epilepsy (v10 SCN1A mutation)"
+    },
+    "N: Alzheimer's (v10 Calcium Toxicity)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 800.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": true,
+          "enable_IM": true,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.08,
+          "gIM_max": 0.05,
+          "gIh_max": 0.02,
+          "gK_max": 6.0,
+          "gL": 0.02,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 48.0,
+          "gSK_max": 1.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 3,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -70.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "alzheimer_mode",
+      "mode_variants": {
+        "progressive": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 800.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": true,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.08,
+            "gIM_max": 0.05,
+            "gIh_max": 0.02,
+            "gK_max": 6.0,
+            "gL": 0.02,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 48.0,
+            "gSK_max": 1.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.002,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "terminal": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 1200.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": true,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.06,
+            "gIM_max": 0.05,
+            "gIh_max": 0.02,
+            "gK_max": 6.0,
+            "gL": 0.02,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 48.0,
+            "gSK_max": 2.2,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.002,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "N",
+      "preset_name": "N: Alzheimer's (v10 Calcium Toxicity)"
+    },
+    "O: Hypoxia (v10 ATP-pump failure)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 2e-05,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 900.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": true,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": true,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.08,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 45.0,
+          "gL": 0.08,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.4,
+          "gNa_max": 120.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 5,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.0015,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 3.0,
+          "gNa_ais_mult": 20.0,
+          "gNa_trunk_mult": 0.65,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -70.0,
+          "ENa": 55.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "hypoxia_mode",
+      "mode_variants": {
+        "progressive": {
+          "calcium": {
+            "B_Ca": 2e-05,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 900.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": true,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.08,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 45.0,
+            "gL": 0.08,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.4,
+            "gNa_max": 120.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 5,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0015,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 3.0,
+            "gNa_ais_mult": 20.0,
+            "gNa_trunk_mult": 0.65,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 55.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "terminal": {
+          "calcium": {
+            "B_Ca": 2e-05,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 1200.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": true,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.1,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 45.0,
+            "gL": 0.08,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.4,
+            "gNa_max": 120.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 5,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0015,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 8.0,
+            "gNa_ais_mult": 20.0,
+            "gNa_trunk_mult": 0.35,
+            "l_ais_cm": 0.002,
+            "single_comp": false
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 55.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "O",
+      "preset_name": "O: Hypoxia (v10 ATP-pump failure)"
+    },
+    "P: Thalamic Reticular Nucleus (TRN Spindles)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 1e-05,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 120.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": true,
+          "enable_Ih": true,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.001,
+          "gK_max": 12.0,
+          "gL": 0.08,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 88.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.8
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -77.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -43.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "P",
+      "preset_name": "P: Thalamic Reticular Nucleus (TRN Spindles)"
+    },
+    "Q: Striatal Spiny Projection (SPN)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": true,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": true,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.8,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.01,
+          "gK_max": 8.0,
+          "gL": 0.04,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 80.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 15,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.0015,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -80.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -43.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "Q",
+      "preset_name": "Q: Striatal Spiny Projection (SPN)"
+    },
+    "R: Cholinergic Neuromodulation (ACh)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 3e-06,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": true,
+          "tau_Ca_ms": 120.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": true,
+          "enable_IM": true,
+          "enable_ITCa": false,
+          "enable_Ih": true,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": true
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 0.03,
+          "gIM_max": 0.5,
+          "gIh_max": 0.01,
+          "gK_max": 6.0,
+          "gL": 0.02,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 56.0,
+          "gSK_max": 0.18,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 3,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -70.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -43.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "ach_mode",
+      "mode_variants": {
+        "arousal": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 120.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": true,
+            "enable_ITCa": false,
+            "enable_Ih": true,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.03,
+            "gIM_max": 0.05,
+            "gIh_max": 0.01,
+            "gK_max": 6.0,
+            "gL": 0.02,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 56.0,
+            "gSK_max": 0.18,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.002,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": true
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -43.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "sleep": {
+          "calcium": {
+            "B_Ca": 3e-06,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": true,
+            "tau_Ca_ms": 120.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": true,
+            "enable_IM": true,
+            "enable_ITCa": false,
+            "enable_Ih": true,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": true
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.4,
+            "gCa_max": 0.03,
+            "gIM_max": 0.5,
+            "gIh_max": 0.01,
+            "gK_max": 6.0,
+            "gL": 0.02,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.2,
+            "gNa_max": 56.0,
+            "gSK_max": 0.18,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 3,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 10,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.002,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": true
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -70.0,
+            "ENa": 50.0,
+            "E_Ca": 120.0,
+            "E_Ih": -43.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "R",
+      "preset_name": "R: Cholinergic Neuromodulation (ACh)"
+    },
+    "S: Pathology: Dravet Syndrome (SCN1A LOF)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.0,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 22.0,
+          "gL": 0.1,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.4,
+          "gNa_max": 64.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.0015,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -65.0,
+          "ENa": 55.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "mode_field": "dravet_mode",
+      "mode_variants": {
+        "baseline": {
+          "calcium": {
+            "B_Ca": 0.001,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": false,
+            "tau_Ca_ms": 200.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": false,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.0,
+            "gCa_max": 1.0,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 22.0,
+            "gL": 0.1,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.4,
+            "gNa_max": 64.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 2,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 35,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0015,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": true
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -65.0,
+            "ENa": 55.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        },
+        "febrile": {
+          "calcium": {
+            "B_Ca": 0.001,
+            "Ca_ext_mM": 2.0,
+            "Ca_rest_mM": 5e-05,
+            "dynamic_Ca": false,
+            "tau_Ca_ms": 200.0
+          },
+          "channel_enable_flags": {
+            "enable_IA": false,
+            "enable_ICa": false,
+            "enable_IM": false,
+            "enable_ITCa": false,
+            "enable_Ih": false,
+            "enable_NaP": false,
+            "enable_NaR": false,
+            "enable_SK": false
+          },
+          "conductances_mS_per_cm2": {
+            "gA_max": 0.0,
+            "gCa_max": 1.0,
+            "gIM_max": 0.5,
+            "gIh_max": 0.02,
+            "gK_max": 22.0,
+            "gL": 0.1,
+            "gNaP_max": 0.1,
+            "gNaR_max": 0.4,
+            "gNa_max": 44.0,
+            "gSK_max": 2.0,
+            "gTCa_max": 2.0
+          },
+          "morphology": {
+            "Cm_trunk_mult": 1.0,
+            "N_ais": 2,
+            "N_b1": 4,
+            "N_b2": 4,
+            "N_trunk": 35,
+            "Ra_ohm_cm": 150.0,
+            "d_ais_cm": 0.00015,
+            "d_b1_cm": 0.00015,
+            "d_b2_cm": 0.0001,
+            "d_soma_cm": 0.0015,
+            "d_trunk_cm": 0.0002,
+            "dx_cm": 0.002,
+            "gA_ais_mult": 3.0,
+            "gCa_ais_mult": 2.0,
+            "gIh_ais_mult": 1.0,
+            "gK_ais_mult": 5.0,
+            "gL_trunk_mult": 1.0,
+            "gNa_ais_mult": 40.0,
+            "gNa_trunk_mult": 1.0,
+            "l_ais_cm": 0.002,
+            "single_comp": true
+          },
+          "reversal_potentials_mV": {
+            "EK": -90.0,
+            "EL": -65.0,
+            "ENa": 55.0,
+            "E_Ca": 120.0,
+            "E_Ih": -30.0,
+            "e_rev_syn_primary": 0.0,
+            "e_rev_syn_secondary": -75.0
+          }
+        }
+      },
+      "preset_code": "S",
+      "preset_name": "S: Pathology: Dravet Syndrome (SCN1A LOF)"
+    },
+    "T: Passive Cable (Linear Decay)": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 0.0,
+          "gL": 0.1,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 0.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 0,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 10,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.002,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": false
+        },
+        "reversal_potentials_mV": {
+          "EK": -90.0,
+          "EL": -65.0,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "T",
+      "preset_name": "T: Passive Cable (Linear Decay)"
+    },
+    "U: I-Clamp Threshold Explorer": {
+      "default_mode": {
+        "calcium": {
+          "B_Ca": 0.001,
+          "Ca_ext_mM": 2.0,
+          "Ca_rest_mM": 5e-05,
+          "dynamic_Ca": false,
+          "tau_Ca_ms": 200.0
+        },
+        "channel_enable_flags": {
+          "enable_IA": false,
+          "enable_ICa": false,
+          "enable_IM": false,
+          "enable_ITCa": false,
+          "enable_Ih": false,
+          "enable_NaP": false,
+          "enable_NaR": false,
+          "enable_SK": false
+        },
+        "conductances_mS_per_cm2": {
+          "gA_max": 0.4,
+          "gCa_max": 1.0,
+          "gIM_max": 0.5,
+          "gIh_max": 0.02,
+          "gK_max": 36.0,
+          "gL": 0.3,
+          "gNaP_max": 0.1,
+          "gNaR_max": 0.2,
+          "gNa_max": 120.0,
+          "gSK_max": 2.0,
+          "gTCa_max": 2.0
+        },
+        "morphology": {
+          "Cm_trunk_mult": 1.0,
+          "N_ais": 2,
+          "N_b1": 4,
+          "N_b2": 4,
+          "N_trunk": 35,
+          "Ra_ohm_cm": 150.0,
+          "d_ais_cm": 0.00015,
+          "d_b1_cm": 0.00015,
+          "d_b2_cm": 0.0001,
+          "d_soma_cm": 0.05,
+          "d_trunk_cm": 0.0002,
+          "dx_cm": 0.002,
+          "gA_ais_mult": 3.0,
+          "gCa_ais_mult": 2.0,
+          "gIh_ais_mult": 1.0,
+          "gK_ais_mult": 5.0,
+          "gL_trunk_mult": 1.0,
+          "gNa_ais_mult": 40.0,
+          "gNa_trunk_mult": 1.0,
+          "l_ais_cm": 0.002,
+          "single_comp": true
+        },
+        "reversal_potentials_mV": {
+          "EK": -77.0,
+          "EL": -54.387,
+          "ENa": 50.0,
+          "E_Ca": 120.0,
+          "E_Ih": -30.0,
+          "e_rev_syn_primary": 0.0,
+          "e_rev_syn_secondary": -75.0
+        }
+      },
+      "preset_code": "U",
+      "preset_name": "U: I-Clamp Threshold Explorer"
+    }
+  },
+  "source_files": [
+    "core/models.py",
+    "core/presets.py"
+  ]
+}

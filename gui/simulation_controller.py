@@ -8,6 +8,7 @@ Keeps QRunnable, QThreadPool, and Worker classes in the GUI package.
 from PySide6.QtCore import QObject, Signal, QThreadPool, QRunnable
 from typing import Callable, Any, Optional
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,110 @@ class SimulationController(QObject):
         super().__init__(parent)
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(4)  # Limit concurrent simulations
+
+    @staticmethod
+    def _snapshot_config(config):
+        """Create an immutable simulation snapshot for worker threads."""
+        if hasattr(config, "model_copy"):
+            return config.model_copy(deep=True)
+        from copy import deepcopy
+        return deepcopy(config)
+
+    def run_configured_simulation(
+        self,
+        config,
+        on_success: Callable[[Any], None] = None,
+        on_error: Callable[[str], None] = None,
+    ) -> dict:
+        """Dispatch single-run vs Monte-Carlo according to config.analysis.run_mc."""
+        analysis = getattr(config, "analysis", None)
+        run_mc = bool(getattr(analysis, "run_mc", False))
+        if run_mc:
+            mc_trials = int(getattr(analysis, "mc_trials", 1))
+            self.run_monte_carlo(
+                config,
+                mc_trials,
+                on_success=on_success,
+                on_error=on_error,
+            )
+            return {"mode": "mc", "mc_trials": mc_trials}
+
+        self.run_single(
+            config,
+            on_success=on_success,
+            on_error=on_error,
+        )
+        return {"mode": "single", "mc_trials": 0}
+
+    def run_stochastic_from_config(
+        self,
+        config,
+        on_success: Callable[[Any], None] = None,
+        on_error: Callable[[str], None] = None,
+    ) -> int:
+        """Run stochastic simulation using trial count from config.analysis.mc_trials."""
+        analysis = getattr(config, "analysis", None)
+        n_trials = int(getattr(analysis, "mc_trials", 1))
+        self.run_stochastic(
+            config,
+            n_trials=n_trials,
+            on_success=on_success,
+            on_error=on_error,
+        )
+        return n_trials
+
+    def run_sweep_from_config(
+        self,
+        config,
+        on_success: Callable[[Any], None] = None,
+        on_error: Callable[[str], None] = None,
+    ) -> tuple[str, np.ndarray]:
+        """Run sweep using analysis.sweep_* fields from config."""
+        analysis = config.analysis
+        param_name = str(getattr(analysis, "sweep_param", "stim.Iext"))
+        param_vals = np.linspace(
+            float(analysis.sweep_min),
+            float(analysis.sweep_max),
+            int(analysis.sweep_steps),
+        )
+        self.run_sweep(
+            config,
+            param_name,
+            param_vals,
+            on_success=on_success,
+            on_error=on_error,
+        )
+        return param_name, param_vals
+
+    def run_sd_curve_from_config(
+        self,
+        config,
+        on_success: Callable[[Any], None] = None,
+        on_error: Callable[[str], None] = None,
+        on_progress: Callable[[str], None] = None,
+    ) -> None:
+        """Run S-D curve for the provided config."""
+        self.run_sd_curve(
+            config,
+            on_success=on_success,
+            on_error=on_error,
+            on_progress=on_progress,
+        )
+
+    def run_excmap_from_config(
+        self,
+        config,
+        on_success: Callable[[Any], None] = None,
+        on_error: Callable[[str], None] = None,
+        on_progress: Callable[[str], None] = None,
+    ) -> None:
+        """Run excitability map for the provided config."""
+        self.run_excmap(
+            config,
+            on_success=on_success,
+            on_error=on_error,
+            on_progress=on_progress,
+        )
         
     def run_single(self, config, on_success: Callable[[Any], None] = None,
                    on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None,
@@ -81,17 +186,18 @@ class SimulationController(QObject):
         from core.solver import NeuronSolver
         from core.morphology import MorphologyBuilder
         from core.analysis import full_analysis
+        config_snapshot = self._snapshot_config(config)
         
         self.simulation_started.emit()
         
         def run_simulation():
-            solver = NeuronSolver(config)
+            solver = NeuronSolver(config_snapshot)
             if compute_lyapunov:
                 result = solver.run_native(
-                    config,
+                    config_snapshot,
                     calc_lle=True,
-                    lle_delta=float(getattr(config.analysis, "lle_delta", 1e-6)),
-                    lle_t_evolve=float(getattr(config.analysis, "lle_t_evolve_ms", 1.0)),
+                    lle_delta=float(getattr(config_snapshot.analysis, "lle_delta", 1e-6)),
+                    lle_t_evolve=float(getattr(config_snapshot.analysis, "lle_t_evolve_ms", 1.0)),
                     lle_subspace_mode=int(lle_subspace_mode),
                 )
             else:
@@ -102,7 +208,7 @@ class SimulationController(QObject):
             # to keep GUI thread responsive (< 16 ms per frame)
             
             # Build morphology for post-processing
-            morph = MorphologyBuilder.build(config)
+            morph = MorphologyBuilder.build(config_snapshot)
             
             # Post-process physics (current reconstruction, ATP estimates)
             solver._post_process_physics(result, morph)
@@ -141,13 +247,14 @@ class SimulationController(QObject):
         Matplotlib rendering happens only after analytics completes.
         """
         self.analytics_started.emit()
+        config_snapshot = self._snapshot_config(config)
 
         from core.solver import NeuronSolver
         from core.analysis import full_analysis
 
         def run_analysis():
             # Post-process physics (current reconstruction, ATP estimates)
-            solver = NeuronSolver(config)
+            solver = NeuronSolver(config_snapshot)
             solver._post_process_physics(result, morph)
 
             # Full analysis (spike detection, statistics, LLE if requested)
@@ -171,14 +278,14 @@ class SimulationController(QObject):
                       compute_lyapunov: bool = False):
         """Run stochastic simulation through the primary solver path with async analysis."""
         self.simulation_started.emit()
+        config_snapshot = self._snapshot_config(config)
         
         def run_simulation():
-            from copy import deepcopy
             from core.solver import NeuronSolver
             from core.morphology import MorphologyBuilder
             from core.analysis import full_analysis
             
-            cfg = deepcopy(config)
+            cfg = config_snapshot
             cfg.stim.stoch_gating = True
             solver = NeuronSolver(cfg)
             result = solver.run_single()
@@ -215,11 +322,12 @@ class SimulationController(QObject):
                         on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None):
         """Run Monte-Carlo simulation."""
         self.simulation_started.emit()
+        config_snapshot = self._snapshot_config(config)
         
         from core.solver import NeuronSolver
         
         def run_simulation():
-            solver = NeuronSolver(config)
+            solver = NeuronSolver(config_snapshot)
             return {'mc_results': solver.run_mc(n_trials)}
             
         worker = Worker(run_simulation)
@@ -243,12 +351,18 @@ class SimulationController(QObject):
                   on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None):
         """Run parametric sweep."""
         self.simulation_started.emit()
-        
-        from core.solver import NeuronSolver
-        
+        config_snapshot = self._snapshot_config(config)
+        if isinstance(param_range, np.ndarray):
+            param_range_snapshot = np.array(param_range, copy=True)
+        else:
+            try:
+                param_range_snapshot = list(param_range)
+            except TypeError:
+                param_range_snapshot = param_range
+
         def run_simulation():
             from core.advanced_sim import run_sweep
-            return run_sweep(config, param_name, param_range)
+            return run_sweep(config_snapshot, param_name, param_range_snapshot)
             
         worker = Worker(run_simulation)
         
@@ -271,12 +385,11 @@ class SimulationController(QObject):
                      on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None):
         """Run Strength-Duration curve."""
         self.simulation_started.emit()
-        
-        from core.solver import NeuronSolver
-        
+        config_snapshot = self._snapshot_config(config)
+
         def run_simulation():
             from core.advanced_sim import run_sd_curve
-            return run_sd_curve(config)
+            return run_sd_curve(config_snapshot)
             
         worker = Worker(run_simulation)
         
@@ -299,12 +412,11 @@ class SimulationController(QObject):
                    on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None):
         """Run excitability map."""
         self.simulation_started.emit()
-        
-        from core.solver import NeuronSolver
-        
+        config_snapshot = self._snapshot_config(config)
+
         def run_simulation():
             from core.advanced_sim import run_excitability_map
-            return run_excitability_map(config)
+            return run_excitability_map(config_snapshot)
             
         worker = Worker(run_simulation)
         
@@ -332,17 +444,17 @@ class SimulationController(QObject):
         Emits progress updates through signals (thread-safe).
         """
         self.simulation_started.emit()
+        config_snapshot = self._snapshot_config(config)
 
         from core.solver import NeuronSolver
         from core.analysis import detect_spikes
-        from copy import deepcopy
 
         def run_search(progress_signal):
             """Worker function that emits progress through signal."""
             search_history = []
             I_low, I_high = 0.0, 100.0
 
-            cfg = deepcopy(config)
+            cfg = config_snapshot
             cfg.stim.t_sim = 50.0  # Short simulation
             solver = NeuronSolver(cfg)
 

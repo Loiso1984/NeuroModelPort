@@ -1,8 +1,7 @@
 # NeuroModelPort Workflow Control Plane
 
 This file is the first stop for AI agents working in this repository. It consolidates routing,
-prompt shape, context budget, validation gates, and safety rules without replacing the
-agent-specific folders under `.windsurf/`, `.claude/`, `.codex/`, `.gemini/`, or `.agents/`.
+prompt shape, context budget, validation gates, and safety rules.
 
 ## Operating Priority
 
@@ -11,6 +10,14 @@ agent-specific folders under `.windsurf/`, `.claude/`, `.codex/`, `.gemini/`, or
 3. Prefer deterministic validation artifacts over visual plausibility.
 4. Keep context small, current, and sourced.
 5. Optimize speed and cost only after correctness is protected.
+
+## Agent Skills Source Of Truth
+
+- Canonical skills directory: `.ai/skills/`
+- `.ai/skills/` is the ONLY source of truth for AI instructions.
+- Do not treat editor-created shadow folders (`.codex/`, `.cursor/`, `.kiro/`, `.pi/`, `.trae/`, `.trae-cn/`) as canonical.
+- New skills must be added only under `.ai/skills/` and referenced from there in prompts/handoffs.
+- If shadow folders need to be repopulated, run `python scripts/sync_skills.py` to mirror `.ai/skills/` into each shadow folder.
 
 ## Source Of Truth
 

@@ -54,6 +54,12 @@ _analysis_results/
 _features/
 .claude/
 .windsurf/
+.codex/
+.cursor/
+.kiro/
+.pi/
+.trae/
+.trae-cn/
 
 # OS
 *.tmp

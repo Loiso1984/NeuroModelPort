@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
-    QCheckBox, QComboBox, QGroupBox, QVBoxLayout, QLabel, QLineEdit
+    QCheckBox, QComboBox, QGroupBox, QVBoxLayout, QLabel, QLineEdit, QApplication
 )
 from PySide6.QtCore import Qt
 from typing import Literal, get_args, get_origin, Iterable
@@ -219,6 +219,12 @@ class PydanticFormWidget(QWidget):
     def refresh(self):
         """Sync widgets from model (needed after preset load)."""
         from gui.locales import T
+        focused_widget = QApplication.focusWidget()
+        restore_focus = focused_widget
+        restore_cursor_pos = None
+        if isinstance(focused_widget, QLineEdit):
+            restore_cursor_pos = focused_widget.cursorPosition()
+
         for name, widget in self.widgets_map.items():
             try:
                 val = getattr(self.instance, name)
@@ -256,3 +262,12 @@ class PydanticFormWidget(QWidget):
         if not isinstance(self.hidden_fields, set):
             self.hidden_fields = set(self.hidden_fields)
         self._apply_visibility_filters()
+
+        if restore_focus is not None:
+            try:
+                restore_focus.setFocus(Qt.FocusReason.OtherFocusReason)
+                if isinstance(restore_focus, QLineEdit) and restore_cursor_pos is not None:
+                    text_len = len(restore_focus.text())
+                    restore_focus.setCursorPosition(max(0, min(int(restore_cursor_pos), text_len)))
+            except Exception as e:
+                logging.debug(f"Focus restore skipped: {e}")
