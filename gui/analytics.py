@@ -1628,95 +1628,40 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Impedance'))
 
     def _build_tab_chaos(self) -> QWidget:
-        self.fig_chaos, cvs = _mpl_fig(3, 1, figsize=(9.6, 18), tight=False)
-        self.ax_chaos = [self.fig_chaos.add_subplot(3, 1, k) for k in range(1, 4)]
-        _set_canvas_margins(self.fig_chaos, left=0.08, right=0.97, top=0.96, bottom=0.06, hspace=0.42, wspace=0.24)
+        self.fig_chaos, cvs = _mpl_fig(1, 1, figsize=(9.6, 7.2), tight=False)
+        self.ax_chaos = self.fig_chaos.add_subplot(1, 1, 1)
+        _set_canvas_margins(self.fig_chaos, left=0.08, right=0.97, top=0.92, bottom=0.10)
         self.cvs_chaos = cvs
         self._tab_figures['Chaos & LLE'] = self.fig_chaos
-        self._chaos_force_enabled = getattr(self, '_chaos_force_enabled', False)
-        self._chaos_selected_k = 0
-        self._chaos_selected_pair = 0
-        self._chaos_analysis = None
         self._chaos_texts: dict[str, object] = {}
-        # PERSISTENT ARTISTS: Create once, update data (avoids memory fragmentation)
-        self._chaos_persistent_artists: dict[str, object] = {}
-        self._create_chaos_persistent_artists()
-        self._chaos_click_cid = self.cvs_chaos.mpl_connect('button_press_event', self._on_chaos_plot_clicked)
 
-        from PySide6.QtWidgets import QWidget, QGridLayout, QLabel, QSpinBox, QDoubleSpinBox, QComboBox
         controls = QWidget()
-        layout = QGridLayout(controls)
+        layout = QHBoxLayout(controls)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setHorizontalSpacing(8)
-        layout.setVerticalSpacing(4)
+        layout.setSpacing(8)
 
-        def _add_label(text_label: str, row: int, col: int):
-            lbl = QLabel(text_label)
-            lbl.setStyleSheet('color:#CDD6F4; font-size:11px;')
-            layout.addWidget(lbl, row, col)
-            return lbl
+        label = QLabel('Benettin subspace:')
+        label.setStyleSheet('color:#CDD6F4; font-size:11px;')
+        layout.addWidget(label)
 
-        _add_label('Embed', 0, 0)
-        self._chaos_embed_spin = QSpinBox()
-        self._chaos_embed_spin.setRange(2, 8)
-        self._chaos_embed_spin.setValue(3)
-        self._chaos_embed_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_embed_spin, 0, 1)
+        self._chaos_subspace_combo = QComboBox()
+        self._chaos_subspace_combo.addItems(["Voltage Only", "Voltage + Gates", "Full State"])
+        self._chaos_subspace_combo.setToolTip('State subspace used for native Benettin renormalization')
+        layout.addWidget(self._chaos_subspace_combo)
 
-        _add_label('Lag', 0, 2)
-        self._chaos_lag_spin = QSpinBox()
-        self._chaos_lag_spin.setRange(1, 20)
-        self._chaos_lag_spin.setValue(2)
-        self._chaos_lag_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_lag_spin, 0, 3)
-
-        _add_label('Fit start', 0, 4)
-        self._chaos_fit_start_spin = QDoubleSpinBox()
-        self._chaos_fit_start_spin.setRange(0.0, 500.0)
-        self._chaos_fit_start_spin.setDecimals(1)
-        self._chaos_fit_start_spin.setValue(5.0)
-        self._chaos_fit_start_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_fit_start_spin, 0, 5)
-
-        _add_label('Fit end', 1, 0)
-        self._chaos_fit_end_spin = QDoubleSpinBox()
-        self._chaos_fit_end_spin.setRange(1.0, 1000.0)
-        self._chaos_fit_end_spin.setDecimals(1)
-        self._chaos_fit_end_spin.setValue(40.0)
-        self._chaos_fit_end_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_fit_end_spin, 1, 1)
-
-        _add_label('Min sep', 1, 2)
-        self._chaos_sep_spin = QDoubleSpinBox()
-        self._chaos_sep_spin.setRange(0.0, 500.0)
-        self._chaos_sep_spin.setDecimals(1)
-        self._chaos_sep_spin.setValue(10.0)
-        self._chaos_sep_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_sep_spin, 1, 3)
-
-        _add_label('Pair', 1, 4)
-        self._chaos_pair_mode = QComboBox()
-        self._chaos_pair_mode.addItems(['Representative', 'First pair', 'Pair index'])
-        self._chaos_pair_mode.currentTextChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_pair_mode, 1, 5)
-
-        self._chaos_pair_spin = QSpinBox()
-        self._chaos_pair_spin.setRange(1, 1)
-        self._chaos_pair_spin.valueChanged.connect(self._on_chaos_controls_changed)
-        layout.addWidget(self._chaos_pair_spin, 1, 6)
-
-        tip = QLabel('Click the divergence curve to inspect a specific separation horizon.')
-        tip.setStyleSheet('color:#A6ADC8; font-size:11px;')
-        tip.setWordWrap(True)
-        layout.addWidget(tip, 0, 6, 1, 2)
-        layout.setColumnStretch(7, 1)
+        self._btn_chaos_compute_lle = QPushButton("Compute LLE")
+        self._btn_chaos_compute_lle.setToolTip("Rerun the simulation with native Benettin LLE enabled")
+        self._btn_chaos_compute_lle.setEnabled(self._last_result is not None)
+        self._btn_chaos_compute_lle.clicked.connect(self._compute_lle_now)
+        layout.addWidget(self._btn_chaos_compute_lle)
+        layout.addStretch(1)
 
         return _tab_with_toolbar(
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Chaos & LLE'),
             extra_widget=controls,
             scroll_canvas=True,
-            min_canvas_height=1280,
+            min_canvas_height=760,
         )
 
     def _build_tab_modulation(self) -> QWidget:
@@ -1739,72 +1684,6 @@ class AnalyticsWidget(QTabWidget):
             fontsize=13, color='#F38BA8', alpha=0.28, rotation=18, visible=False,
         )
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
-
-    def _create_chaos_persistent_artists(self):
-        """Create persistent matplotlib artists for Chaos tab to avoid memory fragmentation.
-        
-        All artists are created once during tab initialization and updated via set_data()
-        methods instead of being removed and recreated on each update.
-        """
-        if not hasattr(self, 'ax_chaos') or len(self.ax_chaos) < 3:
-            return
-            
-        ax_div, ax_attr, ax_trace = self.ax_chaos
-        
-        # Divergence plot (ax_div)
-        self._chaos_persistent_artists['div_line'] = ax_div.plot(
-            [], [], color='#89B4FA', lw=2.0, label='Trajectory divergence'
-        )[0]
-        self._chaos_persistent_artists['div_scatter'] = ax_div.scatter(
-            [], [], color='#F9E2AF', s=60, zorder=5, label='Selected horizon'
-        )
-        self._chaos_persistent_artists['fit_span'] = ax_div.axvspan(
-            0, 0, color='#A6E3A1', alpha=0.12, label='Fit window', visible=False
-        )
-        self._chaos_persistent_artists['fit_line'] = ax_div.plot(
-            [], [], '--', color='#F38BA8', lw=2.0, label='Linear trend'
-        )[0]
-        self._chaos_persistent_artists['summary_text'] = ax_div.text(
-            0.02, 0.96, "", transform=ax_div.transAxes, ha='left', va='top', fontsize=10,
-            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4'
-        )
-        self._chaos_persistent_artists['stoch_text'] = ax_div.text(
-            0.5, 0.46, "", ha='center', va='center', fontsize=11,
-            bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9), color='#CDD6F4'
-        )
-        
-        # Attractor plot (ax_attr)
-        self._chaos_persistent_artists['emb_line'] = ax_attr.plot(
-            [], [], color='#6C7086', alpha=0.4, lw=1.0, label='Embedded attractor'
-        )[0]
-        self._chaos_persistent_artists['emb_ref'] = ax_attr.plot(
-            [], [], color='#89B4FA', lw=2.5, label='Reference segment'
-        )[0]
-        self._chaos_persistent_artists['emb_ref_start'] = ax_attr.scatter(
-            [], [], color='#89B4FA', s=50
-        )
-        self._chaos_persistent_artists['emb_neighbor'] = ax_attr.plot(
-            [], [], color='#F38BA8', lw=2.5, label='Neighbor segment'
-        )[0]
-        self._chaos_persistent_artists['emb_neighbor_start'] = ax_attr.scatter(
-            [], [], color='#F38BA8', s=50
-        )
-        
-        # Trace plot (ax_trace)
-        self._chaos_persistent_artists['trace_line'] = ax_trace.plot(
-            [], [], color='#89B4FA', lw=1.4, label='V_soma'
-        )[0]
-        self._chaos_persistent_artists['trace_ref'] = ax_trace.axvspan(
-            0, 0, color='#89B4FA', alpha=0.18, label='Reference source', visible=False
-        )
-        self._chaos_persistent_artists['trace_neighbor'] = ax_trace.axvspan(
-            0, 0, color='#F38BA8', alpha=0.18, label='Neighbor source', visible=False
-        )
-        
-        # Initially hide all artists until data is available
-        for artist in self._chaos_persistent_artists.values():
-            if hasattr(artist, 'set_visible'):
-                artist.set_visible(False)
 
     def _build_tab_fingerprint(self) -> QWidget:
         """Build the Radar Chart (Biophysical Fingerprint) tab."""
@@ -2101,6 +1980,8 @@ class AnalyticsWidget(QTabWidget):
 
         self._last_stats = stats
         self._btn_compute_lle.setEnabled(True)
+        if hasattr(self, '_btn_chaos_compute_lle'):
+            self._btn_chaos_compute_lle.setEnabled(True)
         self._set_passport_status(result, stats)
 
         # Tab 0 — always built
@@ -2135,6 +2016,8 @@ class AnalyticsWidget(QTabWidget):
         self._last_result = result
         self._last_stats = None
         self._btn_compute_lle.setEnabled(False)
+        if hasattr(self, '_btn_chaos_compute_lle'):
+            self._btn_chaos_compute_lle.setEnabled(False)
         self._set_passport_status(result, None)
         self.passport_view.setPlainText(
             "Simulation complete.\n\n"
@@ -2712,140 +2595,6 @@ class AnalyticsWidget(QTabWidget):
         )
         self.cvs_impedance.draw_idle()
 
-    def _update_chaos(self, result, stats: dict):
-        """Update Lyapunov/Chaos tab with trajectory divergence plot.
-
-        Uses native LLE (Benettin) from result.lle_convergence if available,
-        otherwise falls back to post-hoc Rosenstein method from stats.
-        """
-        if not hasattr(self, 'fig_chaos'):
-            return  # tab not yet visited
-
-        # Check for native LLE data first (Benettin method from run_native)
-        native_lle = getattr(result, 'lle_convergence', None)
-        use_native = native_lle is not None and len(native_lle) > 0
-        div = None  # Initialize for fallback mode (Rosenstein)
-
-        if use_native:
-            # Use native Benettin LLE convergence curve
-            t = result.t  # Use simulation time vector
-            lle_vals = native_lle
-            duration_ms = float(t[-1] - t[0]) if len(t) > 1 else 0.0
-            # Compute LLE from final value (traditional definition)
-            final_lle = lle_vals[-1] if len(lle_vals) > 0 else 0.0
-            lle_per_s = final_lle * 1000.0  # Convert to 1/s
-            lyap_class = 'chaotic' if final_lle > 0.01 else ('neutral' if abs(final_lle) < 0.01 else 'stable')
-            valid_pairs = len(lle_vals)  # Number of recorded points
-            method_label = "Native (Benettin)"
-        else:
-            # Fallback: post-hoc Rosenstein method from analysis
-            t = stats.get('ftle_time_ms', [])
-            div = stats.get('ftle_log_divergence', [])
-            duration_ms = float(result.t[-1] - result.t[0]) if len(result.t) > 1 else 0.0
-            valid_pairs = int(stats.get('lyapunov_valid_pairs', 0) or 0)
-            lyap_class = stats.get('lyapunov_class')
-            lle_per_s = stats.get('lle_per_s', np.nan)
-            lle_vals = None  # Will use div below
-            method_label = "Rosenstein (post-hoc)"
-
-        # Handle disabled/empty state
-        has_data = use_native or (len(t) > 0 and len(div if lle_vals is None else lle_vals) > 0
-                                  and lyap_class not in ('disabled', None))
-        if not has_data:
-            if use_native:
-                msg = "Native LLE computed. Computing class..."
-            elif lyap_class == 'disabled':
-                msg = "LLE not computed. Click 'Compute LLE' button."
-            elif duration_ms < 1000.0:
-                msg = "Lyapunov analysis needs >=1000 ms of data after transients."
-            elif valid_pairs < 20:
-                msg = "No robust divergence fit: too few valid trajectory pairs for this trace."
-            else:
-                msg = "No usable divergence window was found for this simulation."
-            if 'div' not in self._chaos_texts:
-                self._chaos_texts['div'] = self.ax_chaos.text(
-                    0.5, 0.5, msg,
-                    ha='center', va='center', transform=self.ax_chaos.transAxes,
-                    fontsize=11, color='#89B4FA'
-                )
-            else:
-                self._chaos_texts['div'].set_text(msg)
-            self._chaos_texts['div'].set_visible(True)
-            if 'summary' in self._chaos_texts:
-                self._chaos_texts['summary'].set_visible(False)
-            if 'div' in self._chaos_lines:
-                self._chaos_lines['div'].set_data([], [])
-            self.ax_chaos.set_xlim(0, 1)
-            self.ax_chaos.set_ylim(0, 1)
-            _configure_ax_interactive(self.ax_chaos, title='Lyapunov Exponent (Trajectory Separation)',
-                                    xlabel='Time (ms)', ylabel='Log Divergence ln(d)', show_legend=False)
-            self.cvs_chaos.draw_idle()
-            return
-
-        # Hide error message if present
-        if 'div' in self._chaos_texts:
-            self._chaos_texts['div'].set_visible(False)
-
-        # Create persistent line if needed
-        if 'div' not in self._chaos_lines:
-            if use_native:
-                label = 'LLE convergence (Benettin)'
-                color = '#89B4FA'
-            else:
-                label = 'Trajectory divergence (Rosenstein)'
-                color = '#F9E2AF'  # Different color for fallback
-            self._chaos_lines['div'] = self.ax_chaos.plot([], [], color=color, lw=2.5, label=label)[0]
-            self._chaos_lines['trend'] = self.ax_chaos.plot([], [], color='#F38BA8', lw=1.5, ls='--', label='Linear trend')[0]
-        if 'summary' not in self._chaos_texts:
-            self._chaos_texts['summary'] = self.ax_chaos.text(
-                0.02, 0.98, '',
-                ha='left', va='top', transform=self.ax_chaos.transAxes,
-                fontsize=9.5, color='#CDD6F4',
-                bbox=dict(boxstyle='round,pad=0.25', facecolor='#11111B', edgecolor='#45475A', alpha=0.88),
-            )
-
-        # Plot data
-        if use_native:
-            # Plot LLE convergence directly (already computed per time unit)
-            t_arr = np.asarray(t, dtype=float)
-            lle_arr = np.asarray(lle_vals, dtype=float)
-            td, yd = _downsample_xy(t_arr, lle_arr, max_points=2500)
-            self._chaos_lines['div'].set_data(td, yd)
-            # For native LLE, "trend" is just the mean line
-            mean_lle = np.mean(lle_arr) if len(lle_arr) > 0 else 0.0
-            self._chaos_lines['trend'].set_data([t_arr[0], t_arr[-1]], [mean_lle, mean_lle])
-            self._chaos_lines['trend'].set_visible(True)
-            ylabel = 'LLE (1/ms)'
-        else:
-            # Rosenstein method: plot log divergence
-            div_safe = _ensure_shape_compatible(div, t, "div")
-            if div_safe is not None:
-                td, yd = _downsample_xy(np.asarray(t, dtype=float), np.asarray(div_safe, dtype=float), max_points=2500)
-                self._chaos_lines['div'].set_data(td, yd)
-            else:
-                self._chaos_lines['div'].set_data([], [])
-            # Linear trend line for Rosenstein
-            lle_per_ms = stats.get('lle_per_ms', np.nan)
-            if np.isfinite(lle_per_ms) and len(t) > 0 and div_safe is not None:
-                t_trend = np.array([t[0], t[-1]])
-                div_trend = div_safe[0] + lle_per_ms * (t_trend - t[0])
-                self._chaos_lines['trend'].set_data(t_trend, div_trend)
-                self._chaos_lines['trend'].set_visible(True)
-            else:
-                self._chaos_lines['trend'].set_visible(False)
-            ylabel = 'Log Divergence ln(d)'
-
-        self._chaos_texts['summary'].set_visible(True)
-        self._chaos_texts['summary'].set_text(
-            f"class = {lyap_class}\nLLE = {lle_per_s:+.3f} 1/s\npoints = {valid_pairs}\nmethod = {method_label}"
-        )
-
-        self.ax_chaos.relim()
-        self.ax_chaos.autoscale_view()
-        _configure_ax_interactive(self.ax_chaos, title='Lyapunov Exponent (Trajectory Separation)',
-                                    xlabel='Time (ms)', ylabel=ylabel, show_legend=True)
-        self.cvs_chaos.draw_idle()
-
     def _update_modulation(self, result, stats: dict):
         """Update Phase-Locking (Modulation) tab with polar plot."""
         if not hasattr(self, 'fig_mod'):
@@ -3130,235 +2879,64 @@ class AnalyticsWidget(QTabWidget):
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_currents(self._last_result)
 
-    def _on_chaos_controls_changed(self, *_args):
-        if getattr(self, '_last_result', None) is not None and getattr(self, '_chaos_force_enabled', False):
-            self._update_chaos(self._last_result, self._last_stats or {})
-
-    def _chaos_control_values(self) -> dict:
-        return {
-            'embedding_dim': int(self._chaos_embed_spin.value()) if hasattr(self, '_chaos_embed_spin') else 3,
-            'lag_steps': int(self._chaos_lag_spin.value()) if hasattr(self, '_chaos_lag_spin') else 2,
-            'fit_start_ms': float(self._chaos_fit_start_spin.value()) if hasattr(self, '_chaos_fit_start_spin') else 5.0,
-            'fit_end_ms': float(self._chaos_fit_end_spin.value()) if hasattr(self, '_chaos_fit_end_spin') else 40.0,
-            'min_separation_ms': float(self._chaos_sep_spin.value()) if hasattr(self, '_chaos_sep_spin') else 10.0,
-        }
-
-    def _on_chaos_plot_clicked(self, event):
-        if not hasattr(self, 'ax_chaos') or self._chaos_analysis is None:
-            return
-        if event.inaxes != self.ax_chaos[0] or event.xdata is None:
-            return
-        t = np.asarray(self._chaos_analysis.get('ftle_time_ms', []), dtype=float)
-        if len(t) == 0:
-            return
-        self._chaos_selected_k = int(np.argmin(np.abs(t - float(event.xdata))))
-        if getattr(self, '_last_result', None) is not None:
-            self._update_chaos(self._last_result, self._last_stats or {})
-
-    def _chaos_pair_index(self, analysis: dict) -> int:
-        pair_i = np.asarray(analysis.get('pair_i', []), dtype=int)
-        if len(pair_i) == 0:
-            return 0
-        if hasattr(self, '_chaos_pair_spin'):
-            self._chaos_pair_spin.blockSignals(True)
-            self._chaos_pair_spin.setRange(1, max(1, len(pair_i)))
-            self._chaos_pair_spin.blockSignals(False)
-        mode = self._chaos_pair_mode.currentText() if hasattr(self, '_chaos_pair_mode') else 'Representative'
-        if mode == 'First pair':
-            return 0
-        if mode == 'Pair index':
-            return max(0, min(len(pair_i) - 1, int(self._chaos_pair_spin.value()) - 1))
-        return len(pair_i) // 2
-
-    def _clear_chaos_axes(self, message: str):
-        """Clear chaos axes by hiding persistent artists and showing message."""
-        if not hasattr(self, 'ax_chaos'):
-            return
-        titles = ['Trajectory divergence', 'Delay-embedded attractor', 'Source trace']
-        
-        # Hide all persistent artists
-        for artist in getattr(self, '_chaos_persistent_artists', {}).values():
-            try:
-                if hasattr(artist, 'set_visible'):
-                    artist.set_visible(False)
-            except Exception:
-                pass
-        
-        # Show message on each axis
-        for ax, title in zip(self.ax_chaos, titles):
-            _axis_message(ax, self._chaos_texts, f"msg_{title}", message, title=title)
-        self.cvs_chaos.draw_idle()
-
     def _update_chaos(self, result, stats: dict):
+        """Update Chaos & LLE tab from native Benettin convergence only."""
         if not hasattr(self, 'fig_chaos'):
             return
-        from core.analysis import estimate_ftle_lle
 
-        if not getattr(self, '_chaos_force_enabled', False):
-            self._clear_chaos_axes("LLE not computed. Click 'Compute LLE' to build the interactive analysis.")
-            return
+        ax = self.ax_chaos
+        ax.clear()
 
-        params = self._chaos_control_values()
-        analysis = estimate_ftle_lle(
-            np.asarray(result.v_soma, dtype=float),
-            np.asarray(result.t, dtype=float),
-            is_stochastic=bool(
-                getattr(result.config.stim, 'stoch_gating', False)
-                or getattr(result.config.stim, 'synaptic_train_type', 'none') == 'poisson'
-            ),
-            **params,
+        lle_raw = getattr(result, 'lle_convergence', None)
+        calc_lle = bool(getattr(getattr(result, 'config', None).stim, 'calc_lle', False)) if getattr(result, 'config', None) is not None else False
+        if lle_raw is not None:
+            lle = np.asarray(lle_raw, dtype=float).reshape(-1)
+        else:
+            lle = np.zeros(0, dtype=float)
+
+        if calc_lle and lle.size > 0:
+            t = np.asarray(result.t, dtype=float).reshape(-1)
+            n = min(t.size, lle.size)
+            finite = np.isfinite(t[:n]) & np.isfinite(lle[:n])
+            if np.any(finite):
+                ax.plot(t[:n][finite], lle[:n][finite], color='#89B4FA', lw=2.2, label='Benettin LLE')
+                final_lle = float(lle[:n][finite][-1])
+                ax.text(
+                    0.02, 0.96,
+                    f"Final LLE = {final_lle:+.6g} 1/ms\nSubspace = {self._current_chaos_subspace_text()}",
+                    transform=ax.transAxes, ha='left', va='top', fontsize=10,
+                    bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.9),
+                    color='#CDD6F4',
+                )
+                _configure_ax_interactive(
+                    ax,
+                    title='Native Benettin LLE Convergence',
+                    xlabel='Time (ms)',
+                    ylabel='LLE estimate (1/ms)',
+                    show_legend=True,
+                )
+                self.cvs_chaos.draw_idle()
+                return
+
+        ax.text(
+            0.5, 0.5,
+            'LLE not computed. Select a subspace metric and click Compute LLE to rerun the simulation.',
+            ha='center', va='center', transform=ax.transAxes, fontsize=12, color='#89B4FA',
+            wrap=True,
         )
-        self._chaos_analysis = analysis
-
-        t_div = np.asarray(analysis.get('ftle_time_ms', []), dtype=float)
-        div = np.asarray(analysis.get('ftle_log_divergence', []), dtype=float)
-        pair_i = np.asarray(analysis.get('pair_i', []), dtype=int)
-        pair_j = np.asarray(analysis.get('pair_j', []), dtype=int)
-        emb = np.asarray(analysis.get('embedding', np.empty((0, 0))), dtype=float)
-        if len(t_div) == 0 or len(div) == 0 or len(pair_i) == 0 or emb.size == 0:
-            self._clear_chaos_axes('No usable divergence window was found for this simulation.')
-            return
-
-        ax_div, ax_attr, ax_trace = self.ax_chaos
-        
-        # Hide any error messages from previous runs
-        for key in ('msg_Trajectory divergence', 'msg_Delay-embedded attractor', 'msg_Source trace'):
-            _hide_axis_message(self._chaos_texts, key)
-
-        self._chaos_selected_k = max(0, min(len(t_div) - 1, int(getattr(self, '_chaos_selected_k', 0))))
-        selected_pair = self._chaos_pair_index(analysis)
-        self._chaos_selected_pair = selected_pair
-        k = self._chaos_selected_k
-        pair_span = min(k + 1, max(1, emb.shape[0] - max(pair_i[selected_pair], pair_j[selected_pair])))
-
-        # Update persistent divergence line
-        div_line = self._chaos_persistent_artists.get('div_line')
-        if div_line is not None:
-            div_line.set_data(t_div, div)
-            div_line.set_visible(True)
-        
-        # Update persistent selected point scatter
-        div_scatter = self._chaos_persistent_artists.get('div_scatter')
-        if div_scatter is not None:
-            div_scatter.set_offsets([[t_div[k], div[k]]])
-            div_scatter.set_visible(True)
-        
-        # Update persistent fit span
-        fit_start = params['fit_start_ms']
-        fit_end = params['fit_end_ms']
-        fit_span = self._chaos_persistent_artists.get('fit_span')
-        if fit_span is not None:
-            # Use set_xy for Polygon (axvspan returns Polygon, not Rectangle)
-            rect = np.array([[fit_start, 0], [fit_end, 0], [fit_end, 1], [fit_start, 1], [fit_start, 0]])
-            fit_span.set_xy(rect)
-            fit_span.set_visible(True)
-        # Update persistent fit line
-        fit_mask = (t_div >= fit_start) & (t_div <= fit_end)
-        fit_line = self._chaos_persistent_artists.get('fit_line')
-        if fit_line is not None:
-            if np.sum(fit_mask) >= 2 and np.isfinite(analysis.get('lle_per_ms', np.nan)):
-                coeffs = np.polyfit(t_div[fit_mask], div[fit_mask], 1)
-                fit_line.set_data(t_div[fit_mask], np.polyval(coeffs, t_div[fit_mask]))
-                fit_line.set_visible(True)
-            else:
-                fit_line.set_visible(False)
-        
-        # Update persistent summary text
-        summary = (
-            f"class = {analysis.get('classification', stats.get('lyapunov_class', 'n/a'))}\n"
-            f"LLE = {analysis.get('lle_per_s', np.nan):+.3f} 1/s\n"
-            f"pairs = {int(analysis.get('valid_pairs', 0))}\n"
-            f"selected k = {k}\n"
-            f"mode = {analysis.get('preprocess_mode', 'standard')}"
+        _configure_ax_interactive(
+            ax,
+            title='Native Benettin LLE Convergence',
+            xlabel='Time (ms)',
+            ylabel='LLE estimate (1/ms)',
+            show_legend=False,
         )
-        summary_text = self._chaos_persistent_artists.get('summary_text')
-        if summary_text is not None:
-            summary_text.set_text(summary)
-            summary_text.set_visible(True)
-        
-        # Update persistent stochastic warning text
-        stoch_text = self._chaos_persistent_artists.get('stoch_text')
-        if stoch_text is not None:
-            if analysis.get('is_stochastic', False):
-                stoch_text.set_text('STOCHASTIC INPUT: LLE mainly reflects noise entropy.')
-                stoch_text.set_visible(True)
-            else:
-                stoch_text.set_visible(False)
-        _configure_ax_interactive(ax_div, title='Lyapunov Exponent (Trajectory Separation)', xlabel='Time (ms)', ylabel='Log divergence ln(d)', show_legend=True)
-
-        # Update persistent attractor plot
-        dims = emb.shape[1]
-        x_idx = 0
-        y_idx = 1 if dims > 1 else 0
-        
-        emb_line = self._chaos_persistent_artists.get('emb_line')
-        if emb_line is not None:
-            emb_line.set_data(emb[:, x_idx], emb[:, y_idx])
-            emb_line.set_visible(True)
-        
-        i0 = int(pair_i[selected_pair])
-        j0 = int(pair_j[selected_pair])
-        seg_i = emb[i0:i0 + pair_span]
-        seg_j = emb[j0:j0 + pair_span]
-        
-        emb_ref = self._chaos_persistent_artists.get('emb_ref')
-        emb_ref_start = self._chaos_persistent_artists.get('emb_ref_start')
-        if emb_ref is not None and len(seg_i) > 0:
-            emb_ref.set_data(seg_i[:, x_idx], seg_i[:, y_idx])
-            emb_ref.set_visible(True)
-            if emb_ref_start is not None:
-                emb_ref_start.set_offsets([[seg_i[0, x_idx], seg_i[0, y_idx]]])
-                emb_ref_start.set_visible(True)
-        elif emb_ref is not None:
-            emb_ref.set_visible(False)
-            if emb_ref_start is not None:
-                emb_ref_start.set_visible(False)
-        
-        emb_neighbor = self._chaos_persistent_artists.get('emb_neighbor')
-        emb_neighbor_start = self._chaos_persistent_artists.get('emb_neighbor_start')
-        if emb_neighbor is not None and len(seg_j) > 0:
-            emb_neighbor.set_data(seg_j[:, x_idx], seg_j[:, y_idx])
-            emb_neighbor.set_visible(True)
-            if emb_neighbor_start is not None:
-                emb_neighbor_start.set_offsets([[seg_j[0, x_idx], seg_j[0, y_idx]]])
-                emb_neighbor_start.set_visible(True)
-        elif emb_neighbor is not None:
-            emb_neighbor.set_visible(False)
-            if emb_neighbor_start is not None:
-                emb_neighbor_start.set_visible(False)
-        _configure_ax_interactive(ax_attr, title='Delay-embedded attractor and selected pair', xlabel='x(t)', ylabel='x(t + lag)', show_legend=True)
-
-        # Update persistent trace plot
-        t_full = np.asarray(result.t, dtype=float)
-        v_full = np.asarray(result.v_soma, dtype=float)
-        
-        trace_line = self._chaos_persistent_artists.get('trace_line')
-        if trace_line is not None:
-            trace_line.set_data(t_full, v_full)
-            trace_line.set_visible(True)
-        
-        dt_ms = float(analysis.get('dt_ms', np.median(np.diff(t_full)) if len(t_full) > 1 else 0.1))
-        span_ms = pair_span * dt_ms
-        start_i_ms = t_full[min(i0, len(t_full) - 1)]
-        start_j_ms = t_full[min(j0, len(t_full) - 1)]
-        
-        trace_ref = self._chaos_persistent_artists.get('trace_ref')
-        if trace_ref is not None:
-            # Use set_xy for Polygon (axvspan returns Polygon, not Rectangle)
-            rect_ref = np.array([[start_i_ms, 0], [start_i_ms + span_ms, 0], [start_i_ms + span_ms, 1], [start_i_ms, 1], [start_i_ms, 0]])
-            trace_ref.set_xy(rect_ref)
-            trace_ref.set_visible(True)
-        
-        trace_neighbor = self._chaos_persistent_artists.get('trace_neighbor')
-        if trace_neighbor is not None:
-            # Use set_xy for Polygon
-            rect_neighbor = np.array([[start_j_ms, 0], [start_j_ms + span_ms, 0], [start_j_ms + span_ms, 1], [start_j_ms, 1], [start_j_ms, 0]])
-            trace_neighbor.set_xy(rect_neighbor)
-            trace_neighbor.set_visible(True)
-        
-        _configure_ax_interactive(ax_trace, title='Time-domain trace with selected divergence segment', xlabel='Time (ms)', ylabel='V (mV)', show_legend=True)
-
         self.cvs_chaos.draw_idle()
+
+    def _current_chaos_subspace_text(self) -> str:
+        if hasattr(self, '_chaos_subspace_combo'):
+            return self._chaos_subspace_combo.currentText()
+        return 'Voltage Only'
 
     def _spike_mech_current_limit(self) -> int | None:
         if not hasattr(self, '_spike_mech_current_scope'):

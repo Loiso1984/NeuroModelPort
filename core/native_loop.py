@@ -14,7 +14,7 @@ RHS notation (per compartment i):
   d[i]   = Cm_i/dt + g_total_ion_i - L_diag_i     (L_diag < 0)
   a[i]   = g_axial_to_parent[i]                    (positive, child->parent)
   b[i]   = g_axial_parent_to_child[i]              (positive, parent←child)
-  rhs[i] = Cm_i/dt*V_n + e_eff_i + I_stim_eff_i
+  rhs[i] = Cm_i/dt*V_n + e_eff_i + I_stim_rhs_i
 
 Hines system (solved by hines.py::hines_solve):
   d[i]*V[i] - a[i]*V[parent] - sum_c b[c]*V[c]  = rhs[i]
@@ -410,7 +410,7 @@ def run_native_loop(
     v_new = np.empty(n_comp, dtype=np.float64)
     # i_ca_influx: 2D when LLE enabled to prevent cross-talk between trajectories
     # Layout (n_traj, n_comp): trajectory-major row keeps compartment loop contiguous.
-    i_ca_influx_2d = np.zeros((n_traj, n_comp), dtype=np.float64)
+    i_ca_influx_2d = np.zeros((n_comp, n_traj), dtype=np.float64)
     i_ca_dummy_v = np.zeros(n_comp, dtype=np.float64)  # Required by update_gates_analytic
     # v11.6: Ionic conductance buffers for unified scalar helper
     g_total_arr = np.empty(n_comp, dtype=np.float64)  # Total membrane conductance per compartment
@@ -587,7 +587,7 @@ def run_native_loop(
                 ena_i = ena_arr_buf[i]
                 ek_i = ek_arr_buf[i]
 
-                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[traj_idx, i] = compute_ionic_conductances_scalar(
+                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[i, traj_idx] = compute_ionic_conductances_scalar(
                     vi, mi, hi, ni,
                     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
                     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
@@ -629,13 +629,16 @@ def run_native_loop(
                     physics.use_dfilter_primary, physics.dfilter_attenuation,
                     physics.dfilter_tau_ms, i_filt,
                 )
+                rhs_stim_add = 0.0
                 if is_cond:
                     g_syn = i_stim_p
                     if is_nmda:
                         g_syn *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
-                    i_stim_eff = -g_syn * (vi - e_syn)
                     d[i] += g_syn
+                    rhs_stim_add = g_syn * e_syn
+                    i_stim_eff = g_syn * (e_syn - vi)
                 else:
+                    rhs_stim_add = i_stim_p
                     i_stim_eff = i_stim_p
 
                 if physics.dual_stim_enabled == 1:
@@ -649,9 +652,11 @@ def run_native_loop(
                         g2 = i_stim_s
                         if is_nmda_2:
                             g2 *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
-                        i_stim_eff += -g2 * (vi - e_syn_2)
                         d[i] += g2
+                        rhs_stim_add += g2 * e_syn_2
+                        i_stim_eff += g2 * (e_syn_2 - vi)
                     else:
+                        rhs_stim_add += i_stim_s
                         i_stim_eff += i_stim_s
 
                 # Accumulate effective stimulus for soma compartment (i=0)
@@ -673,7 +678,7 @@ def run_native_loop(
                 k_o_val = y_active[off_k_o + i] if dyn_atp else k_o_rest_mM
                 i_pump = compute_na_k_pump_current(na_i_val, k_o_val, pump_atp_val, pump_max_capacity, km_na)
 
-                rhs[i] = cm_over_dt * vi + e_eff_arr[i] + katp_rhs + i_stim_eff - i_pump
+                rhs[i] = cm_over_dt * vi + e_eff_arr[i] + katp_rhs + rhs_stim_add - i_pump
 
                 # Additive membrane noise (main trajectory only)
                 if physics.noise_sigma > 0.0 and traj_idx == 0:
@@ -710,7 +715,7 @@ def run_native_loop(
                 for i in range(n_comp):
                     ca_val = y_active[off_ca + i]
                     tau_ca_safe = max(tau_ca, 1e-12)
-                    influx = b_ca[i] * i_ca_influx_2d[traj_idx, i] + ca_rest / tau_ca_safe
+                    influx = b_ca[i] * i_ca_influx_2d[i, traj_idx] + ca_rest / tau_ca_safe
                     decay_rate = 1.0 / tau_ca_safe
                     y_active[off_ca + i] = (ca_val + dt * influx) / (1.0 + dt * decay_rate)
 
@@ -745,7 +750,7 @@ def run_native_loop(
                         atp_val, atp_synthesis_rate,
                         na_i_val, k_o_val, k_o_rest_mM,
                         ion_drift_gain, k_o_clearance_tau_ms,
-                        i_ca_influx_2d[traj_idx, i],
+                        i_ca_influx_2d[i, traj_idx],
                         pump_max_capacity,
                         km_na,
                     )

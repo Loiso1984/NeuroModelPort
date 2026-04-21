@@ -72,7 +72,7 @@ class SimulationController(QObject):
         
     def run_single(self, config, on_success: Callable[[Any], None] = None,
                    on_error: Callable[[str], None] = None, on_progress: Callable[[str], None] = None,
-                   compute_lyapunov: bool = False):
+                   compute_lyapunov: bool = False, lle_subspace_mode: int = 0):
         """Run single simulation in background thread with async analysis.
         
         The worker now performs post-processing and full_analysis in the background
@@ -86,7 +86,10 @@ class SimulationController(QObject):
         
         def run_simulation():
             solver = NeuronSolver(config)
-            result = solver.run_single()
+            if compute_lyapunov and getattr(config.stim, "jacobian_mode", "") == "native_hines":
+                result = solver.run_native(config, calc_lle=True, lle_subspace_mode=int(lle_subspace_mode))
+            else:
+                result = solver.run_single()
             
             # ── Async Analytical Pipeline (v11.8) ──
             # Post-processing and analysis run in background thread

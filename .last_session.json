@@ -61,7 +61,7 @@
     "B_Ca": 3e-6
   },
   "metabolism": {
-    "enable_dynamic_atp": false,
+    "enable_dynamic_atp": true,
     "atp_max_mM": 2.0,
     "atp_synthesis_rate": 0.6,
     "g_katp_max": 0.1,

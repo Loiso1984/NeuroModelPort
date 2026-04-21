@@ -2412,11 +2412,20 @@ class MainWindow(QMainWindow):
         cfg = self.config_manager.config
         # Enable LLE in config (stored in stim section, not analysis)
         cfg.stim.calc_lle = True
+        subspace_text = "Voltage Only"
+        if hasattr(self, "analytics") and hasattr(self.analytics, "_chaos_subspace_combo"):
+            subspace_text = self.analytics._chaos_subspace_combo.currentText()
+        lle_subspace_mode = {
+            "Voltage Only": 0,
+            "Voltage + Gates": 1,
+            "Full State": 2,
+        }.get(subspace_text, 0)
         self.sim_controller.run_single(
             cfg,
             on_success=self._on_simulation_done,
             on_error=self._on_sim_error,
             compute_lyapunov=True,
+            lle_subspace_mode=lle_subspace_mode,
         )
 
     def _on_simulation_done(self, result: dict):

@@ -5,15 +5,13 @@ CONTEXT
 This test file verifies that the L1 cache alignment refactor of `i_ca_influx_2d`
 produces bit-identical simulation output.
 
-CHANGE BEING TESTED
--------------------
-Array layout of `i_ca_influx_2d` in `core/native_loop.py` changes from:
-    (n_comp, n_traj)  — old layout (column-major inner loop)
-to:
-    (n_traj, n_comp)  — new layout (row-major inner loop)
+CONTRACT BEING TESTED
+---------------------
+Array layout of `i_ca_influx_2d` in `core/native_loop.py` is:
+    (n_comp, n_traj)
 
-All accesses `[i, traj_idx]` are flipped to `[traj_idx, i]`.
-The LOOP ORDER is unchanged — this is a pure transpose of the backing buffer.
+All accesses use `[i, traj_idx]`.
+The LOOP ORDER is unchanged; this is a structural scratch-buffer contract.
 Since physics are unchanged, all numerical outputs must be bit-identical.
 
 # PRE-CHANGE BASELINE
@@ -99,11 +97,13 @@ def _spike_count(v_soma: np.ndarray, threshold: float = -20.0) -> int:
 # Test 0 — structural cache-layout contract
 # ---------------------------------------------------------------------------
 
-def test_native_loop_uses_traj_major_ca_influx_layout():
-    """The Ca influx scratch buffer must be trajectory-major for row-major locality."""
+def test_native_loop_uses_compartment_major_ca_influx_layout():
+    """The Ca influx scratch buffer must keep the audited compartment-major contract."""
     source = (ROOT / "core" / "native_loop.py").read_text(encoding="utf-8")
-    assert "np.zeros((n_traj, n_comp), dtype=np.float64)" in source
-    assert "i_ca_influx_2d[i, traj_idx]" not in source
+    assert "np.zeros((n_comp, n_traj), dtype=np.float64)" in source
+    assert "i_ca_influx_2d[traj_idx, i]" not in source
+    assert "i_ca_influx_2d[i, traj_idx]" in source
+
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ def test_single_comp_no_lle_output_unchanged():
     Bit-identical output is the expected result.
 
     # PRE-CHANGE BASELINE: record result from native_loop.py with (n_comp, n_traj) layout.
-    # POST-CHANGE CHECK:   same test must pass with (n_traj, n_comp) layout.
+    # POST-CHANGE CHECK:   same test must pass with the audited (n_comp, n_traj) layout.
     """
     cfg = _make_hh_config(t_sim_ms=100.0, dt_eval_ms=0.025)
 
@@ -175,13 +175,13 @@ def test_lle_dual_traj_output_unchanged():
     With calc_lle=True the native loop allocates i_ca_influx_2d for two trajectories.
     The OLD layout is (n_comp, 2): column 0 = main traj, column 1 = perturbed.
     The NEW layout is (2, n_comp): row 0 = main traj, row 1 = perturbed.
-    Every access [i, traj_idx] must be flipped to [traj_idx, i].
+    Every access must remain [i, traj_idx].
 
     We use the L5 preset with dynamic Ca enabled so the Ca influx buffer is
     actually written and read every step (not a dead code path).
 
     # PRE-CHANGE BASELINE: record LLE value and v_soma from (n_comp, n_traj) layout.
-    # POST-CHANGE CHECK:   same test must pass with (n_traj, n_comp) layout.
+    # POST-CHANGE CHECK:   same test must pass with the audited (n_comp, n_traj) layout.
 
     Tolerance: 1e-12 (bit-identical for float64; the layout change is purely structural).
     """
@@ -237,7 +237,7 @@ def test_lle_dual_traj_output_unchanged():
         atol=1e-12, rtol=0.0,
         err_msg=(
             "Two sequential LLE runs produced different v_soma. "
-            "The buffer initialisation in the new (n_traj, n_comp) layout "
+            "The buffer initialisation in the audited (n_comp, n_traj) layout "
             "may leave stale values across calls."
         ),
     )
@@ -288,7 +288,7 @@ def test_ca_influx_consistent_between_trajectories():
     the main trajectory's Ca bookkeeping.
 
     # PRE-CHANGE BASELINE: record Ca_i time course from (n_comp, n_traj) layout.
-    # POST-CHANGE CHECK:   same test must pass with (n_traj, n_comp) layout.
+    # POST-CHANGE CHECK:   same test must pass with the audited (n_comp, n_traj) layout.
     """
     cfg = _make_l5_config(t_sim_ms=100.0, dt_eval_ms=0.025)
 
@@ -375,6 +375,6 @@ def test_ca_influx_consistent_between_trajectories():
             "Ca_i of the main trajectory (traj_idx=0) differs between the no-LLE "
             "and LLE runs. This indicates that the perturbed trajectory's Ca influx "
             "is leaking into traj_idx=0 — a symptom of a wrong index after the "
-            "i_ca_influx_2d layout transpose from (n_comp, n_traj) to (n_traj, n_comp)."
+            "i_ca_influx_2d audited (n_comp, n_traj) layout."
         ),
     )
