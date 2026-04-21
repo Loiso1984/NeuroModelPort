@@ -355,6 +355,7 @@ def run_native_loop(
 
     # ── Shared state offsets ──
     offsets = physics.state_offsets
+    off_v = int(offsets.off_v)
     off_m = int(offsets.off_m)
     off_h = int(offsets.off_h)
     off_n = int(offsets.off_n)
@@ -410,6 +411,11 @@ def run_native_loop(
     i_stim_soma_accum = 0.0  # Accumulates effective stimulus during physics loop
     i_stim_soma_count = 0
 
+    # v13.5: Pre-allocated output for butterfly trace and local divergence (LLE analysis)
+    v_pert_out = np.zeros(n_out, dtype=np.float64)
+    div_local_out = np.zeros(n_out, dtype=np.float64)
+    current_div_local = 0.0
+
     # ── Hines system buffers (pre-allocated, reused every step per trajectory) ──
     d     = np.empty(n_comp, dtype=np.float64)
     a_vec = np.empty(n_comp, dtype=np.float64)
@@ -417,8 +423,8 @@ def run_native_loop(
     rhs   = np.empty(n_comp, dtype=np.float64)
     v_new = np.empty(n_comp, dtype=np.float64)
     # i_ca_influx: 2D when LLE enabled to prevent cross-talk between trajectories
-    # Layout (n_traj, n_comp): trajectory-major row keeps compartment loop contiguous.
-    i_ca_influx_2d = np.zeros((n_comp, n_traj), dtype=np.float64)
+    # Layout (n_traj, n_comp): trajectory-major row keeps compartment loop contiguous for L1 cache.
+    i_ca_influx_2d = np.zeros((n_traj, n_comp), dtype=np.float64)
     i_ca_dummy_v = np.zeros(n_comp, dtype=np.float64)  # Required by update_gates_analytic
     # v11.6: Ionic conductance buffers for unified scalar helper
     g_total_arr = np.empty(n_comp, dtype=np.float64)  # Total membrane conductance per compartment
@@ -595,7 +601,7 @@ def run_native_loop(
                 ena_i = ena_arr_buf[i]
                 ek_i = ek_arr_buf[i]
 
-                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[i, traj_idx] = compute_ionic_conductances_scalar(
+                g_total_arr[i], e_eff_arr[i], i_ca_influx_2d[traj_idx, i] = compute_ionic_conductances_scalar(
                     vi, mi, hi, ni,
                     ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
                     en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
@@ -723,7 +729,7 @@ def run_native_loop(
                 for i in range(n_comp):
                     ca_val = y_active[off_ca + i]
                     tau_ca_safe = max(tau_ca, 1e-12)
-                    influx = b_ca[i] * i_ca_influx_2d[i, traj_idx] + ca_rest / tau_ca_safe
+                    influx = b_ca[i] * i_ca_influx_2d[traj_idx, i] + ca_rest / tau_ca_safe
                     decay_rate = 1.0 / tau_ca_safe
                     y_active[off_ca + i] = (ca_val + dt * influx) / (1.0 + dt * decay_rate)
 
@@ -758,7 +764,7 @@ def run_native_loop(
                         atp_val, atp_synthesis_rate,
                         na_i_val, k_o_val, k_o_rest_mM,
                         ion_drift_gain, k_o_clearance_tau_ms,
-                        i_ca_influx_2d[i, traj_idx],
+                        i_ca_influx_2d[traj_idx, i],
                         pump_max_capacity,
                         km_na,
                     )
@@ -784,6 +790,10 @@ def run_native_loop(
             i_stim_out[out_idx] = i_stim_soma_accum / i_stim_soma_count if i_stim_soma_count > 0 else 0.0
             if calc_lle:
                 lle_out[out_idx] = current_lle
+                # v13.5: Record butterfly trace and instantaneous divergence
+                v_pert_out[out_idx] = y_pert[off_v]  # Soma voltage of perturbed trajectory
+                div_local_out[out_idx] = current_div_local
+                current_div_local = 0.0  # Reset for discrete pulse appearance
             out_idx += 1
             # Reset accumulator AFTER recording (for next interval)
             i_stim_soma_accum = 0.0
@@ -866,10 +876,13 @@ def run_native_loop(
             dist = np.sqrt(dist_sq)
 
             if dist > 1e-12:  # More reasonable threshold than 1e-30
-                lle_accum += np.log(dist / lle_delta)
+                div_val = np.log(dist / lle_delta)
+                lle_accum += div_val
                 lle_count += 1
                 # v12.7: Update running LLE estimate for convergence curve
                 current_lle = lle_accum / t if t > 1e-12 else np.nan
+                # v13.5: Store instantaneous divergence for output
+                current_div_local = div_val
                 # Renormalize perturbation vector to lle_delta
                 # CRITICAL FIX (v12.1): Only scale variables IN the subspace;
                 # variables NOT in subspace snap directly to main trajectory.
@@ -957,13 +970,18 @@ def run_native_loop(
             y_out[s, out_idx] = y[s]
         # Record final stimulus using the same interval-average convention
         i_stim_out[out_idx] = i_stim_soma_accum / i_stim_soma_count if i_stim_soma_count > 0 else 0.0
-        # Record final LLE estimate
+        # Record final LLE estimate and butterfly data
         if calc_lle:
             lle_out[out_idx] = current_lle if not np.isnan(current_lle) else (lle_accum / t if t > 1e-12 and lle_count > 0 else np.nan)
+            v_pert_out[out_idx] = y_pert[off_v]
+            div_local_out[out_idx] = current_div_local
         out_idx += 1
 
     # Return empty LLE array if not computed to avoid confusion with zero values
     lle_result = lle_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
     i_stim_result = i_stim_out[:out_idx]  # v12.2: Stimulus current for analysis
-    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_result, i_stim_result
+    # v13.5: Return butterfly trace and local divergence (empty if LLE not computed)
+    v_pert_result = v_pert_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
+    div_local_result = div_local_out[:out_idx] if calc_lle else np.zeros(0, dtype=np.float64)
+    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_result, i_stim_result, v_pert_result, div_local_result
 

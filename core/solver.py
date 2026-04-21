@@ -1680,7 +1680,8 @@ class NeuronSolver:
             else:
                 lle_weights = w_arr
 
-        t_out, y_out, diverged, lle_arr, i_stim_arr = run_native_loop(
+        (t_out, y_out, diverged, lle_arr, i_stim_arr,
+         v_pert_arr, div_local_arr) = run_native_loop(
             y0.astype(np.float64),
             float(cfg.stim.t_sim),
             dt_internal,
@@ -1708,6 +1709,9 @@ class NeuronSolver:
             res.i_stim_total = i_stim_arr  # v12.2: Precomputed stimulus current
             if calc_lle:
                 res.lle_convergence = lle_arr
+                # v13.5: Attach butterfly trace and local divergence
+                res.v_pert_soma = v_pert_arr
+                res.lle_local_div = div_local_arr
             res.diverged = True
             return res
 
@@ -1718,6 +1722,9 @@ class NeuronSolver:
         res.i_stim_total = i_stim_arr  # v12.2: Precomputed stimulus current
         if calc_lle:
             res.lle_convergence = lle_arr
+            # v13.5: Attach butterfly trace and local divergence
+            res.v_pert_soma = v_pert_arr
+            res.lle_local_div = div_local_arr
         return res
 
     # ─────────────────────────────────────────────────────────────────

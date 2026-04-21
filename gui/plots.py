@@ -746,7 +746,8 @@ class OscilloscopeWidget(QWidget):
         self._p_ca.setVisible(any_ca)
 
         # Resize splitter to redistribute space after visibility changes
-        self._apply_plot_layout_profile()
+        # Note: Qt's QSplitter automatically redistributes space when setVisible() is called.
+        # We only need _apply_plot_layout_profile() when the user explicitly changes layout preset.
 
     def _on_view_settings_changed(self, *_):
         """

@@ -466,6 +466,121 @@ DEFAULT_EXPERT_RULES: List[ExpertRule] = [
         "severity": "warning",
         "format_args": lambda s: [s.get('spike_timing_jitter_ms', 0)]
     },
+    # ── v13.2 NEW RULES: Advanced Biophysics ──
+    {
+        "id": "edge_of_chaos",
+        "condition": lambda s: (
+            -0.002 < s.get('lle_per_ms', -1) < 0.002 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "🌌 **Edge of Chaos**: System is poised at the boundary of instability (|LLE| = {:.5f} < 0.002). "
+            "Maximum computational capacity and flexibility. Optimal for complex network integration."
+        ),
+        "message_ru": (
+            "🌌 **Граница хаоса**: Система находится на границе неустойчивости (|ЛЯ| = {:.5f} < 0.002). "
+            "Максимальная вычислительная емкость и гибкость. Оптимально для сложной сетевой интеграции."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [abs(s.get('lle_per_ms', 0))]
+    },
+    {
+        "id": "resonant_bandpass",
+        "condition": lambda s: s.get('f_res_hz', 0) > 1.0,
+        "message_en": (
+            "📻 **Resonance Detected**: Neuron acts as a band-pass filter with peak resonance at {:.1f} Hz. "
+            "Likely driven by Ih or slow K+ currents. Preferentially responds to rhythmic inputs in this band."
+        ),
+        "message_ru": (
+            "📻 **Обнаружен резонанс**: Нейрон работает как полосовой фильтр с пиком резонанса на {:.1f} Гц. "
+            "Вероятно обусловлено токами Ih или медленными K+. Предпочтительно отвечает на ритмические входы в этой полосе."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('f_res_hz', 0)]
+    },
+    {
+        "id": "severe_dendritic_shunting",
+        "condition": lambda s: (
+            s.get('dfilter_attenuation', 1.0) < 0.1 and
+            s.get('stim_mode', 0) == 2
+        ),
+        "message_en": (
+            "🛡️ **Severe Attenuation**: Dendritic inputs are attenuated by {:.0%}. "
+            "Somatic integration relies strictly on massive spatial summation or dendritic spiking. "
+            "Consider reducing dendritic distance or increasing proximal drive."
+        ),
+        "message_ru": (
+            "🛡️ **Сильное ослабление**: Дендритные входы ослаблены на {:.0%}. "
+            "Соматическая интеграция полагается на массивное пространственное суммирование или дендритные спайки. "
+            "Рассмотрите уменьшение дендритного расстояния или усиление проксимального драйва."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [1.0 - s.get('dfilter_attenuation', 1.0)]
+    },
+    # ── PHASE 1 NEW RULES: Spike Pattern & Dynamics ──
+    {
+        "id": "bursting_detected",
+        "condition": lambda s: (
+            s.get('burst_spike_ratio', 0) > 0.3 and
+            s.get('n_spikes', 0) > 10
+        ),
+        "message_en": (
+            "💥 **Bursting Detected**: {:.0%} of spikes occur in bursts. "
+            "Intraburst frequency {:.1f} Hz suggests intrinsic bursting mechanism "
+            "(IT or Ca2+-dependent). Check enable_ICa and gT settings."
+        ),
+        "message_ru": (
+            "💥 **Обнаружено пакетное поведение**: {:.0%} спайков в пакетах. "
+            "Внутрипакетная частота {:.1f} Гц указывает на механизм пакетной генерации "
+            "(IT или Ca2+-зависимый). Проверьте enable_ICa и gT."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [
+            s.get('burst_spike_ratio', 0),
+            s.get('intra_burst_freq_hz', 0)
+        ]
+    },
+    {
+        "id": "strong_adaptation",
+        "condition": lambda s: (
+            s.get('adaptation_index', 0) > 0.7 and
+            s.get('n_spikes', 0) > 20
+        ),
+        "message_en": (
+            "📉 **Strong Adaptation**: AI = {:.2f}. Neuron acts as 'differentiator' - "
+            "responds to changes, not steady states. Typical of pyramidal cells with IM/SK. "
+            "Consider increasing gM or gSK for stronger adaptation."
+        ),
+        "message_ru": (
+            "📉 **Сильная адаптация**: ИА = {:.2f}. Нейрон работает как 'дифференциатор' - "
+            "отвечает на изменения, не на постоянные состояния. Характерно для пирамидальных клеток с IM/SK. "
+            "Рассмотрите повышение gM или gSK для усиления адаптации."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('adaptation_index', 0)]
+    },
+    {
+        "id": "refractory_violation",
+        "condition": lambda s: (
+            s.get('refractory_period_ms', 2) < s.get('halfwidth_ms', 1) * 1.5 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "⚠️ **Refractory Period Anomaly**: Refractory ({:.2f} ms) < 1.5 × Halfwidth ({:.2f} ms). "
+            "Spike doublets possible. Check Na+ recovery from inactivation (h gate tau_h). "
+            "May indicate insufficient repolarization."
+        ),
+        "message_ru": (
+            "⚠️ **Аномалия рефрактерного периода**: Рефрактерность ({:.2f} мс) < 1.5 × Половинная ширина ({:.2f} мс). "
+            "Возможны спайковые дублеты. Проверьте восстановление Na+ от инактивации (tau_h h-гейта). "
+            "Может указывать на недостаточную реполяризацию."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [
+            s.get('refractory_period_ms', 2),
+            s.get('halfwidth_ms', 1)
+        ]
+    },
 ]
 
 

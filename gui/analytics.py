@@ -24,7 +24,7 @@ import logging
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget,
-                                QLabel, QTextEdit, QHBoxLayout,
+                                QLabel, QTextEdit, QHBoxLayout, QSplitter,
                                 QSizePolicy, QScrollArea, QPushButton, QMainWindow, QComboBox)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -81,8 +81,28 @@ GATE_COLORS = {
 }
 
 
+class SafeFigureCanvas(FigureCanvas):
+    """FigureCanvas with safe mouse event handling to prevent deleted QLabel errors.
+    
+    When canvas is inside a scroll area, the toolbar's locLabel can be destroyed
+    during scrolling while matplotlib still tries to update it. This class wraps
+    mouse events to prevent RuntimeError spam.
+    """
+
+    def mouseMoveEvent(self, event):
+        """Override to handle mouse moves safely when toolbar label is deleted."""
+        try:
+            super().mouseMoveEvent(event)
+        except RuntimeError as e:
+            # Ignore deleted widget errors during mouse events
+            if "already deleted" in str(e):
+                event.accept()
+            else:
+                raise
+
+
 def _mpl_fig(nrows=1, ncols=1, tight=True, **kwargs) -> tuple:
-    """Create a matplotlib Figure + FigureCanvas pair with dark theme."""
+    """Create a matplotlib Figure + SafeFigureCanvas pair with dark theme."""
     # Extract figsize from kwargs if provided, otherwise use default
     figsize = kwargs.pop('figsize', (8, 4 * nrows))
     
@@ -111,7 +131,7 @@ def _mpl_fig(nrows=1, ncols=1, tight=True, **kwargs) -> tuple:
             fig.set_layout_engine('tight')
         except Exception:
             fig.set_tight_layout(True)
-    canvas = FigureCanvas(fig)
+    canvas = SafeFigureCanvas(fig)
     return fig, canvas
 
 
@@ -550,11 +570,12 @@ class AnalyticsWidget(QTabWidget):
         self._fullscreen_windows = []
         self._building_lazy_tab = False  # re-entrancy guard for _on_tab_changed
         self._active_category = 'All'  # Current category filter
+        self._reference_metrics = None  # For radar chart comparison
         self._category_mapping = {  # Map tab indices to categories
             1: 'Single', 2: 'Single', 3: 'Single', 4: 'Single', 16: 'Single', 17: 'Single',
             5: 'Spectral', 6: 'Spectral', 7: 'Spectral',
             8: 'Sweep', 9: 'Sweep', 10: 'Sweep', 11: 'Sweep',
-            12: 'Physics', 13: 'Physics', 14: 'Physics', 15: 'Physics', 18: 'Physics',
+            12: 'Physics', 13: 'Physics', 14: 'Physics', 15: 'Physics',
             19: 'Physics', 21: 'Physics',
         }
         self._all_tab_specs = {}  # Store all tab specs for rebuilding
@@ -653,7 +674,6 @@ class AnalyticsWidget(QTabWidget):
             15: {'builder': '_build_tab_spike_shape', 'updater': '_update_spike_shape', 'title': 'Spike Shape', 'needs_stats': True},
             16: {'builder': '_build_tab_poincare',    'updater': '_update_poincare',       'title': 'Poincare (ISI)', 'needs_stats': True},
             17: {'builder': '_build_tab_isi_dist',    'updater': '_update_isi_dist',       'title': 'ISI Distribution', 'needs_stats': True},
-            18: {'builder': '_build_tab_fingerprint', 'updater': '_update_fingerprint',   'title': 'Fingerprint', 'needs_stats': True},
             19: {'builder': '_build_tab_csd',         'updater': '_update_csd',            'title': 'CSD', 'needs_morph': True},
             21: {'builder': '_build_tab_metabolic',   'updater': '_update_metabolic',      'title': 'Metabolic', 'needs_stats': True},
         }
@@ -710,6 +730,15 @@ class AnalyticsWidget(QTabWidget):
                     self._update_chaos(self._last_result, self._last_stats)
                 return True
         return False
+
+    def _compute_lle_now(self):
+        """Route LLE computation through MainWindow's secure dispatcher for UI locking."""
+        main_win = self.window()
+        if hasattr(main_win, '_run_lle_experiment'):
+            # Leverage the existing secure method that handles UI locking
+            main_win._run_lle_experiment()
+        else:
+            logging.error("MainWindow._run_lle_experiment not found.")
 
     # ─────────────────────────────────────────────────────────────────
     #  LAZY TAB ACTIVATION
@@ -1637,9 +1666,16 @@ class AnalyticsWidget(QTabWidget):
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Impedance'))
 
     def _build_tab_chaos(self) -> QWidget:
-        self.fig_chaos, cvs = _mpl_fig(1, 1, figsize=(9.6, 7.2), tight=False)
-        self.ax_chaos = self.fig_chaos.add_subplot(1, 1, 1)
-        _set_canvas_margins(self.fig_chaos, left=0.08, right=0.97, top=0.92, bottom=0.10)
+        # v13.5: 3-pane layout for butterfly, divergence, and convergence
+        self.fig_chaos, cvs = _mpl_fig(3, 1, figsize=(10, 9), tight=False)
+        
+        # Create 3 subplots with shared X (bottom axis controls zoom for all)
+        self.ax_butterfly = self.fig_chaos.add_subplot(3, 1, 1)
+        self.ax_div = self.fig_chaos.add_subplot(3, 1, 2, sharex=self.ax_butterfly)
+        self.ax_conv = self.fig_chaos.add_subplot(3, 1, 3, sharex=self.ax_butterfly)
+        
+        _set_canvas_margins(self.fig_chaos, left=0.08, right=0.97, top=0.95, bottom=0.08, hspace=0.30)
+        
         self.cvs_chaos = cvs
         self._tab_figures['Lyapunov (LLE)'] = self.fig_chaos
         self._chaos_texts: dict[str, object] = {}
@@ -1647,7 +1683,7 @@ class AnalyticsWidget(QTabWidget):
             cvs,
             fullscreen_callback=lambda: self._open_fullscreen_plot('Lyapunov (LLE)'),
             scroll_canvas=True,
-            min_canvas_height=760,
+            min_canvas_height=900,
         )
 
 
@@ -1671,28 +1707,6 @@ class AnalyticsWidget(QTabWidget):
             fontsize=13, color='#F38BA8', alpha=0.28, rotation=18, visible=False,
         )
         return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Phase-Locking'))
-
-    def _build_tab_fingerprint(self) -> QWidget:
-        """Build the Radar Chart (Biophysical Fingerprint) tab."""
-        self.fig_fingerprint, cvs = _mpl_fig(1, 1, figsize=(8.8, 8.8), tight=False)
-        # Use polar projection for radar chart
-        self.ax_fingerprint = self.fig_fingerprint.add_subplot(1, 1, 1, polar=True)
-        self.cvs_fingerprint = cvs
-        self._tab_figures['Fingerprint'] = self.fig_fingerprint
-        # Initialize empty radar chart
-        self._radar_labels = ['Firing Rate', 'Adaptation', 'Half-width', 'Rin', 'Energy', 'P/T Ratio']
-        self._radar_angles = np.linspace(0, 2 * np.pi, len(self._radar_labels), endpoint=False).tolist()
-        self._radar_angles += self._radar_angles[:1]  # Complete the circle
-        self._radar_fill = None
-        self._radar_line = None
-        self._radar_points = None
-        self._radar_text = None
-        # Set up the axes
-        self.ax_fingerprint.set_xticks(self._radar_angles[:-1])
-        self.ax_fingerprint.set_xticklabels(self._radar_labels, size=10)
-        self.ax_fingerprint.set_ylim(0, 1)
-        self.ax_fingerprint.set_title('Biophysical Fingerprint', fontsize=14, fontweight='bold', pad=20)
-        return _tab_with_toolbar(cvs, fullscreen_callback=lambda: self._open_fullscreen_plot('Fingerprint'))
 
     def _build_tab_csd(self) -> QWidget:
         """Build the CSD (Current-Source Density) spatial heatmap tab with time slider."""
@@ -1967,7 +1981,7 @@ class AnalyticsWidget(QTabWidget):
         self._update_currents(result)
         self._update_gates(result)
         self._update_equil(result)
-        self._update_fingerprint(result, stats)
+        # NOTE: _update_fingerprint removed - radar chart now in Passport tab
         self._update_csd(result)
         if result.morph:
             self._update_energy_balance(result)
@@ -2017,23 +2031,90 @@ class AnalyticsWidget(QTabWidget):
     # ─────────────────────────────────────────────────────────────────
     def _build_tab_passport(self) -> QWidget:
         """Build the Neuron Passport Dashboard with radar chart and progress bars."""
-        from PySide6.QtWidgets import QProgressBar
+        from PySide6.QtWidgets import QProgressBar, QTextBrowser, QPushButton
         
-        # Main container
+        # Main container with splitter for resizable panels
         widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(8)
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        # Left side: Radar chart (reuses fingerprint figure setup)
+        # Use QSplitter for resizable left/right panels
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(6)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: #313244;
+                border: 1px solid #45475A;
+                border-radius: 2px;
+            }
+            QSplitter::handle:hover {
+                background: #45475A;
+            }
+        """)
+        
+        # Left side: Scrollable radar chart with Save Reference button
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(6, 6, 6, 6)
+        left_layout.setSpacing(4)
+        
         self.fig_passport_radar, cvs = _mpl_fig(1, 1, figsize=(6, 6), tight=False)
         self.ax_passport_radar = self.fig_passport_radar.add_subplot(111, projection='polar')
         self.ax_passport_radar.set_facecolor('#0D1117')
         self.ax_passport_radar.tick_params(colors='#CDD6F4')
         self.ax_passport_radar.set_title('Biophysical Fingerprint', color='#CDD6F4', pad=20)
-        layout.addWidget(cvs, stretch=1)
         
-        # Right side: Scroll area with text and progress bars
+        # Set minimum size for the canvas to ensure visibility
+        cvs.setMinimumSize(400, 400)
+        
+        # Initialize radar chart elements
+        self._radar_labels = ['Firing Rate', 'Adaptation', 'Half-width', 'Rin', 'Energy', 'P/T Ratio']
+        self._radar_angles = np.linspace(0, 2 * np.pi, len(self._radar_labels), endpoint=False).tolist()
+        self._radar_angles += self._radar_angles[:1]  # Complete the circle
+        self._radar_fill = None
+        self._radar_line = None
+        self._radar_line_ref = None
+        self._radar_line_default = None
+        self._radar_text = None
+        self._current_radar_values = None
+        
+        # Default L5 baseline (for comparison when no user reference)
+        self._DEFAULT_L5_BASELINE = [0.5, 0.5, 0.5, 0.5, 0.3, 0.5]
+        
+        left_layout.addWidget(cvs, stretch=1)
+        
+        # Save Reference button
+        self.btn_save_reference = QPushButton("📌 Save as Reference")
+        self.btn_save_reference.setToolTip("Store current radar chart shape for comparison")
+        self.btn_save_reference.setStyleSheet("""
+            QPushButton {
+                background: #313244;
+                color: #F9E2AF;
+                border: 1px solid #45475A;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: #45475A;
+            }
+            QPushButton:pressed {
+                background: #585B70;
+            }
+        """)
+        self.btn_save_reference.clicked.connect(self._on_save_reference_clicked)
+        left_layout.addWidget(self.btn_save_reference)
+        
+        left_scroll.setWidget(left_widget)
+        splitter.addWidget(left_scroll)
+        
+        # Right side: Scroll area with HTML browser and progress bars
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         right_widget = QWidget()
@@ -2048,13 +2129,31 @@ class AnalyticsWidget(QTabWidget):
         )
         right_layout.addWidget(self._passport_status_label)
         
-        # Text view (original passport view)
-        self.passport_view = QTextEdit()
+        # HTML browser for rich text display
+        self.passport_view = QTextBrowser()
         self.passport_view.setReadOnly(True)
-        self.passport_view.setFont(QFont("Consolas", 10))
-        self.passport_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.passport_view.setOpenExternalLinks(True)
         self.passport_view.setMinimumWidth(350)
         self.passport_view.setStyleSheet("background:#0D1117; color:#C9D1D9; border:none;")
+        
+        # Apply dark theme CSS
+        dark_css = """
+            body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; background: #0D1117; color: #C9D1D9; }
+            h1 { color: #89B4FA; font-size: 16px; margin: 8px 0; }
+            h2 { color: #94E2D5; font-size: 14px; margin: 6px 0; border-bottom: 1px solid #313244; padding-bottom: 4px; }
+            h3 { color: #F9E2AF; font-size: 13px; margin: 4px 0; }
+            table { border-collapse: collapse; width: 100%; margin: 4px 0; }
+            td { padding: 3px 6px; border: 1px solid #21262d; }
+            tr:nth-child(even) { background: #161b22; }
+            .metric-label { color: #8b949e; }
+            .metric-value { color: #89B4FA; font-weight: bold; }
+            .critical { border-left: 4px solid #F38BA8; padding-left: 10px; background: #3d1f22; }
+            .warning { border-left: 4px solid #F9E2AF; padding-left: 10px; background: #3d3422; }
+            .info { border-left: 4px solid #89B4FA; padding-left: 10px; background: #1c2733; }
+            .success { border-left: 4px solid #A6E3A1; padding-left: 10px; background: #1f3322; }
+            .expert-box { margin: 8px 0; padding: 8px; border-radius: 4px; }
+        """
+        self.passport_view.document().setDefaultStyleSheet(dark_css)
         right_layout.addWidget(self.passport_view, stretch=1)
         
         # Progress bars section
@@ -2117,9 +2216,115 @@ class AnalyticsWidget(QTabWidget):
         right_layout.addWidget(lle_container)
         
         scroll.setWidget(right_widget)
-        layout.addWidget(scroll, stretch=1)
+        splitter.addWidget(scroll)
+        
+        # Set initial splitter sizes (50/50 split)
+        splitter.setSizes([500, 500])
+        
+        main_layout.addWidget(splitter)
+        
+        # Store splitter reference for potential programmatic resizing
+        self._passport_splitter = splitter
         
         return widget
+
+    def _on_save_reference_clicked(self):
+        """Save current radar chart values as reference for comparison."""
+        if hasattr(self, '_current_radar_values') and self._current_radar_values is not None:
+            self._reference_metrics = self._current_radar_values.copy()
+            self._update_radar_chart()  # Force redraw with reference
+
+    def _update_radar_chart(self, metrics: dict = None):
+        """Update the radar chart in the Passport tab.
+        
+        Parameters
+        ----------
+        metrics : dict, optional
+            Computed biophysical metrics. If None, uses cached values.
+        """
+        from core.analysis import compute_biophysical_metrics
+        
+        ax = self.ax_passport_radar
+        
+        # Get metrics if not provided
+        if metrics is None:
+            if hasattr(self, '_last_result') and self._last_result is not None:
+                metrics = compute_biophysical_metrics(self._last_result, self._last_stats)
+            else:
+                return
+        
+        # Get normalized values for each axis
+        values = [
+            metrics['firing_rate_norm'],
+            metrics['adaptation_norm'],
+            metrics['halfwidth_norm'],
+            metrics['resistance_norm'],
+            metrics['energy_norm'],
+            metrics['peak_threshold_norm'],
+        ]
+        self._current_radar_values = values.copy()
+        values_closed = values + values[:1]
+        
+        # Default L5 baseline
+        default_ref = self._DEFAULT_L5_BASELINE + self._DEFAULT_L5_BASELINE[:1]
+        
+        # User reference if set
+        user_ref = None
+        if self._reference_metrics is not None:
+            user_ref = self._reference_metrics + self._reference_metrics[:1]
+        
+        # Update or create the radar chart elements
+        if self._radar_fill is None:
+            # Initialize all elements
+            ax.set_xticks(self._radar_angles[:-1])
+            ax.set_xticklabels(self._radar_labels, size=10, color='#CDD6F4')
+            ax.set_ylim(0, 1)
+            ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+            ax.set_yticklabels(['0.25', '0.5', '0.75', '1.0'], color='#6C7086', size=8)
+            ax.grid(True, color='#313244', alpha=0.5)
+            
+            # Default L5 reference (dashed gray) - always show if no user ref
+            self._radar_line_default, = ax.plot(
+                self._radar_angles, default_ref, '--', linewidth=1.5,
+                color='#6C7086', alpha=0.7, label='Default L5 Ref'
+            )
+            
+            # User reference (dashed orange) - only if saved
+            self._radar_line_ref, = ax.plot(
+                self._radar_angles, user_ref if user_ref else default_ref, '--', linewidth=1.5,
+                color='#F9E2AF', alpha=0.8, label='User Reference', visible=user_ref is not None
+            )
+            
+            # Current values (blue filled polygon)
+            self._radar_fill = ax.fill(
+                self._radar_angles, values_closed, alpha=0.25, color='#89B4FA'
+            )[0]
+            self._radar_line, = ax.plot(
+                self._radar_angles, values_closed, 'o-', linewidth=2,
+                color='#89B4FA', label='Current', markersize=6
+            )
+            
+            # Legend
+            ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1),
+                     fontsize=8, framealpha=0.8, facecolor='#1E1E2E',
+                     edgecolor='#313244', labelcolor='#CDD6F4')
+        else:
+            # Update existing elements
+            self._radar_fill.set_xy(np.column_stack([self._radar_angles, values_closed]))
+            self._radar_line.set_data(self._radar_angles, values_closed)
+            
+            # Update reference lines
+            if user_ref is not None:
+                self._radar_line_ref.set_data(self._radar_angles, user_ref)
+                self._radar_line_ref.set_visible(True)
+                self._radar_line_default.set_visible(False)
+            else:
+                self._radar_line_ref.set_visible(False)
+                self._radar_line_default.set_visible(True)
+                self._radar_line_default.set_data(self._radar_angles, default_ref)
+        
+        # Redraw
+        self.fig_passport_radar.canvas.draw_idle()
 
     def _update_passport(self, result, stats: dict):
         cfg = result.config
@@ -2370,37 +2575,16 @@ class AnalyticsWidget(QTabWidget):
         if np.isfinite(na_min):
             lines.append(f'[Na+]i min={na_min:.2f} mM | [K+]o max={k_max:.2f} mM' if np.isfinite(k_max) else f'[Na+]i min={na_min:.2f} mM')
         
-        lines.append(line_major)
-        
         # ── EXPERT INSIGHTS (v11.5 bilingual) ──
+        expert_html = ""
         try:
             from core.expert_system import (
                 generate_expert_insights, 
                 get_quick_recommendations,
-                format_insights_markdown,
-                get_language,
-                set_language
+                get_language
             )
             
-            # Detect language from config or use default
-            # Note: When full app localization is ready, this will integrate with main locale system
             current_lang = getattr(cfg, 'language', 'EN') or 'EN'
-            
-            # Bilingual headers
-            _HEADERS = {
-                'section': {
-                    'EN': 'EXPERT INSIGHTS & RECOMMENDATIONS',
-                    'RU': 'ЭКСПЕРТНЫЕ ИНСАЙТЫ И РЕКОМЕНДАЦИИ'
-                },
-                'insights': {
-                    'EN': '📋 Insights:',
-                    'RU': '📋 Инсайты:'
-                },
-                'recommendations': {
-                    'EN': '💡 Recommendations:',
-                    'RU': '💡 Рекомендации:'
-                }
-            }
             
             # Build comprehensive expert stats dictionary
             expert_stats = {
@@ -2414,43 +2598,179 @@ class AnalyticsWidget(QTabWidget):
                 'ca_i_max_nM': stats.get('ca_i_max_nM', 0),
                 'threshold_rheobase_pA': stats.get('threshold_rheobase_pA', 100),
                 'burst_spike_ratio': stats.get('burst_spike_ratio', 0),
+                'intra_burst_freq_hz': stats.get('intra_burst_freq_hz', 0),
                 'n_spikes': ns,
                 'stim_amplitude_pA': cfg.stim.Iext,
-                'mean_v_mM': np.mean(result.v_soma) if len(result.v_soma) > 0 else -70,
+                'refractory_period_ms': refr_per,
+                'halfwidth_ms': hw,
+                'mean_v_mV': np.mean(result.v_soma) if len(result.v_soma) > 0 else -70,
                 'temperature_celsius': cfg.env.T_celsius,
                 'isi_mean_ms': isi_mean if ns > 1 else np.nan,
                 'isi_std_ms': isi_std if ns > 1 else np.nan,
                 'atp_decline_rate_mM_per_s': stats.get('atp_decline_rate_mM_per_s', 0),
+                'V_ahp_mV': V_ah,
+                'f_res_hz': stats.get('f_res_hz', np.nan),
+                'dfilter_attenuation': getattr(cfg.stim, 'dfilter_attenuation', 1.0),
+                'stim_mode': getattr(cfg.stim, 'stype', 0),
             }
             
             insights = generate_expert_insights(expert_stats, language=current_lang)
             recommendations = get_quick_recommendations(expert_stats, language=current_lang)
             
             if insights or recommendations:
-                lines += [
-                    '',
-                    _HEADERS['section'][current_lang],
-                    line_minor,
-                ]
-                
-                if insights:
-                    lines.append(_HEADERS['insights'][current_lang])
-                    lines.extend(format_insights_markdown(insights, language=current_lang).split('\n\n'))
-                    lines.append('')
+                expert_boxes = []
+                for insight in insights:
+                    severity = insight.get('severity', 'info')
+                    msg = insight.get('message', '')
+                    expert_boxes.append(f'<div class="expert-box {severity}">{msg}</div>')
                 
                 if recommendations:
-                    lines.append(_HEADERS['recommendations'][current_lang])
-                    for rec in recommendations:
-                        lines.append(f"  {rec}")
-                    lines.append('')
+                    recs_html = '<br>'.join(f'• {rec}' for rec in recommendations)
+                    expert_boxes.append(f'<div class="expert-box info"><strong>💡 Recommendations:</strong><br>{recs_html}</div>')
                 
-                lines.append(line_major)
-        except Exception as e:
-            # Expert system is optional - fail silently in production
-            # Log error in debug mode if needed
+                expert_html = '<h2>Expert Insights & Recommendations</h2>' + ''.join(expert_boxes)
+        except Exception:
             pass
 
-        self.passport_view.setPlainText("\n".join(lines))
+        # ── BUILD HTML DASHBOARD ──
+        def _fmt_html(v, fmt='.2f', unit=''):
+            if v is None or (isinstance(v, float) and np.isnan(v)):
+                return '<span style="color:#6C7086">N/A</span>'
+            return f'<span class="metric-value">{v:{fmt}}</span> {unit}'.strip()
+        
+        # Crisis warnings
+        crisis_html = ""
+        if atp_min_mM < 0.2:
+            crisis_html = '<div class="expert-box critical"><strong>CRITICAL:</strong> ATP < 0.2 mM — PUMPS FAILING — IMPENDING CELL DEATH</div>'
+        elif atp_min_mM < 0.5:
+            crisis_html = '<div class="expert-box warning"><strong>WARNING:</strong> ATP < 0.5 mM — METABOLIC CRISIS</div>'
+        
+        # Build sections
+        html_parts = [
+            '<h1>🧠 Neuron Passport Dashboard</h1>',
+            crisis_html,
+            expert_html,
+            '<h2>Configuration</h2>',
+            f'<table><tr><td class="metric-label">Preset</td><td>{cfg.channels.__class__.__name__}</td></tr>',
+            f'<tr><td class="metric-label">Temperature</td><td>{cfg.env.T_celsius:.1f}°C | φ = {cfg.env.phi:.3f}</td></tr>',
+            f'<tr><td class="metric-label">Channels</td><td>{channels_enabled}</td></tr></table>',
+            '<h2>Passive Properties</h2>',
+            f'<table><tr>',
+            f'<td>τₘ = {_fmt_html(tau, ".3f", "ms")}</td>',
+            f'<td>Rᵢₙ = {_fmt_html(Rin, ".3f", "kΩ·cm²")}</td>',
+            f'<td>λ = {_fmt_html(lam, ".1f", "μm")}</td>',
+            f'</tr></table>',
+            '<h2>Spike Metrics</h2>',
+            f'<table><tr><td class="metric-label">Count</td><td>{ns}</td></tr>',
+        ]
+        
+        if ns > 0:
+            html_parts.extend([
+                f'<tr><td class="metric-label">Threshold</td><td>{_fmt_html(V_th, "+.1f", "mV")}</td></tr>',
+                f'<tr><td class="metric-label">Peak</td><td>{_fmt_html(V_pk, "+.1f", "mV")}</td></tr>',
+                f'<tr><td class="metric-label">AHP</td><td>{_fmt_html(V_ah, "+.1f", "mV")}</td></tr>',
+                f'<tr><td class="metric-label">Half-width</td><td>{_fmt_html(hw, ".3f", "ms")}</td></tr>',
+                f'<tr><td class="metric-label">dV/dt</td><td>{_fmt_html(stats["dvdt_max"], ".0f", "mV/ms")} / {_fmt_html(stats["dvdt_min"], ".0f", "mV/ms")}</td></tr>',
+            ])
+        
+        if ns > 1:
+            html_parts.extend([
+                '</table><h2>Firing Dynamics</h2>',
+                f'<table><tr>',
+                f'<td>f_initial = {_fmt_html(fi, ".1f", "Hz")}</td>',
+                f'<td>f_steady = {_fmt_html(fs, ".1f", "Hz")}</td>',
+                f'<td>AI = {_fmt_html(AI, "+.3f")}</td>',
+                f'</tr></table>',
+                # Detailed neuron type classification section
+                '<h3>Automatic Neuron Typing</h3>',
+                '<table>',
+                f'<tr><td class="metric-label" width="20%">Rule-based</td><td><b>{nt_rule}</b></td></tr>',
+                f'<tr><td class="metric-label">ML-based</td><td><b>{nt_ml}</b> (confidence: {nt_ml_conf:.2f})</td></tr>',
+                f'<tr><td class="metric-label">Hybrid</td><td><b>{nt_hybrid}</b> (source: {nt_source}, confidence: {nt_hybrid_conf:.2f})</td></tr>',
+                '</table>',
+                f'<table><tr>',
+                f'<td>ISI mean = {_fmt_html(isi_mean, ".2f", "ms")}</td>',
+                f'<td>std = {_fmt_html(isi_std, ".2f", "ms")}</td>',
+                f'<td>CV = {_fmt_html(cv_isi, ".3f")}</td>',
+                f'</tr><tr>',
+                f'<td>Latency = {_fmt_html(lat_1st, ".2f", "ms")}</td>',
+                f'<td>Refractory = {_fmt_html(refr_per, ".3f", "ms")}</td>',
+                f'<td>Reliability = {_fmt_html(firing_rel, ".3f")}</td>',
+                f'</tr></table>',
+            ])
+        
+        if cv > 0:
+            html_parts.append(f'<p>Conduction velocity: {_fmt_html(cv, ".3f", "m/s")}</p>')
+        
+        # LLE section
+        html_parts.append('<h2>Dynamical Stability (LLE)</h2>')
+        if lyap_class == 'disabled':
+            html_parts.append('<p><i>LLE not computed. Launch "Lyapunov Exponent (LLE)" from Experiment Studio.</i></p>')
+        else:
+            html_parts.append(f'<table><tr><td class="metric-label">Class</td><td>{lyap_class}</td><td class="metric-label">LLE</td><td>{_fmt_html(lyap_lle_s, "+.4f", "1/s")}</td><td class="metric-label">Valid pairs</td><td>{lyap_pairs}</td></tr></table>')
+        
+        # Information Theory section (v13.5)
+        html_parts.append('<h2>Information Theory</h2>')
+        pe_norm = stats.get('permutation_entropy_norm', np.nan)
+        html_parts.append(f'<table><tr><td class="metric-label">Permutation Entropy (V)</td><td>{_fmt_html(pe_norm, ".3f")} (normalized complexity, 0-1)</td></tr></table>')
+        
+        bits_nj = stats.get('bits_per_nj', np.nan)
+        bits_nmol = stats.get('bits_per_nmol_atp', np.nan)
+        if np.isfinite(bits_nj) or np.isfinite(bits_nmol):
+            html_parts.append('<table><tr>')
+            if np.isfinite(bits_nj):
+                html_parts.append(f'<td>{_fmt_html(bits_nj, ".3e")} bits/nJ</td>')
+            if np.isfinite(bits_nmol):
+                html_parts.append(f'<td>{_fmt_html(bits_nmol, ".3e")} bits/nmol ATP</td>')
+            html_parts.append('</tr></table>')
+        else:
+            html_parts.append('<p><i>Encoding efficiency: N/A (deterministic simulation)</i></p>')
+        
+        # Modulation section
+        html_parts.append('<h2>Modulation Analysis</h2>')
+        if not modulation_valid:
+            html_parts.append('<p><i>Disabled or insufficient spikes for robust estimate.</i></p>')
+        else:
+            html_parts.extend([
+                f'<table><tr>',
+                f'<td>Source: {modulation_source}</td>',
+                f'<td>Band: {_fmt_html(modulation_low_hz, ".1f", "Hz")}–{_fmt_html(modulation_high_hz, ".1f", "Hz")}</td>',
+                f'</tr></table>',
+                f'<table><tr>',
+                f'<td>PLV = {_fmt_html(modulation_plv, ".3f")}</td>',
+                f'<td>Phase = {_fmt_html(modulation_phase_deg, ".1f", "°")}</td>',
+                f'<td>Depth = {_fmt_html(modulation_depth, ".3f")}</td>',
+                f'<td>MI = {_fmt_html(modulation_index, ".3f")}</td>',
+                f'</tr></table>',
+            ])
+        
+        # Channel engagement
+        html_parts.extend([
+            '<h2>Channel Engagement</h2>',
+            f'<p><b>Dominant:</b> {dominant_current}</p>',
+            '<table>',
+        ])
+        for name, (i_min, i_max, q_abs) in top_channels:
+            html_parts.append(f'<tr><td>{name}</td><td>I ∈ [{_fmt_html(i_min, ".2f", "μA/cm²")}, {_fmt_html(i_max, ".2f", "μA/cm²")}]</td><td>|Q| = {_fmt_html(q_abs, ".2f", "nC/cm²")}</td></tr>')
+        html_parts.append('</table>')
+        
+        if result.n_comp > 1:
+            html_parts.append(f'<p>Propagation delays: soma→junction = {_fmt_html(delay_junction_ms, ".2f", "ms")} | soma→terminal = {_fmt_html(delay_terminal_ms, ".2f", "ms")}</p>')
+        
+        # Energy section
+        html_parts.extend([
+            '<h2>Energy & Metabolism</h2>',
+            f'<table><tr><td>ATP total = {_fmt_html(atp, ".4e", "nmol/cm²")}</td></tr>',
+            f'<tr><td>Na⁺ pump = {atp_na_s} nmol/cm²</td></tr>',
+            f'<tr><td>Ca²⁺ pump = {atp_ca_s} nmol/cm²</td></tr>',
+            f'<tr><td>Baseline = {atp_bl_s} nmol/cm²</td></tr></table>',
+            f'<table><tr><td>ATP min = {atp_min_mM:.3f} mM</td><td>decline = {atp_decline:.4f} mM/s</td></tr></table>',
+        ])
+        if np.isfinite(na_min):
+            html_parts.append(f'<p>[Na⁺]ᵢ min = {na_min:.2f} mM | [K⁺]ₒ max = {k_max:.2f} mM</p>')
+        
+        html = '\n'.join(html_parts)
+        self.passport_view.setHtml(html)
         
         # v12.2: Update progress bars. Numerical diagnostics can legitimately
         # be NaN/inf for short or degenerate traces, so clamp UI values.
@@ -2463,6 +2783,11 @@ class AnalyticsWidget(QTabWidget):
         lle_scaled = max(0, min(self._passport_lle_bar.maximum(), int(lyap_lle * 100)))
         self._passport_lle_bar.setValue(lle_scaled)
         self._passport_lle_bar.setFormat(f"{lle_scaled}/200 ({lyap_lle:.2f} lambda)")
+        
+        # Update radar chart
+        from core.analysis import compute_biophysical_metrics
+        metrics = compute_biophysical_metrics(result, stats)
+        self._update_radar_chart(metrics)
 
     @staticmethod
     def _finite_float(value, *, default: float = 0.0) -> float:
@@ -2833,85 +3158,131 @@ class AnalyticsWidget(QTabWidget):
             self._update_currents(self._last_result)
 
     def _update_chaos(self, result, stats: dict | None = None):
-        """Update Lyapunov tab from native Benettin convergence only."""
+        """Update 3-pane Chaos dashboard: Butterfly, Instantaneous Divergence, Convergence."""
         if not hasattr(self, 'fig_chaos'):
             return
 
-        ax = self.ax_chaos
-        ax.clear()
+        # Clear all three axes
+        self.ax_butterfly.clear()
+        self.ax_div.clear()
+        self.ax_conv.clear()
 
-        lle_raw = getattr(result, 'lle_convergence', None)
-        lle = np.asarray(lle_raw, dtype=float).reshape(-1) if lle_raw is not None else np.zeros(0, dtype=float)
+        # Get data arrays
         t = np.asarray(getattr(result, 't', []), dtype=float).reshape(-1)
-        n = min(t.size, lle.size)
-        finite = np.isfinite(t[:n]) & np.isfinite(lle[:n]) if n > 0 else np.zeros(0, dtype=bool)
+        v_main = np.asarray(getattr(result, 'v_soma', []), dtype=float).reshape(-1)
+        v_pert = np.asarray(getattr(result, 'v_pert_soma', []), dtype=float).reshape(-1)
+        div_local = np.asarray(getattr(result, 'lle_local_div', []), dtype=float).reshape(-1)
+        lle_conv = np.asarray(getattr(result, 'lle_convergence', []), dtype=float).reshape(-1)
 
-        if n > 0 and np.any(finite):
-            t_plot = t[:n][finite]
-            lle_plot = lle[:n][finite]
-            ax.axhspan(0, 100, color='#F38BA8', alpha=0.10, label='Chaotic region')
-            ax.axhspan(-100, 0, color='#A6E3A1', alpha=0.10, label='Stable region')
-            transient_end_ms = float(t_plot[0] + 0.2 * (t_plot[-1] - t_plot[0])) if t_plot.size > 1 else float(t_plot[0])
-            ax.axvline(x=transient_end_ms, color='gray', linestyle='--', lw=1.2, alpha=0.8, label='Transient end')
-            ax.plot(t_plot, lle_plot, color='#89B4FA', lw=2.2, label='Benettin LLE')
+        n_t = len(t)
+        has_lle = len(lle_conv) > 0 and np.any(np.isfinite(lle_conv))
 
-            tail_start = int(max(0, np.floor(0.70 * len(lle_plot))))
-            tail = lle_plot[tail_start:]
-            mean_lle = float(np.nanmean(tail)) if tail.size else float(lle_plot[-1])
-            if mean_lle > 0.001:
-                predictability_horizon = 1.0 / mean_lle
-                expert = (
-                    f"?? EXPERT ANALYSIS:\n"
-                    f"System is CHAOTIC (LLE = {mean_lle:.4f} 1/ms).\n"
-                    f"Predictability Horizon: ~{predictability_horizon:.1f} ms.\n"
-                    f"Phase lock is impossible."
-                )
-                edge = '#F38BA8'
-            elif mean_lle < -0.001:
-                expert = (
-                    f"?? EXPERT ANALYSIS:\n"
-                    f"System is STABLE (LLE = {mean_lle:.4f} 1/ms).\n"
-                    f"Trajectory converges to a limit cycle or resting state."
-                )
-                edge = '#A6E3A1'
-            else:
-                expert = (
-                    f"?? EXPERT ANALYSIS:\n"
-                    f"System is NEAR-NEUTRAL (LLE = {mean_lle:.4f} 1/ms).\n"
-                    f"Longer runs or a narrower subspace may be needed."
-                )
-                edge = '#F9E2AF'
-
-            ax.text(
-                0.02, 0.96,
-                expert,
-                transform=ax.transAxes, ha='left', va='top', fontsize=10,
-                bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.94, edgecolor=edge, linewidth=1.4),
-                color='#CDD6F4',
-            )
+        if n_t > 0 and has_lle:
+            # ── PANE 1: Butterfly Trace (Main vs Perturbed) ──
+            self.ax_butterfly.plot(t, v_main, color='#89B4FA', lw=1.5, label='Main trajectory')
+            if len(v_pert) == n_t:
+                self.ax_butterfly.plot(t, v_pert, color='#F38BA8', lw=1.5, alpha=0.7,
+                                       linestyle='--', label='Perturbed (δ)')
             _configure_ax_interactive(
-                ax,
-                title='Native Benettin LLE Convergence',
+                self.ax_butterfly,
+                title='Butterfly Trace: V_main vs V_perturbed',
+                ylabel='Voltage (mV)',
+                show_legend=True,
+            )
+            self.ax_butterfly.tick_params(labelbottom=False)  # Hide X labels (shared)
+
+            # ── PANE 2: Instantaneous Divergence ──
+            if len(div_local) == n_t:
+                # Plot as step-like visualization
+                # Use vlines for discrete pulse appearance at non-zero values
+                nonzero_mask = np.abs(div_local) > 1e-12
+                if np.any(nonzero_mask):
+                    t_nonzero = t[nonzero_mask]
+                    div_nonzero = div_local[nonzero_mask]
+                    # Color by sign: red=positive (divergence/chaos), green=negative (convergence)
+                    pos_mask = div_nonzero > 0
+                    if np.any(pos_mask):
+                        self.ax_div.vlines(t_nonzero[pos_mask], 0, div_nonzero[pos_mask],
+                                           color='#F38BA8', alpha=0.8, linewidth=2, label='Divergence (>0)')
+                    if np.any(~pos_mask):
+                        self.ax_div.vlines(t_nonzero[~pos_mask], 0, div_nonzero[~pos_mask],
+                                           color='#A6E3A1', alpha=0.8, linewidth=2, label='Convergence (<0)')
+                self.ax_div.axhline(y=0, color='#6C7086', linestyle='-', linewidth=0.5, alpha=0.5)
+            _configure_ax_interactive(
+                self.ax_div,
+                title='Instantaneous Divergence ln(d/δ)',
+                ylabel='ln(d/δ)',
+                show_legend=True,
+            )
+            self.ax_div.tick_params(labelbottom=False)  # Hide X labels (shared)
+
+            # ── PANE 3: LLE Convergence Curve ──
+            n = min(n_t, len(lle_conv))
+            finite = np.isfinite(t[:n]) & np.isfinite(lle_conv[:n])
+            if np.any(finite):
+                t_plot = t[:n][finite]
+                lle_plot = lle_conv[:n][finite]
+                self.ax_conv.axhspan(0, 100, color='#F38BA8', alpha=0.10, label='Chaotic region')
+                self.ax_conv.axhspan(-100, 0, color='#A6E3A1', alpha=0.10, label='Stable region')
+                # Transient marker at 20% of time
+                transient_end_ms = float(t_plot[0] + 0.2 * (t_plot[-1] - t_plot[0])) if len(t_plot) > 1 else float(t_plot[0])
+                self.ax_conv.axvline(x=transient_end_ms, color='gray', linestyle='--', lw=1.2, alpha=0.8, label='Transient end')
+                self.ax_conv.plot(t_plot, lle_plot, color='#89B4FA', lw=2.2, label='Benettin LLE')
+
+                # Calculate mean LLE from tail for expert analysis
+                tail_start = int(max(0, np.floor(0.70 * len(lle_plot))))
+                tail = lle_plot[tail_start:]
+                mean_lle = float(np.nanmean(tail)) if len(tail) > 0 else float(lle_plot[-1])
+
+                # Expert analysis text box
+                if mean_lle > 0.001:
+                    predictability_horizon = 1.0 / mean_lle
+                    expert = (
+                        f"🔥 CHAOTIC: LLE = {mean_lle:.4f} 1/ms\n"
+                        f"Predictability: ~{predictability_horizon:.1f} ms"
+                    )
+                    edge = '#F38BA8'
+                elif mean_lle < -0.001:
+                    expert = (
+                        f"🟢 STABLE: LLE = {mean_lle:.4f} 1/ms\n"
+                        f"Converges to limit cycle"
+                    )
+                    edge = '#A6E3A1'
+                else:
+                    expert = (
+                        f"🟡 NEAR-NEUTRAL: LLE = {mean_lle:.4f} 1/ms\n"
+                        f"Longer runs may be needed"
+                    )
+                    edge = '#F9E2AF'
+
+                self.ax_conv.text(
+                    0.02, 0.96, expert,
+                    transform=self.ax_conv.transAxes, ha='left', va='top', fontsize=9,
+                    bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.94, edgecolor=edge, linewidth=1.4),
+                    color='#CDD6F4',
+                )
+
+            _configure_ax_interactive(
+                self.ax_conv,
+                title='LLE Convergence Curve (λ)',
                 xlabel='Time (ms)',
                 ylabel='LLE estimate (1/ms)',
                 show_legend=True,
             )
+
             self.cvs_chaos.draw_idle()
             return
 
-        ax.text(
-            0.5, 0.5,
-            'LLE not computed. Select "Lyapunov Exponent (LLE)" in Experiment Studio and launch the experiment.',
-            ha='center', va='center', transform=ax.transAxes, fontsize=12, color='#89B4FA',
-            wrap=True,
-        )
-        _configure_ax_interactive(
-            ax,
-            title='Native Benettin LLE Convergence',
-            xlabel='Time (ms)',
-            ylabel='LLE estimate (1/ms)',
-            show_legend=False,
-        )
+        # ── LLE not computed state ──
+        for ax in (self.ax_butterfly, self.ax_div, self.ax_conv):
+            ax.text(
+                0.5, 0.5,
+                'LLE not computed.\nSelect "Lyapunov Exponent (LLE)" in Experiment Studio.',
+                ha='center', va='center', transform=ax.transAxes, fontsize=11, color='#89B4FA',
+                wrap=True,
+            )
+            _configure_ax_interactive(ax, title='No LLE Data', show_legend=False)
+        self.ax_conv.set_xlabel('Time (ms)')
         self.cvs_chaos.draw_idle()
 
 
@@ -4582,102 +4953,9 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_excmap.draw_idle()
         self.setCurrentWidget(self.tab_excmap)
 
-    # ─────────────────────────────────────────────────────────────────
-    #  12 — FINGERPRINT (Radar Chart)
-    # ─────────────────────────────────────────────────────────────────
-    # Reference: Healthy Pyramidal L5 neuron baseline (normalized 0-1)
-    _REFERENCE_BASELINE = [0.5, 0.5, 0.5, 0.5, 0.3, 0.5]  # [rate, adapt, hw, Rin, energy, P/T]
-
-    def _update_fingerprint(self, result, stats):
-        """Update the Radar Chart (Biophysical Fingerprint) tab."""
-        if not hasattr(self, 'fig_fingerprint'):
-            return
-        from core.analysis import compute_biophysical_metrics
-
-        ax = self.ax_fingerprint
-        metrics = compute_biophysical_metrics(result, stats)
-
-        # Get normalized values for each axis
-        values = [
-            metrics['firing_rate_norm'],
-            metrics['adaptation_norm'],
-            metrics['halfwidth_norm'],
-            metrics['resistance_norm'],
-            metrics['energy_norm'],
-            metrics['peak_threshold_norm'],
-        ]
-        values_closed = values + values[:1]
-
-        # Reference baseline (healthy pyramidal) — for comparison
-        ref_values = self._REFERENCE_BASELINE + self._REFERENCE_BASELINE[:1]
-
-        # Update or create the radar chart elements
-        if self._radar_fill is None:
-            # Reference polygon (dashed gray)
-            self._radar_ref_line = ax.plot(
-                self._radar_angles, ref_values, '--', linewidth=1.5,
-                color='#6C7086', alpha=0.7, label='Healthy L5 Ref'
-            )[0]
-            self._radar_fill = ax.fill(
-                self._radar_angles, values_closed, alpha=0.25, color='#89B4FA'
-            )[0]
-            self._radar_line = ax.plot(
-                self._radar_angles, values_closed, 'o-', linewidth=2,
-                color='#89B4FA', label='Current', markersize=6
-            )[0]
-            # Add legend
-            ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1),
-                     fontsize=8, framealpha=0.8, facecolor='#1E1E2E')
-        else:
-            self._radar_fill.set_xy(np.column_stack([self._radar_angles, values_closed]))
-            self._radar_line.set_data(self._radar_angles, values_closed)
-
-        # Compute deviation from reference for summary
-        deviations = [
-            (values[i] - self._REFERENCE_BASELINE[i]) / max(0.01, self._REFERENCE_BASELINE[i]) * 100
-            for i in range(6)
-        ]
-        avg_deviation = np.mean(np.abs(deviations))
-
-        # Color-coded summary
-        summary = (
-            f"Firing Rate: {metrics['firing_rate_hz']:.1f} Hz "
-            f"({values[0]:.2f}) {self._deviation_arrow(deviations[0])}\n"
-            f"Adaptation: {metrics['adaptation_index']:.2f} "
-            f"({values[1]:.2f}) {self._deviation_arrow(deviations[1])}\n"
-            f"Half-width: {metrics['spike_halfwidth_ms']:.2f} ms "
-            f"({values[2]:.2f}) {self._deviation_arrow(deviations[2])}\n"
-            f"Input R: {metrics['input_resistance_mohm']:.1f} MΩ·cm² "
-            f"({values[3]:.2f}) {self._deviation_arrow(deviations[3])}\n"
-            f"Energy: {metrics['energy_cost_atp']:.2e} "
-            f"({values[4]:.2f}) {self._deviation_arrow(deviations[4])}\n"
-            f"P/T Ratio: {metrics['peak_threshold_ratio']:.2f} "
-            f"({values[5]:.2f}) {self._deviation_arrow(deviations[5])}\n"
-            f"────────────────────\n"
-            f"Avg Deviation: {avg_deviation:.1f}%"
-        )
-
-        if self._radar_text is None:
-            self._radar_text = ax.text(
-                1.35, 0.5, summary, transform=ax.transAxes, fontsize=9,
-                verticalalignment='center', color='#CDD6F4',
-                bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8),
-                fontfamily='monospace'
-            )
-        else:
-            self._radar_text.set_text(summary)
-
-        ax.set_ylim(0, 1)
-        self.cvs_fingerprint.draw_idle()
-
-    def _deviation_arrow(self, pct_dev: float) -> str:
-        """Return arrow indicator for deviation from reference."""
-        if abs(pct_dev) < 10:
-            return "●"  # Within 10% — close to reference
-        elif pct_dev > 0:
-            return "↑" if pct_dev < 50 else "↑↑"  # Elevated
-        else:
-            return "↓" if pct_dev > -50 else "↓↓"  # Reduced
+    # NOTE: Fingerprint/Radar chart now integrated into Passport tab (v13.2)
+    # The _build_tab_fingerprint and _update_fingerprint methods have been removed.
+    # Radar chart functionality is now handled by _build_tab_passport and _update_radar_chart.
 
     # ─────────────────────────────────────────────────────────────────
     #  13 — CSD (Current-Source Density)

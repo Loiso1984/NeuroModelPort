@@ -80,6 +80,56 @@ def _fsm_detect_spikes(V, t, threshold, baseline_threshold, refractory_ms):
 
     return peak_indices[:count]
 
+
+@njit(cache=True)
+def permutation_entropy_order3(x, delay=1):
+    """Fast Bandt-Pompe permutation entropy for order=3 (6 states).
+    
+    Zero-allocation implementation using manual scalar comparisons
+    instead of arrays/argsort for C-level speed inside Numba.
+    
+    Parameters
+    ----------
+    x : array-like
+        Time series data (e.g., voltage trace)
+    delay : int
+        Embedding delay (default 1)
+    
+    Returns
+    -------
+    float
+        Normalized permutation entropy in [0, 1]
+        (0 = completely deterministic, 1 = fully random)
+    """
+    n = len(x)
+    if n < 3 * delay:
+        return 0.0
+    counts = np.zeros(6, dtype=np.float64)
+    for i in range(n - 2 * delay):
+        a, b, c = x[i], x[i + delay], x[i + 2 * delay]
+        # Manual pattern matching (6 permutations of 3 elements)
+        # Normalized by log2(3!) = log2(6) to keep in [0, 1]
+        if a <= b <= c:
+            counts[0] += 1
+        elif a <= c < b:
+            counts[1] += 1
+        elif b < a <= c:
+            counts[2] += 1
+        elif b <= c < a:
+            counts[3] += 1
+        elif c < a <= b:
+            counts[4] += 1
+        elif c < b < a:
+            counts[5] += 1
+    
+    total = np.sum(counts)
+    if total == 0:
+        return 0.0
+    p = counts / total
+    p = p[p > 0]
+    return -np.sum(p * np.log2(p)) / np.log2(6.0)
+
+
 def detect_spikes(V: np.ndarray, t: np.ndarray,
                   threshold: float = -20.0,
                   prominence: float = 10.0,
@@ -1450,7 +1500,7 @@ def compute_biophysical_metrics(result, stats: dict | None = None) -> dict:
         metrics['firing_rate_hz'] = float(stats['f_inst'])
     elif stats and 'f_s' in stats and np.isfinite(stats['f_s']):
         metrics['firing_rate_hz'] = float(stats['f_s'])
-    metrics['firing_rate_norm'] = min(1.0, metrics['firing_rate_hz'] / 200.0)
+    metrics['firing_rate_norm'] = np.clip(metrics['firing_rate_hz'] / 150.0, 0, 1)
 
     # Adaptation Index
     if stats and 'spike_times' in stats and len(stats['spike_times']) >= 3:
@@ -1466,8 +1516,8 @@ def compute_biophysical_metrics(result, stats: dict | None = None) -> dict:
         hw = spike_halfwidth(result.v_soma, result.t)
         if np.isfinite(hw):
             metrics['spike_halfwidth_ms'] = float(hw)
-            # Normalize: 0-2 ms -> 0-1
-            metrics['halfwidth_norm'] = max(0.0, min(1.0, hw / 2.0))
+            # Normalize: 0-3 ms -> 0-1
+            metrics['halfwidth_norm'] = np.clip(hw / 3.0, 0, 1)
 
     # Input Resistance
     if hasattr(result, 'config') and hasattr(result.config, 'channels'):
@@ -1475,15 +1525,15 @@ def compute_biophysical_metrics(result, stats: dict | None = None) -> dict:
         if gL > 0:
             Rin = 1.0 / gL  # kOhm*cm²
             metrics['input_resistance_mohm'] = float(Rin)
-            # Normalize: 0-100 -> 0-1
-            metrics['resistance_norm'] = min(1.0, Rin / 100.0)
+            # Normalize: 0-200 -> 0-1
+            metrics['resistance_norm'] = np.clip(Rin / 200.0, 0, 1)
 
     # Energy Cost (ATP estimate)
     if hasattr(result, 'atp_estimate'):
         atp = result.atp_estimate
         metrics['energy_cost_atp'] = float(atp)
-        # Normalize: typical range 0 to 1e6 nmol/cm²
-        metrics['energy_norm'] = min(1.0, atp / 1e6)
+        # Logarithmic normalization: log10(1 to 1e6) -> 0-6 -> 0-1
+        metrics['energy_norm'] = np.clip(np.log10(max(atp, 1.0)) / 6.0, 0, 1)
 
     # Peak-to-Threshold Ratio
     if stats and 'peak_V' in stats and 'threshold_V' in stats:
@@ -2001,6 +2051,25 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
     if is_stochastic and n_spikes > 2:
         isi_entropy_bits = shannon_entropy_isi(spike_times, bins=20)
 
+    # ──────────────────────────────────────────────────────────────
+    #  Permutation Entropy & Metabolic Efficiency (v13.5)
+    # ──────────────────────────────────────────────────────────────
+    # Permutation Entropy: complexity of voltage trace (normalized, 0-1)
+    dt_val = float(t[1] - t[0]) if len(t) > 1 else 0.05
+    delay_pe = max(1, int(1.0 / max(1e-6, dt_val)))
+    pe_norm = permutation_entropy_order3(np.asarray(V, dtype=np.float64), delay=delay_pe)
+    
+    # Metabolic encoding efficiency: bits per nmol ATP (for stochastic sims)
+    bits_per_nmol_atp = np.nan
+    bits_per_nj = np.nan  # Converted metric for user display
+    if is_stochastic and n_spikes > 2 and result.atp_estimate > 0:
+        bits_per_nmol_atp = isi_entropy_bits / result.atp_estimate if np.isfinite(isi_entropy_bits) else np.nan
+        # Convert to bits/nJ: 1 nmol ATP ≈ 50 nJ (based on ~50 kJ/mol ATP hydrolysis)
+        # This is an approximation for user-facing metric
+        # Conversion: 50 kJ/mol = 50 kJ / 1e9 nmol = 50e9 nJ / 1e9 nmol = 50 nJ/nmol
+        ATP_ENERGY_NJ_PER_NMOL = 50.0  # Standard biological value (50 kJ/mol)
+        bits_per_nj = bits_per_nmol_atp / ATP_ENERGY_NJ_PER_NMOL if np.isfinite(bits_per_nmol_atp) else np.nan
+
     return {
         'n_spikes':            n_spikes,
         'spike_times':         spike_times,
@@ -2051,6 +2120,10 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         'ftle_log_divergence':  lyap["ftle_log_divergence"],
         'lyapunov_is_stochastic': lyap.get("lyapunov_is_stochastic", False),
         'lyapunov_transient_ms': lyap.get("lyapunov_transient_ms", np.nan),
+        # ── v13.5: Information Theory Metrics ──
+        'permutation_entropy_norm': pe_norm,
+        'bits_per_nmol_atp':   bits_per_nmol_atp,
+        'bits_per_nj':         bits_per_nj,
         'modulation_valid':    modulation["valid"],
         'modulation_source':   modulation["source"],
         'modulation_plv':      modulation["plv"],
@@ -2067,4 +2140,7 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         'modulation_phase_rate_hz': modulation["phase_rate_hz"],
         'modulation_low_statistical_power': modulation["low_statistical_power"],
         'isi_entropy_bits':    isi_entropy_bits,
+        # ── v13.2: Additional params for expert system ──
+        'f_res_hz':            np.nan,  # Will be populated if impedance analysis runs
+        'dfilter_attenuation': getattr(cfg.stim, 'dfilter_attenuation', 1.0),
     }
