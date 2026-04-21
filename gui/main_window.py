@@ -149,6 +149,9 @@ class MainWindow(QMainWindow):
             border: 1px solid #585B70; border-radius: 4px; padding: 2px 6px;
         }
         QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border-color: #89B4FA; }
+        QPushButton:focus, QComboBox:focus, QLineEdit:focus, QTextEdit:focus {
+            border: 2px solid #F9E2AF;
+        }
         QCheckBox { color: #CDD6F4; spacing: 6px; }
         QCheckBox::indicator { width: 16px; height: 16px; }
         QScrollBar:vertical {
@@ -194,6 +197,7 @@ class MainWindow(QMainWindow):
         # Generation counter to prevent race conditions with stale analytics
         self._analytics_generation = 0
         self._pending_analytics_generation = 0
+        self._progress_dialog = None
 
         # v12.7: Create oscilloscope first (will be set as central widget)
         self.oscilloscope = OscilloscopeWidget()
@@ -246,8 +250,18 @@ class MainWindow(QMainWindow):
     def _on_progress_updated(self, current: int, total: int, value: float):
         """Handle progress update signal from SimulationController."""
         pct = int(100 * current / max(1, total))
-        self._status(f"Progress: {pct}% ({current}/{total}) — Value: {value:.3g}")
+        self._status(f"Progress: {pct}% ({current}/{total}) - Value: {value:.3g}")
+        if total > 0:
+            max_total = max(1, total)
+            if self._progress_dialog is None:
+                self._progress_dialog = QProgressDialog("Simulation in progress...", "Cancel", 0, max_total, self)
+                self._progress_dialog.setWindowTitle("NeuroModelPort")
+                self._progress_dialog.setAutoClose(True)
+                self._progress_dialog.canceled.connect(self._request_cancel)
+            self._progress_dialog.setMaximum(max_total)
+            self._progress_dialog.setValue(min(current, max_total))
         QApplication.processEvents()
+
 
     # ─────────────────────────────────────────────────────────────────
     #  TOOLBARS (v12.7 Cockpit Paradigm)
@@ -258,6 +272,7 @@ class MainWindow(QMainWindow):
         self.main_toolbar = QToolBar("Main", self)
         self.main_toolbar.setObjectName("main_toolbar")  # v12.8 FIX: Required for saveState
         self.main_toolbar.setMovable(False)
+        self.main_toolbar.setFloatable(False)
         self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
         # Run button
@@ -360,9 +375,11 @@ class MainWindow(QMainWindow):
         self.main_toolbar.addWidget(self.btn_more_actions)
 
         # Settings Toolbar (Preset, Lang, Mode)
+        self.addToolBarBreak(Qt.TopToolBarArea)
         self.settings_toolbar = QToolBar("Settings", self)
         self.settings_toolbar.setObjectName("settings_toolbar")  # v12.8 FIX: Required for saveState
         self.settings_toolbar.setMovable(False)
+        self.settings_toolbar.setFloatable(False)
         self.addToolBar(Qt.TopToolBarArea, self.settings_toolbar)
 
         # Preset selector
@@ -467,6 +484,7 @@ class MainWindow(QMainWindow):
         self._build_live_deck_panel()
         self._dock_live.setWidget(self._live_deck_frame)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock_live)
+        self.tabifyDockWidget(self._dock_params, self._dock_live)
 
         # ── Dock 3: Analytics (Bottom) ─────────────────────────────
         self._dock_analytics = QDockWidget("Analytics", self)
@@ -1158,8 +1176,10 @@ class MainWindow(QMainWindow):
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_params)
             self._dock_params.setVisible(True)
         if hasattr(self, '_dock_live'):
-            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock_live)
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_live)
             self._dock_live.setVisible(True)
+        if hasattr(self, '_dock_params') and hasattr(self, '_dock_live'):
+            self.tabifyDockWidget(self._dock_params, self._dock_live)
         if hasattr(self, '_dock_analytics'):
             self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._dock_analytics)
             self._dock_analytics.setVisible(True)
@@ -2197,6 +2217,9 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setEnabled(False)
 
     def _on_sim_error(self, msg: str):
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+            self._progress_dialog = None
         self._lock_ui(False)
         QMessageBox.critical(self, "Simulation Error", msg)
         self._status("Error.")
@@ -2478,6 +2501,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Simulation Error", str(e))
             self._status("Error — check parameters.")
         finally:
+            if self._progress_dialog is not None:
+                self._progress_dialog.close()
+                self._progress_dialog = None
             self._lock_ui(False)
             self._is_live_run = False  # Reset flag after any simulation completion
 

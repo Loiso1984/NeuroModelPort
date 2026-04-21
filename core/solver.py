@@ -11,22 +11,120 @@ from core.morphology import MorphologyBuilder
 from core.channels import ChannelRegistry, derive_dynamic_atp_rest_ions
 from core.jacobian import analytic_sparse_jacobian, build_jacobian_sparsity, make_analytic_jacobian
 from core.rhs import (
-    rhs_multicompartment, _get_syn_reversal, F_CONST, R_GAS,
+    rhs_multicompartment, _get_syn_reversal, nmda_mg_block, F_CONST, R_GAS,
     ATP_ISCHEMIC_THRESHOLD, NA_I_MIN_M_M, NA_I_MAX_M_M, K_O_MIN_M_M, K_O_MAX_M_M,
     compute_na_k_pump_current, get_pump_current_array, get_ghk_current_array,
+    get_stim_current, get_event_driven_conductance,
 )
+from core.dual_stimulation import distributed_stimulus_current_for_comp
 from core.dendritic_filter import get_ac_attenuation
 from core.physics_params import create_physics_params, build_state_offsets
 from core.kinetics import z_inf_SK
 from core.validation import estimate_simulation_runtime, validate_simulation_config
-from core.rhs import get_stim_current, get_event_driven_conductance
-
 
 logger = logging.getLogger(__name__)
 
 # LLE subspace mode mapping for native solver (Numba-compatible ints)
 # 0=v_only, 1=v_and_gates, 2=full_state, 3=custom
 _LLE_MODE_MAP = {"v_only": 0, "v_and_gates": 1, "full_state": 2, "custom": 3}
+
+
+def _compute_soma_stimulus_trace(t_arr: np.ndarray, y_mat: np.ndarray, physics_params) -> np.ndarray:
+    """Reconstruct the exact effective soma stimulus for SciPy outputs."""
+    out = np.zeros(len(t_arr), dtype=float)
+    if len(t_arr) == 0:
+        return out
+
+    offsets = physics_params.state_offsets
+    off_v = int(offsets.off_v)
+    off_ifilt_primary = int(offsets.off_ifilt_primary)
+    off_ifilt_secondary = int(offsets.off_ifilt_secondary)
+    n_comp = int(physics_params.n_comp)
+
+    is_cond_primary = int(physics_params.stype) >= 4
+    is_cond_secondary = bool(physics_params.dual_stim_enabled == 1 and int(physics_params.stype_2) >= 4)
+    e_syn_primary = _get_syn_reversal(
+        int(physics_params.stype),
+        float(physics_params.e_rev_syn_primary),
+        float(physics_params.e_rev_syn_secondary),
+    ) if is_cond_primary else 0.0
+    e_syn_secondary = _get_syn_reversal(
+        int(physics_params.stype_2),
+        float(physics_params.e_rev_syn_primary),
+        float(physics_params.e_rev_syn_secondary),
+    ) if is_cond_secondary else 0.0
+
+    use_dfilter_primary_eff = 1 if (
+        int(physics_params.stim_mode) == 2
+        and int(physics_params.use_dfilter_primary) == 1
+        and float(physics_params.dfilter_tau_ms) > 1e-12
+    ) else 0
+    use_dfilter_secondary_eff = 1 if (
+        int(physics_params.dual_stim_enabled) == 1
+        and int(physics_params.stim_mode_2) == 2
+        and int(physics_params.use_dfilter_secondary) == 1
+        and float(physics_params.dfilter_tau_ms_2) > 1e-12
+    ) else 0
+
+    for k, t_val in enumerate(t_arr):
+        vi = float(y_mat[off_v, k])
+        if int(physics_params.n_events) > 0 and is_cond_primary:
+            base_primary = get_event_driven_conductance(
+                float(t_val), int(physics_params.stype), float(physics_params.iext),
+                physics_params.event_times_arr, int(physics_params.n_events), float(physics_params.atau),
+            )
+        else:
+            base_primary = get_stim_current(
+                float(t_val), int(physics_params.stype), float(physics_params.iext),
+                float(physics_params.t0), float(physics_params.td), float(physics_params.atau),
+                float(physics_params.zap_f0_hz), float(physics_params.zap_f1_hz), float(physics_params.zap_rise_ms),
+                physics_params.zap_win_t, physics_params.zap_win_g, int(physics_params.zap_win_size),
+            )
+
+        i_filtered_primary = float(y_mat[off_ifilt_primary, k]) if off_ifilt_primary >= 0 else 0.0
+        stim_primary = distributed_stimulus_current_for_comp(
+            0, n_comp, float(base_primary), int(physics_params.stim_comp), int(physics_params.stim_mode),
+            use_dfilter_primary_eff, float(physics_params.dfilter_attenuation),
+            float(physics_params.dfilter_tau_ms), i_filtered_primary,
+        )
+        if is_cond_primary:
+            g_syn = float(stim_primary)
+            if int(physics_params.stype) == 5:
+                g_syn *= nmda_mg_block(vi, float(physics_params.mg_ext), float(physics_params.nmda_mg_block_mM))
+            stim_eff = -g_syn * (vi - e_syn_primary)
+        else:
+            stim_eff = float(stim_primary)
+
+        if int(physics_params.dual_stim_enabled) == 1:
+            if int(physics_params.n_events_2) > 0 and is_cond_secondary:
+                base_secondary = get_event_driven_conductance(
+                    float(t_val), int(physics_params.stype_2), float(physics_params.iext_2),
+                    physics_params.event_times_arr_2, int(physics_params.n_events_2), float(physics_params.atau_2),
+                )
+            else:
+                base_secondary = get_stim_current(
+                    float(t_val), int(physics_params.stype_2), float(physics_params.iext_2),
+                    float(physics_params.t0_2), float(physics_params.td_2), float(physics_params.atau_2),
+                    float(physics_params.zap_f0_hz_2), float(physics_params.zap_f1_hz_2), float(physics_params.zap_rise_ms_2),
+                    physics_params.zap_win_t_2, physics_params.zap_win_g_2, int(physics_params.zap_win_size_2),
+                )
+
+            i_filtered_secondary = float(y_mat[off_ifilt_secondary, k]) if off_ifilt_secondary >= 0 else 0.0
+            stim_secondary = distributed_stimulus_current_for_comp(
+                0, n_comp, float(base_secondary), int(physics_params.stim_comp_2), int(physics_params.stim_mode_2),
+                use_dfilter_secondary_eff, float(physics_params.dfilter_attenuation_2),
+                float(physics_params.dfilter_tau_ms_2), i_filtered_secondary,
+            )
+            if is_cond_secondary:
+                g2 = float(stim_secondary)
+                if int(physics_params.stype_2) == 5:
+                    g2 *= nmda_mg_block(vi, float(physics_params.mg_ext), float(physics_params.nmda_mg_block_mM))
+                stim_eff -= g2 * (vi - e_syn_secondary)
+            else:
+                stim_eff += float(stim_secondary)
+
+        out[k] = stim_eff
+    return out
 
 
 def precompute_stimulus_arrays(n_steps, dt, physics, is_cond_primary, is_cond_secondary):
@@ -138,6 +236,7 @@ def _resolve_stochastic_seed(cfg, noise_sigma: float, stoch_gating: bool) -> int
         seeded_rng = get_rng()
         if getattr(seeded_rng, "seed", None) is not None:
             return int(seeded_rng.seed)
+        return int(seeded_rng.next_seed())
     except Exception:
         pass
     return _stable_seed_from_values(
@@ -284,6 +383,8 @@ class SimulationResult:
         
         # v12.2: Total stimulus current at soma (precomputed for fast analysis)
         self.i_stim_total: np.ndarray | None = None
+        self.use_ghk = bool(config.calcium.dynamic_Ca and (config.channels.enable_ICa or config.channels.enable_ITCa))
+        self.currents_ghk: dict[str, np.ndarray] = {}
 
     def _finalize_current_shapes(self):
         """Collapse single-compartment current matrices to 1-D time series."""
@@ -855,6 +956,7 @@ class NeuronSolver:
         res = SimulationResult(sol.t, sol.y, n_comp, cfg)
         self._post_process_physics(res, morph)
         res.morph = morph        # store for current-balance analysis
+        res.i_stim_total = _compute_soma_stimulus_trace(sol.t, sol.y, physics_params)
         return res
 
     # ─────────────────────────────────────────────────────────────────
@@ -938,6 +1040,7 @@ class NeuronSolver:
                     ca_flat = ca_i.ravel()
                     ghk_arr = get_ghk_current_array(v_flat, ca_flat, cfg.calcium.Ca_ext, 2.0, t_kelvin)
                     res.currents['ICa'] = g_ca * _RT_over_z2F2 * (s ** 2) * u * ghk_arr.reshape(v.shape)
+                    res.currents_ghk['ICa'] = res.currents['ICa']
                 else:
                     e_ca = 120.0
                     res.currents['ICa'] = g_ca * (s ** 2) * u * (v - e_ca)
@@ -969,6 +1072,7 @@ class NeuronSolver:
                     ca_flat = ca_i.ravel()
                     ghk_arr = get_ghk_current_array(v_flat, ca_flat, cfg.calcium.Ca_ext, 2.0, t_kelvin)
                     res.currents['ITCa'] = g_tca * _RT_over_z2F2 * (p_t ** 2) * q_t * ghk_arr.reshape(v.shape)
+                    res.currents_ghk['ITCa'] = res.currents['ITCa']
                 else:
                     if not cfg.channels.enable_ICa:
                         e_ca = 120.0

@@ -660,7 +660,6 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     A large balance error indicates solver issues or dt too coarse.
     Returns balance signal for the soma compartment.
     """
-    from core.rhs import get_stim_current
     from scipy.sparse import csr_matrix
 
     t   = result.t
@@ -693,6 +692,13 @@ def compute_current_balance(result, morph: dict) -> np.ndarray:
     # The solver already computed and returned the exact total stimulus current
     if hasattr(result, 'i_stim_total') and result.i_stim_total is not None:
         I_stim = np.asarray(result.i_stim_total, dtype=float)
+        if I_stim.shape != V.shape:
+            if I_stim.ndim == 1 and I_stim.size == V.size:
+                I_stim = I_stim.reshape(V.shape)
+            else:
+                raise ValueError(
+                    f"i_stim_total shape {I_stim.shape} does not match voltage shape {V.shape}"
+                )
     else:
         # Fallback for old data without i_stim_total field
         I_stim = np.zeros_like(V)

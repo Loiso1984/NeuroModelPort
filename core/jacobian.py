@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import threading
+
 import numpy as np
 from scipy.sparse import csr_matrix, lil_matrix
 
@@ -51,21 +54,24 @@ from .physics_params import (
 )
 
 _LEGACY_JACOBIAN_CACHE: dict[tuple, object] = {}
+_LEGACY_JACOBIAN_CACHE_LOCK = threading.RLock()
 _MAX_JAC_CACHE = 8
 
 
 def _evict_oldest_if_needed() -> None:
-    if len(_LEGACY_JACOBIAN_CACHE) >= _MAX_JAC_CACHE:
-        oldest_key = next(iter(_LEGACY_JACOBIAN_CACHE))
-        del _LEGACY_JACOBIAN_CACHE[oldest_key]
+    with _LEGACY_JACOBIAN_CACHE_LOCK:
+        if len(_LEGACY_JACOBIAN_CACHE) >= _MAX_JAC_CACHE:
+            oldest_key = next(iter(_LEGACY_JACOBIAN_CACHE))
+            del _LEGACY_JACOBIAN_CACHE[oldest_key]
 
 
 def _sparse_structure_signature(l_indices: np.ndarray, l_indptr: np.ndarray) -> tuple:
-    """Hashable signature for cache keying by sparse topology content."""
-    return (
-        tuple(np.asarray(l_indices, dtype=np.int64).tolist()),
-        tuple(np.asarray(l_indptr, dtype=np.int64).tolist()),
-    )
+    """Hashable sparse-topology signature without tupleizing large arrays."""
+    idx = np.ascontiguousarray(l_indices, dtype=np.int64)
+    ptr = np.ascontiguousarray(l_indptr, dtype=np.int64)
+    idx_hash = hashlib.blake2b(idx.view(np.uint8), digest_size=32).hexdigest()
+    ptr_hash = hashlib.blake2b(ptr.view(np.uint8), digest_size=32).hexdigest()
+    return (idx.shape, idx_hash, ptr.shape, ptr_hash)
 
 
 def _state_slices(
@@ -876,7 +882,8 @@ def _analytic_sparse_jacobian_impl(*args, **kwargs):
         n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, dyn_atp, en_itca, en_im, en_nap, en_nar,
         use_dfp, use_dfs, _sparse_structure_signature(rhs["l_indices"], rhs["l_indptr"]),
     )
-    fn = _LEGACY_JACOBIAN_CACHE.get(cache_key)
+    with _LEGACY_JACOBIAN_CACHE_LOCK:
+        fn = _LEGACY_JACOBIAN_CACHE.get(cache_key)
     if fn is None:
         sp = build_jacobian_sparsity(
             n_comp, en_ih, en_ica, en_ia, en_sk, dyn_ca, dyn_atp,
@@ -884,12 +891,17 @@ def _analytic_sparse_jacobian_impl(*args, **kwargs):
             use_dfp, use_dfs,
             en_itca=en_itca, en_im=en_im, en_nap=en_nap, en_nar=en_nar,
         )
-        fn = make_analytic_jacobian(sp)
-        _evict_oldest_if_needed()
-        _LEGACY_JACOBIAN_CACHE[cache_key] = fn
+        built_fn = make_analytic_jacobian(sp)
+        with _LEGACY_JACOBIAN_CACHE_LOCK:
+            fn = _LEGACY_JACOBIAN_CACHE.get(cache_key)
+            if fn is None:
+                _evict_oldest_if_needed()
+                _LEGACY_JACOBIAN_CACHE[cache_key] = built_fn
+                fn = built_fn
     return fn(*args)
 
 
 def clear_legacy_jacobian_cache() -> None:
     """Clear cached legacy Jacobian callables (test/debug helper)."""
-    _LEGACY_JACOBIAN_CACHE.clear()
+    with _LEGACY_JACOBIAN_CACHE_LOCK:
+        _LEGACY_JACOBIAN_CACHE.clear()

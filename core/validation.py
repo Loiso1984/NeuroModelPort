@@ -90,6 +90,10 @@ def validate_simulation_config(cfg: FullModelConfig) -> List[str]:
             raise SimulationParameterError(f"Ca_rest must be > 0, got {cfg.calcium.Ca_rest}.")
         if cfg.calcium.tau_Ca <= 0.0:
             raise SimulationParameterError(f"tau_Ca must be > 0, got {cfg.calcium.tau_Ca}.")
+        if cfg.calcium.tau_Ca < 0.1:
+            warnings.append(
+                f"tau_Ca={cfg.calcium.tau_Ca} ms is extremely small; calcium pump dynamics may become stiff."
+            )
         if cfg.calcium.B_Ca <= 0.0:
             raise SimulationParameterError(f"B_Ca must be > 0, got {cfg.calcium.B_Ca}.")
         if cfg.calcium.Ca_ext <= cfg.calcium.Ca_rest:

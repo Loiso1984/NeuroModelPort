@@ -103,6 +103,10 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POI
     if n == 0 or n <= max_points or max_points <= 0:
         return t, y
 
+    finite_mask = np.isfinite(y)
+    if not np.any(finite_mask):
+        return t, y
+
     # Each chunk contributes 2 points (min and max)
     n_chunks = max_points // 2
     chunk_size = max(1, n // n_chunks)
@@ -114,23 +118,35 @@ def _downsample_xy(t: np.ndarray, y: np.ndarray, max_points: int = _MAX_PLOT_POI
         if is_2d:
             # 2D: (n_comp, n_time) - find global min/max across ALL compartments
             chunk = y[:, i:end]  # Shape: (n_comp, chunk_time)
+            chunk_finite = finite_mask[:, i:end]
+            if not np.any(chunk_finite):
+                continue
+            chunk_min = np.where(chunk_finite, chunk, np.inf)
+            chunk_max = np.where(chunk_finite, chunk, -np.inf)
             # Find where global min and max occur (across all compartments)
-            flat_min_idx = int(np.argmin(chunk))
-            flat_max_idx = int(np.argmax(chunk))
+            flat_min_idx = int(np.argmin(chunk_min))
+            flat_max_idx = int(np.argmax(chunk_max))
             # Convert flat index to (compartment, time) - safe for any memory order
-            min_time_idx = np.unravel_index(flat_min_idx, chunk.shape)[1]
-            max_time_idx = np.unravel_index(flat_max_idx, chunk.shape)[1]
+            min_time_idx = np.unravel_index(flat_min_idx, chunk_min.shape)[1]
+            max_time_idx = np.unravel_index(flat_max_idx, chunk_max.shape)[1]
             min_idx = i + min_time_idx
             max_idx = i + max_time_idx
         else:
             # 1D: original logic
             chunk = y[i:end]
-            min_idx = i + int(np.argmin(chunk))
-            max_idx = i + int(np.argmax(chunk))
+            chunk_finite = finite_mask[i:end]
+            if not np.any(chunk_finite):
+                continue
+            chunk_min = np.where(chunk_finite, chunk, np.inf)
+            chunk_max = np.where(chunk_finite, chunk, -np.inf)
+            min_idx = i + int(np.argmin(chunk_min))
+            max_idx = i + int(np.argmax(chunk_max))
         indices.append(min_idx)
         indices.append(max_idx)
 
     # Sort indices to maintain temporal order
+    if not indices:
+        return t, y
     indices = np.unique(np.array(indices, dtype=np.int64))
 
     # Always include the last point for trace continuity

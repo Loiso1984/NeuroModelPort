@@ -5283,8 +5283,9 @@ class AnalyticsWidget(QTabWidget):
             else:
                 self._csd_time_slider.setValue(current + 2)  # +2% per frame
 
-        self._csd_play_timer = QTimer(self)
-        self._csd_play_timer.timeout.connect(advance_frame)
+        if self._csd_play_timer is None:
+            self._csd_play_timer = QTimer(self)
+            self._csd_play_timer.timeout.connect(advance_frame)
         self._csd_play_timer.start(100)  # 100ms = 10 fps
 
     def _on_csd_export_clicked(self):

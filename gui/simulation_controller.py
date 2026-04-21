@@ -164,16 +164,18 @@ class SimulationController(QObject):
         self.simulation_started.emit()
         
         def run_simulation():
+            from copy import deepcopy
             from core.solver import NeuronSolver
             from core.morphology import MorphologyBuilder
             from core.analysis import full_analysis
             
-            config.stim.stoch_gating = True
-            solver = NeuronSolver(config)
+            cfg = deepcopy(config)
+            cfg.stim.stoch_gating = True
+            solver = NeuronSolver(cfg)
             result = solver.run_single()
             
             # Async Analytical Pipeline (v11.8)
-            morph = MorphologyBuilder.build(config)
+            morph = MorphologyBuilder.build(cfg)
             solver._post_process_physics(result, morph)
             stats = full_analysis(result, compute_lyapunov=compute_lyapunov)
             

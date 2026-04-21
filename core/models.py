@@ -1,5 +1,7 @@
-﻿from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal, List, Optional, TYPE_CHECKING, Any
+
+CA_EXT_MIN_M_M = 1e-9
 
 if TYPE_CHECKING:
     from .dual_stimulation import DualStimulationConfig
@@ -102,8 +104,10 @@ class ChannelParams(BaseModel):
 
 class CalciumParams(BaseModel):
     """Intracellular calcium dynamics."""
+    model_config = ConfigDict(validate_assignment=True)
+
     dynamic_Ca: bool  = Field(default=False, description="Track [CaÂ˛âş]áµ˘ with Nernst correction")
-    Ca_ext:     float = Field(default=2.0,   description="Extracellular [CaÂ˛âş] (mM)")
+    Ca_ext:     float = Field(default=2.0, ge=CA_EXT_MIN_M_M, description="Extracellular [CaÂ˛âş] (mM)")
     Ca_rest:    float = Field(default=50e-6, description="Resting [CaÂ˛âş]áµ˘ (mM)")
     tau_Ca:     float = Field(default=200.0, description="CaÂ˛âş pump time constant (ms)")
     B_Ca:       float = Field(default=0.001, description="Current-to-concentration conversion")

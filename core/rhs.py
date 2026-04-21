@@ -17,11 +17,13 @@ R_GAS = 8.314
 TEMP_ZERO = 273.15
 CA_I_MIN_M_M = 1e-9
 CA_I_MAX_M_M = 10.0
+CA_EXT_MIN_M_M = 1e-9
 NA_I_MIN_M_M = 1.0
 NA_I_MAX_M_M = 80.0
 K_O_MIN_M_M = 1.0
 K_O_MAX_M_M = 30.0
 CA_MICRODOMAIN_SCALAR = 10.0
+MAX_EVENTS_TO_PROCESS = 10000
 
 # ATP metabolism constants
 ATP_MIN_M_M = 0.0
@@ -72,7 +74,8 @@ MG_BLOCK_VOLTAGE_FACTOR = -0.062  # mV^-1, voltage sensitivity
 def nernst_ca_ion(ca_i, ca_ext, t_kelvin):
     """Đ”Đ¸Đ˝Đ°ĐĽĐ¸Ń‡ĐµŃĐşĐ¸Đą ĐżĐľŃ‚ĐµĐ˝Ń†Đ¸Đ°Đ» ĐťĐµŃ€Đ˝ŃŃ‚Đ° Đ´Đ»ŃŹ ĐšĐ°Đ»ŃŚŃ†Đ¸ŃŹ (z=2). | Dynamic Nernst potential for Calcium (z=2)."""
     ca_i_safe = min(max(ca_i, CA_I_MIN_M_M), CA_I_MAX_M_M)
-    return (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(ca_ext / ca_i_safe) * 1000.0
+    ca_ext_safe = max(ca_ext, CA_EXT_MIN_M_M)
+    return (R_GAS * t_kelvin / (2.0 * F_CONST)) * np.log(ca_ext_safe / ca_i_safe) * 1000.0
 
 
 @njit(float64(float64, float64, float64, float64), cache=True)
@@ -80,7 +83,10 @@ def nernst_mono_ion(c_in, c_out, z_val, t_kelvin):
     """Generic Nernst helper for monovalent ions when z_val=1 or -1."""
     c_in_safe = max(c_in, 1e-9)
     c_out_safe = max(c_out, 1e-9)
-    return (R_GAS * t_kelvin / (z_val * F_CONST)) * np.log(c_out_safe / c_in_safe) * 1000.0
+    z_safe = z_val
+    if abs(z_safe) < 1e-12:
+        return 0.0
+    return (R_GAS * t_kelvin / (z_safe * F_CONST)) * np.log(c_out_safe / c_in_safe) * 1000.0
 
 
 @njit(float64(float64, float64, float64), cache=True)
@@ -476,6 +482,8 @@ def ghk_current(v_mV, ci_mM, co_mM, z, T_kelvin):
     
     # Convert mV to V for dimensional consistency
     V = v_mV * 1e-3
+    ci_safe = max(ci_mM, CA_I_MIN_M_M)
+    co_safe = max(co_mM, CA_EXT_MIN_M_M)
     
     # Precompute common terms
     RT = R_GAS * T_kelvin
@@ -489,14 +497,14 @@ def ghk_current(v_mV, ci_mM, co_mM, z, T_kelvin):
         # Correct physical limit for GHK as V -> 0: I = P * z * F * (ci - co)
         # Units: [P in cm/s] * [z in C/mol equiv] * [F in C/mol] * [conc in mM = mol/L]
         # = cm/s * C/mol * mol/L * C/mol - with appropriate 1e-3 scaling for µA/cm²
-        return zF * (ci_mM - co_mM) * 1e-3  # µA/cm² scaling
+        return zF * (ci_safe - co_safe) * 1e-3  # µA/cm² scaling
     
     # Full GHK equation
     exp_term = np.exp(-zF_V_RT)
     denominator = 1.0 - exp_term
     
     # Numerator: ci - co * exp(-zFV/RT)
-    numerator = ci_mM - co_mM * exp_term
+    numerator = ci_safe - co_safe * exp_term
     
     # GHK current (permeability factor P applied externally for unit consistency)
     # Units: [P in cm/s] * [z^2] * [F^2/RT in C^2/(J·mol) = C/V·mol] * [V in V] * [concentration in mM]
@@ -616,6 +624,7 @@ def compute_ionic_currents_scalar(
         if i_tca < 0.0:
             i_ca_influx += -i_tca
 
+
     if en_sk:
         i_ion += gsk * sk_gate * (vi - ek)
 
@@ -689,21 +698,29 @@ def compute_ionic_conductances_scalar(
     
     if en_ica:
         g_ca = gca * (si ** 2) * ui
-        g_tot += g_ca
         if use_ghk:
-            # For GHK: current is NOT ohmic, so we estimate effective E
-            # GHK current = P * GHK_factor; approximate g_eff = I/(V-E)
             i_ca = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
-            # Approximate reversal contribution: if I=0 at E=ECa, use ECa
-            e_eff_i += g_ca * eca_i  # Best Ohmic approximation for Hines
+            # 1e-3 mV central step avoids cancellation while staying local for GHK linearization.
+            eps_v = 1e-3
+            i_ca_p = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(vi + eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
+            i_ca_m = gca * _RT_over_z2F2 * (si ** 2) * ui * ghk_current(vi - eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
+            g_ca_slope = (i_ca_p - i_ca_m) / (2.0 * eps_v)
+            if not np.isfinite(g_ca_slope) or g_ca_slope <= 0.0:
+                g_ca_slope = g_ca
+            g_tot += g_ca_slope
+            # Linearized outward current: I(Vnew) ~= I(Vn) + slope*(Vnew - Vn).
+            # RHS contribution is -I(Vn) + slope*Vn, reducing to g*E for Ohmic channels.
+            e_eff_i += -i_ca + g_ca_slope * vi
             if i_ca < 0.0:
                 i_ca_influx += -i_ca
         else:
-            e_eff_i += g_ca * eca_i
+            g_tot += g_ca
+            e_eff_i += g_ca * eca_i  # Ohmic: I = g*(V - E), so contribution is g*E
             i_ca = g_ca * (vi - eca_i)
             if i_ca < 0.0:
                 i_ca_influx += -i_ca
     
+
     if en_ia:
         g_ia = ga * ai * bi
         g_tot += g_ia
@@ -711,14 +728,22 @@ def compute_ionic_conductances_scalar(
     
     if en_itca:
         g_tca = gtca * (pi ** 2) * qi
-        g_tot += g_tca
         if use_ghk:
             i_tca = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(vi, ca_i_val, ca_ext, 2.0, t_kelvin)
-            e_eff_i += g_tca * eca_i
+            # 1e-3 mV central step avoids cancellation while staying local for GHK linearization.
+            eps_v = 1e-3
+            i_tca_p = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(vi + eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
+            i_tca_m = gtca * _RT_over_z2F2 * (pi ** 2) * qi * ghk_current(vi - eps_v, ca_i_val, ca_ext, 2.0, t_kelvin)
+            g_tca_slope = (i_tca_p - i_tca_m) / (2.0 * eps_v)
+            if not np.isfinite(g_tca_slope) or g_tca_slope <= 0.0:
+                g_tca_slope = g_tca
+            g_tot += g_tca_slope
+            e_eff_i += -i_tca + g_tca_slope * vi
             if i_tca < 0.0:
                 i_ca_influx += -i_tca
         else:
-            e_eff_i += g_tca * eca_i
+            g_tot += g_tca
+            e_eff_i += g_tca * eca_i  # Ohmic
             i_tca = g_tca * (vi - eca_i)
             if i_tca < 0.0:
                 i_ca_influx += -i_tca
@@ -809,7 +834,10 @@ def get_event_driven_conductance(t: float64, stype: int32, iext: float64,
     window = 5.0 * tau_d
     # OPTIMIZATION: Early termination for sorted event times (common case)
     # Events are typically sorted chronologically; we can break early when dt < 0
-    for k in range(n_events):
+    event_limit = n_events
+    if event_limit > MAX_EVENTS_TO_PROCESS:
+        event_limit = MAX_EVENTS_TO_PROCESS
+    for k in range(event_limit):
         event_time = event_times[k]
         dt_event = t - event_time
         if dt_event < 0.0:

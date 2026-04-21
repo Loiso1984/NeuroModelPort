@@ -162,3 +162,47 @@ def _run_as_script() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_run_as_script())
+
+
+def test_space_saver_tabifies_parameters_and_live_controls():
+    app = _app()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            w = MainWindow()
+            w.show()
+            app.processEvents()
+            try:
+                assert w.tabifiedDockWidgets(w._dock_params)
+                assert w._dock_live in w.tabifiedDockWidgets(w._dock_params)
+            finally:
+                w.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_progress_dialog_lifecycle(monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: None)
+    app = _app()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            w = MainWindow()
+            w.show()
+            app.processEvents()
+            try:
+                w._on_progress_updated(1, 1, 0.0)
+                assert w._progress_dialog is not None
+                w._progress_dialog.close()
+                w._progress_dialog = None
+                w._on_progress_updated(1, 5, 0.0)
+                assert w._progress_dialog is not None
+                w._on_sim_error("synthetic")
+                assert w._progress_dialog is None
+            finally:
+                w.close()
+        finally:
+            os.chdir(old_cwd)

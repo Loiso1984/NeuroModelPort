@@ -46,6 +46,26 @@ def set_numba_random_seed(seed: int) -> None:
     np.random.seed(seed)
 
 
+@njit(cache=True)
+def _reflect_unit_interval(value: float) -> float:
+    """Reflect a stochastic gate value into [0, 1] without absorbing variance."""
+    if not np.isfinite(value):
+        return np.nan
+    reflected = value
+    for _ in range(64):
+        if reflected >= 0.0 and reflected <= 1.0:
+            return reflected
+        if reflected < 0.0:
+            reflected = -reflected
+        if reflected > 1.0:
+            reflected = 2.0 - reflected
+    if reflected < 0.0:
+        return 0.0
+    if reflected > 1.0:
+        return 1.0
+    return reflected
+
+
 def make_lle_subspace_mask(
     n_comp: int,
     state_offsets,
@@ -97,6 +117,8 @@ def make_lle_subspace_mask(
     ... )
     """
     n_state = state_offsets.n_state
+    if n_comp <= 0:
+        raise ValueError("n_comp must be positive for LLE subspace mask")
     mask = np.zeros(n_state, dtype=np.bool_)
 
     if include_v:
@@ -104,6 +126,8 @@ def make_lle_subspace_mask(
 
     # Helper to set gate range
     def _set_gate_range(off_start, n_comp_val):
+        if off_start < 0 or off_start + n_comp_val > n_state:
+            raise ValueError("LLE subspace offset is outside state vector bounds")
         mask[off_start:off_start + n_comp_val] = True
 
     # Determine which gates to include
@@ -145,8 +169,12 @@ def make_lle_subspace_mask(
         _set_gate_range(state_offsets.off_k_o, n_comp)
     if include_ifilt:
         if state_offsets.off_ifilt_primary != -1:
+            if state_offsets.off_ifilt_primary >= n_state:
+                raise ValueError("Primary dendritic-filter offset is outside state vector bounds")
             mask[state_offsets.off_ifilt_primary] = True
         if state_offsets.off_ifilt_secondary != -1:
+            if state_offsets.off_ifilt_secondary >= n_state:
+                raise ValueError("Secondary dendritic-filter offset is outside state vector bounds")
             mask[state_offsets.off_ifilt_secondary] = True
 
     return mask
@@ -213,11 +241,6 @@ def make_lle_weights(mask: np.ndarray, n_comp: int, state_offsets) -> np.ndarray
     weights[~mask] = 0.0
 
     return weights
-
-
-# NOTE: _compute_ionic_currents_vectorized REMOVED v11.6
-# Replaced by unified compute_ionic_conductances_scalar in rhs.py
-# Native loop now uses scalar indexing directly for zero-allocation performance
 
 
 @njit(cache=True)
@@ -349,7 +372,9 @@ def run_native_loop(
     # ── Output sizing ──
     n_steps = int(t_sim / dt) + 1
     every   = max(1, int(dt_eval / dt + 0.5))
-    n_out   = n_steps // every + 1
+    # +3 leaves room for initial, sampled steps, and an explicit final sample
+    # when dt_eval is larger than the simulated interval.
+    n_out   = n_steps // every + 3
 
     t_out = np.empty(n_out, dtype=np.float64)
     y_out = np.empty((n_state, n_out), dtype=np.float64)  # (state, time) like solve_ivp.y
@@ -375,6 +400,7 @@ def run_native_loop(
     # Records the actual effective stimulus applied to soma (compartment 0)
     i_stim_out = np.zeros(n_out, dtype=np.float64)
     i_stim_soma_accum = 0.0  # Accumulates effective stimulus during physics loop
+    i_stim_soma_count = 0
 
     # ── Hines system buffers (pre-allocated, reused every step per trajectory) ──
     d     = np.empty(n_comp, dtype=np.float64)
@@ -415,22 +441,17 @@ def run_native_loop(
     t = 0.0
     diverged = 0  # Initialize divergence flag
 
-    for step in range(n_steps):
-        # ── Record output BEFORE physics (main trajectory only) ──
-        # v12.8 FIX: Record accumulated stimulus from PREVIOUS step
-        # This fixes the 1-step lag bug
-        if step % every == 0 and out_idx < n_out:
-            t_out[out_idx] = t
-            for s in range(n_state):
-                y_out[s, out_idx] = y[s]
-            i_stim_out[out_idx] = i_stim_soma_accum  # From previous step (or 0.0 for step 0)
-            if calc_lle:
-                lle_out[out_idx] = current_lle
-            out_idx += 1
-        
-        # Reset accumulator AFTER recording
-        i_stim_soma_accum = 0.0
+    # ── Record initial condition (t=0) ──
+    # v12.8 FIX: Initial state recorded before any physics
+    t_out[out_idx] = t
+    for s in range(n_state):
+        y_out[s, out_idx] = y[s]
+    i_stim_out[out_idx] = 0.0  # No stimulus before simulation starts
+    if calc_lle:
+        lle_out[out_idx] = np.nan
+    out_idx += 1
 
+    for step in range(n_steps):
         # ─────────────────────────────────────────────────────────────
         # 0. Get precomputed stimulus values (Optimization v11.8)
         # Precomputed arrays eliminate per-step function call overhead.
@@ -532,49 +553,15 @@ def run_native_loop(
                         noise_n_arr[i] = np.sqrt(var_n) * phi_k[i] * np.random.randn() * sqrt_dt
 
                         # Apply noise with reflecting boundaries (preserves variance at [0,1])
-                        val_m = y_active[off_m + i] + noise_m_arr[i]
-                        if val_m < 0.0:
-                            val_m = -val_m
-                        elif val_m > 1.0:
-                            val_m = 2.0 - val_m
-                        y_active[off_m + i] = val_m
-
-                        val_h = y_active[off_h + i] + noise_h_arr[i]
-                        if val_h < 0.0:
-                            val_h = -val_h
-                        elif val_h > 1.0:
-                            val_h = 2.0 - val_h
-                        y_active[off_h + i] = val_h
-
-                        val_n = y_active[off_n + i] + noise_n_arr[i]
-                        if val_n < 0.0:
-                            val_n = -val_n
-                        elif val_n > 1.0:
-                            val_n = 2.0 - val_n
-                        y_active[off_n + i] = val_n
+                        y_active[off_m + i] = _reflect_unit_interval(y_active[off_m + i] + noise_m_arr[i])
+                        y_active[off_h + i] = _reflect_unit_interval(y_active[off_h + i] + noise_h_arr[i])
+                        y_active[off_n + i] = _reflect_unit_interval(y_active[off_n + i] + noise_n_arr[i])
                 else:
                     # Apply SAME pre-generated noise to perturbed trajectory (identical reflecting)
                     for i in range(n_comp):
-                        val_m = y_active[off_m + i] + noise_m_arr[i]
-                        if val_m < 0.0:
-                            val_m = -val_m
-                        elif val_m > 1.0:
-                            val_m = 2.0 - val_m
-                        y_active[off_m + i] = val_m
-
-                        val_h = y_active[off_h + i] + noise_h_arr[i]
-                        if val_h < 0.0:
-                            val_h = -val_h
-                        elif val_h > 1.0:
-                            val_h = 2.0 - val_h
-                        y_active[off_h + i] = val_h
-
-                        val_n = y_active[off_n + i] + noise_n_arr[i]
-                        if val_n < 0.0:
-                            val_n = -val_n
-                        elif val_n > 1.0:
-                            val_n = 2.0 - val_n
-                        y_active[off_n + i] = val_n
+                        y_active[off_m + i] = _reflect_unit_interval(y_active[off_m + i] + noise_m_arr[i])
+                        y_active[off_h + i] = _reflect_unit_interval(y_active[off_h + i] + noise_h_arr[i])
+                        y_active[off_n + i] = _reflect_unit_interval(y_active[off_n + i] + noise_n_arr[i])
 
             # ── 3. Compute ionic conductances per-compartment (zero-slice) ──
             for i in range(n_comp):
@@ -668,8 +655,10 @@ def run_native_loop(
                         i_stim_eff += i_stim_s
 
                 # Accumulate effective stimulus for soma compartment (i=0)
+                # v12.8 FIX: Accumulate over micro-steps, not overwrite
                 if i == 0 and traj_idx == 0:
-                    i_stim_soma_accum = i_stim_eff
+                    i_stim_soma_accum += i_stim_eff
+                    i_stim_soma_count += 1
 
                 katp_rhs = 0.0
                 if dyn_atp:
@@ -770,6 +759,22 @@ def run_native_loop(
             break
 
         t += dt
+
+        # ── Record output at end of step (AFTER t += dt) ──
+        # v12.8 FIX: Moved to end of step AFTER physics for correct V/stimulus synchronization
+        # V_{n+1} and the stimulus that produced it are recorded together
+        if (step + 1) % every == 0 and out_idx < n_out:
+            t_out[out_idx] = t
+            for s in range(n_state):
+                y_out[s, out_idx] = y[s]
+            # v12.8 FIX: Record average stimulus over the output interval
+            i_stim_out[out_idx] = i_stim_soma_accum / i_stim_soma_count if i_stim_soma_count > 0 else 0.0
+            if calc_lle:
+                lle_out[out_idx] = current_lle
+            out_idx += 1
+            # Reset accumulator AFTER recording (for next interval)
+            i_stim_soma_accum = 0.0
+            i_stim_soma_count = 0
 
         # ─────────────────────────────────────────────────────────────
         # 9. Benettin re-orthonormalization (periodic)
@@ -937,8 +942,8 @@ def run_native_loop(
         t_out[out_idx] = t
         for s in range(n_state):
             y_out[s, out_idx] = y[s]
-        # Record final stimulus (already accumulated during last step)
-        i_stim_out[out_idx] = i_stim_soma_accum
+        # Record final stimulus using the same interval-average convention
+        i_stim_out[out_idx] = i_stim_soma_accum / i_stim_soma_count if i_stim_soma_count > 0 else 0.0
         # Record final LLE estimate
         if calc_lle:
             lle_out[out_idx] = current_lle if not np.isnan(current_lle) else (lle_accum / t if t > 1e-12 and lle_count > 0 else np.nan)

@@ -11,6 +11,7 @@ Handles all operations related to the model state:
 
 import copy
 import numpy as np
+from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 from typing import Optional
 
@@ -74,10 +75,18 @@ class ConfigManager(QObject):
         if "—" in name or "Select" in name:
             return False
         
-        self._current_preset_name = name
-        apply_preset(self.config, name)
-        self.config_changed.emit()
-        return True
+        previous_config = copy.deepcopy(self.config)
+        previous_preset = self._current_preset_name
+        try:
+            self._current_preset_name = name
+            apply_preset(self.config, name)
+            self.config_changed.emit()
+            return True
+        except Exception as e:
+            self.config = previous_config
+            self._current_preset_name = previous_preset
+            print(f"Error loading preset '{name}': {e}")
+            return False
     
     def save_config_as(self, file_path: str) -> bool:
         """
@@ -94,7 +103,11 @@ class ConfigManager(QObject):
             True if successful, False otherwise
         """
         try:
-            self.config.save_to_file(file_path)
+            path = Path(file_path).expanduser().resolve()
+            if path.suffix.lower() != ".json":
+                raise ValueError("Configuration path must use .json extension")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.config.save_to_file(str(path))
             return True
         except Exception as e:
             print(f"Error saving config: {e}")
@@ -120,7 +133,14 @@ class ConfigManager(QObject):
             `True` if the configuration was applied successfully, `False` if an error occurred.
         """
         try:
-            new_cfg = FullModelConfig.load_from_file(file_path)
+            path = Path(file_path).expanduser().resolve()
+            if not path.is_file():
+                raise FileNotFoundError(f"Configuration file not found: {path}")
+            if path.suffix.lower() != ".json":
+                raise ValueError("Configuration path must use .json extension")
+            new_cfg = FullModelConfig.load_from_file(str(path))
+            previous_config = copy.deepcopy(self.config)
+            previous_preset = self._current_preset_name
             
             # Helper to recursively update Pydantic models without replacing them
             def _is_pydantic_model_instance(value) -> bool:
@@ -159,6 +179,9 @@ class ConfigManager(QObject):
             self.config_changed.emit()
             return True
         except Exception as e:
+            if 'previous_config' in locals():
+                self.config = previous_config
+                self._current_preset_name = previous_preset
             print(f"Error loading config: {e}")
             return False
     

@@ -88,33 +88,50 @@ class StochasticRNG:
         with self._lock:
             return self.rng.exponential(scale, size)
 
+    def next_seed(self) -> int:
+        """Return a 32-bit seed for a native stochastic simulation."""
+        with self._lock:
+            return int(self.rng.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+
 
 # Global RNG instance (can be overridden by PhysicsParams)
 _GLOBAL_RNG: Optional[StochasticRNG] = None
 _GLOBAL_RNG_LOCK = threading.Lock()
+_THREAD_LOCAL_RNG = threading.local()
+_GLOBAL_SEED: Optional[int] = None
 
 
 def get_rng() -> StochasticRNG:
-    """Get global stochastic RNG instance."""
-    global _GLOBAL_RNG
+    """Get a thread-local stochastic RNG instance."""
     with _GLOBAL_RNG_LOCK:
-        if _GLOBAL_RNG is None:
-            _GLOBAL_RNG = StochasticRNG()  # Default: no seed
-        return _GLOBAL_RNG
+        seed = _GLOBAL_SEED
+    rng = getattr(_THREAD_LOCAL_RNG, "rng", None)
+    rng_seed = getattr(_THREAD_LOCAL_RNG, "seed", None)
+    if rng is None or rng_seed != seed:
+        rng = StochasticRNG(seed)
+        _THREAD_LOCAL_RNG.rng = rng
+        _THREAD_LOCAL_RNG.seed = seed
+    return rng
 
 
 def set_rng(rng: StochasticRNG):
     """Set global stochastic RNG instance."""
-    global _GLOBAL_RNG
+    global _GLOBAL_RNG, _GLOBAL_SEED
     with _GLOBAL_RNG_LOCK:
         _GLOBAL_RNG = rng
+        _GLOBAL_SEED = rng.seed
+    _THREAD_LOCAL_RNG.rng = rng
+    _THREAD_LOCAL_RNG.seed = rng.seed
 
 
 def reset_rng(seed: Optional[int] = None):
     """Reset global RNG with new seed."""
-    global _GLOBAL_RNG
+    global _GLOBAL_RNG, _GLOBAL_SEED
     with _GLOBAL_RNG_LOCK:
+        _GLOBAL_SEED = seed
         _GLOBAL_RNG = StochasticRNG(seed)
+    _THREAD_LOCAL_RNG.rng = _GLOBAL_RNG
+    _THREAD_LOCAL_RNG.seed = seed
 
 
 def seed_all(seed: int):

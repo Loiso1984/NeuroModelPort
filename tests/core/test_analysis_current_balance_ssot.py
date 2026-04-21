@@ -36,3 +36,21 @@ def test_current_balance_uses_solver_i_stim_total_without_reconstruction(monkeyp
     balance = compute_current_balance(result, morph={})
 
     np.testing.assert_allclose(balance, np.array([0.0, 0.0, 0.0]), atol=1e-12)
+
+
+def test_current_balance_rejects_bad_solver_i_stim_shape():
+    cfg = FullModelConfig()
+    cfg.channels.Cm = 1.0
+
+    result = DummyResult()
+    result.t = np.array([0.0, 1.0, 2.0], dtype=float)
+    result.v_soma = np.array([-65.0, -64.0, -63.0], dtype=float)
+    result.config = cfg
+    result.currents = {}
+    result.n_comp = 1
+    result.i_stim_total = np.array([[0.0, 1.0], [2.0, 3.0]], dtype=float)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="i_stim_total shape"):
+        compute_current_balance(result, morph={})
