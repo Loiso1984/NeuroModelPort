@@ -58,7 +58,7 @@ targets = [
     ("B: Pyramidal L5 (Mainen 1996)", 15),
     ("C: FS Interneuron (Wang-Buzsaki)", 50),
     ("E: Cerebellar Purkinje (De Schutter)", 75),
-    ("K: Thalamic Relay (Ih + ICa + Burst)", 10),
+    ("K: Thalamic Relay (Ih + ITCa + Burst)", 10),
 ]
 
 print("=" * 80)

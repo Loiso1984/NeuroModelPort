@@ -46,7 +46,7 @@ def _build_l5() -> FullModelConfig:
 def _build_k_activated() -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.preset_modes.k_mode = "activated"
-    apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
+    apply_preset(cfg, "K: Thalamic Relay (Ih + ITCa + Burst)")
     cfg.stim.t_sim = 300.0
     cfg.stim.dt_eval = 0.2
     cfg.stim.jacobian_mode = "sparse_fd"

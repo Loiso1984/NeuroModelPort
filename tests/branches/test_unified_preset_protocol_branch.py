@@ -101,13 +101,13 @@ def test_demyelination_preserves_soma_spike_but_impairs_axon_propagation():
 
 def test_k_modes_baseline_vs_activated():
     _, res_base, st_base = _run_preset(
-        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "K: Thalamic Relay (Ih + ITCa + Burst)",
         t_sim=300.0,
         dt_eval=0.2,
         k_mode="baseline",
     )
     _, res_act, st_act = _run_preset(
-        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "K: Thalamic Relay (Ih + ITCa + Burst)",
         t_sim=300.0,
         dt_eval=0.2,
         k_mode="activated",
@@ -117,22 +117,22 @@ def test_k_modes_baseline_vs_activated():
     fg_base = float(1000.0 * len(st_base) / dur_base) if dur_base > 0 else 0.0
     fg_act = float(1000.0 * len(st_act) / dur_act) if dur_act > 0 else 0.0
 
-    assert 4.0 <= fg_base <= 25.0, f"K baseline global frequency should stay low-throughput/theta-like, got {fg_base:.2f} Hz"
+    assert 10.0 <= fg_base <= 30.0, f"K baseline global frequency should stay relay-like, got {fg_base:.2f} Hz"
     assert len(st_act) >= len(st_base), "Activated thalamic mode should not be less excitable than baseline"
     assert len(st_act) >= 3, "Activated thalamic mode should produce robust relay output"
-    assert fg_act >= fg_base + 10.0, f"K activated should clearly exceed baseline throughput ({fg_base:.2f} -> {fg_act:.2f} Hz)"
+    assert 120.0 <= fg_act <= 190.0, f"K activated mode should sit in high-throughput burst window, got {fg_act:.2f} Hz"
 
 
 def test_k_default_mode_is_baseline_and_low_throughput():
     cfg, res, st = _run_preset(
-        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "K: Thalamic Relay (Ih + ITCa + Burst)",
         t_sim=300.0,
         dt_eval=0.2,
     )
     assert cfg.preset_modes.k_mode == "baseline", "K default mode should be baseline"
     dur = float(res.t[-1] - res.t[0]) if len(res.t) > 1 else 0.0
     fg = float(1000.0 * len(st) / dur) if dur > 0 else 0.0
-    assert 4.0 <= fg <= 25.0, f"K default baseline throughput should remain low, got {fg:.2f} Hz"
+    assert 10.0 <= fg <= 30.0, f"K default baseline throughput should remain relay-like, got {fg:.2f} Hz"
 
 
 def test_alzheimer_progressive_vs_terminal_modes():
@@ -187,7 +187,7 @@ def test_detect_spikes_consistency_with_transition_counter():
 def test_heavy_presets_use_native_hines_jacobian_mode():
     heavy = [
         "F: Multiple Sclerosis (Demyelination)",
-        "K: Thalamic Relay (Ih + ICa + Burst)",
+        "K: Thalamic Relay (Ih + ITCa + Burst)",
         "N: Alzheimer's (v10 Calcium Toxicity)",
         "O: Hypoxia (v10 ATP-pump failure)",
     ]

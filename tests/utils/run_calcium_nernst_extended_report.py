@@ -120,8 +120,8 @@ def main() -> int:
     temps = [float(x.strip()) for x in args.temps.split(",") if x.strip()]
     i_scales = [float(x.strip()) for x in args.i_scales.split(",") if x.strip()]
     presets = [
-        "K: Thalamic Relay (Ih + ICa + Burst)",
-        "L: Hippocampal CA1 (Theta rhythm)",
+        "K: Thalamic Relay (Ih + ITCa + Burst)",
+        "L: Hippocampal CA1 Pyramidal (Adapting)",
         "M: Epilepsy (v10 SCN1A mutation)",
         "N_progressive",
         "N_terminal",

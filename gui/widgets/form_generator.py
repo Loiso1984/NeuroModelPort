@@ -167,7 +167,22 @@ class PydanticFormWidget(QWidget):
         self._apply_visibility_filters()
 
     def _field_priority(self, field_name: str) -> str:
-        return self.field_priorities.get(field_name, default_priority_for_field(field_name))
+        field_info = type(self.instance).model_fields.get(field_name)
+        extra = getattr(field_info, "json_schema_extra", None) or {}
+        meta_priority = ""
+        if isinstance(extra, dict):
+            meta_priority = str(extra.get("priority", "")).strip().lower()
+        if meta_priority == "advanced":
+            meta_priority = "research"
+        explicit = str(self.field_priorities.get(field_name, "")).strip().lower()
+        if explicit == "advanced":
+            explicit = "research"
+        if explicit:
+            return explicit
+        if meta_priority:
+            return meta_priority
+        fallback = str(default_priority_for_field(field_name)).strip().lower()
+        return "research" if fallback == "advanced" else fallback
 
     def _field_matches_search(self, field_name: str) -> bool:
         if not self._search_filter:
@@ -183,6 +198,8 @@ class PydanticFormWidget(QWidget):
         priority = self._field_priority(field_name)
         if self._priority_filter == "basic":
             return priority in {"critical", "basic"}
+        if self._priority_filter in {"research", "advanced"}:
+            return priority == "research"
         return priority == self._priority_filter
 
     def _apply_visibility_filters(self) -> None:
@@ -198,7 +215,10 @@ class PydanticFormWidget(QWidget):
                 label.setVisible(visible)
 
     def set_priority_filter(self, priority: str) -> None:
-        self._priority_filter = str(priority or "all").lower()
+        normalized = str(priority or "all").lower()
+        if normalized == "advanced":
+            normalized = "research"
+        self._priority_filter = normalized
         self._apply_visibility_filters()
 
     def set_search_filter(self, text: str) -> None:

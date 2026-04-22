@@ -165,3 +165,11 @@ class StimFormWithUnits(QWidget):
         self.soma_area_cm2 = np.pi * (diameter_cm ** 2)
         self.unit_toggle.set_soma_area(self.soma_area_cm2)
         self._update_display_value()
+
+    def set_priority_filter(self, priority: str) -> None:
+        if hasattr(self.form_stim, "set_priority_filter"):
+            self.form_stim.set_priority_filter(priority)
+
+    def set_search_filter(self, text: str) -> None:
+        if hasattr(self.form_stim, "set_search_filter"):
+            self.form_stim.set_search_filter(text)

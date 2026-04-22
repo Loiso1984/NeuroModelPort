@@ -1233,7 +1233,12 @@ class NeuronSolver:
             detects numerical divergence the returned result contains the partial output
             and has `res.diverged = True`.
         """
-        from core.native_loop import make_lle_subspace_mask, run_native_loop, set_numba_random_seed
+        from core.native_loop import (
+            make_lle_subspace_mask,
+            run_native_loop,
+            run_native_loop_adaptive,
+            set_numba_random_seed,
+        )
 
         cfg = custom_config or self.config
         if calc_lle:
@@ -1680,25 +1685,56 @@ class NeuronSolver:
             else:
                 lle_weights = w_arr
 
-        (t_out, y_out, diverged, lle_arr, i_stim_arr,
-         v_pert_arr, div_local_arr) = run_native_loop(
-            y0.astype(np.float64),
-            float(cfg.stim.t_sim),
-            dt_internal,
-            dt_eval_f,
-            physics,
-            l_diag,
-            morph["parent_idx"].astype(np.int32),
-            morph["hines_order"].astype(np.int32),
-            morph["g_axial_to_parent"].astype(np.float64),
-            morph["g_axial_parent_to_child"].astype(np.float64),
-            calc_lle,
-            lle_delta,
-            lle_t_evolve,
-            lle_subspace_mode_int,
-            lle_custom_mask,
-            lle_weights,
+        # Adaptive dispatch (Task 2 / policy #5): route to the standalone
+        # heuristic-voltage-rate kernel only when it is safe — LLE and
+        # dendritic delay > 1 step are known-incompatible (policies #2, #3).
+        _max_delay = max(
+            int(getattr(physics, "dfilter_delay_steps", 1)),
+            int(getattr(physics, "dfilter_delay_steps_2", 1)),
         )
+        _use_adaptive = (
+            bool(getattr(physics, "adaptive_dt", False))
+            and not calc_lle
+            and _max_delay <= 1
+        )
+
+        if _use_adaptive:
+            t_out, y_out, diverged, i_stim_arr = run_native_loop_adaptive(
+                y0.astype(np.float64),
+                float(cfg.stim.t_sim),
+                dt_internal,
+                dt_eval_f,
+                physics,
+                l_diag,
+                morph["parent_idx"].astype(np.int32),
+                morph["hines_order"].astype(np.int32),
+                morph["g_axial_to_parent"].astype(np.float64),
+                morph["g_axial_parent_to_child"].astype(np.float64),
+            )
+            # LLE/butterfly arrays are absent by construction under adaptive.
+            lle_arr = np.zeros(0, dtype=np.float64)
+            v_pert_arr = np.zeros(0, dtype=np.float64)
+            div_local_arr = np.zeros(0, dtype=np.float64)
+        else:
+            (t_out, y_out, diverged, lle_arr, i_stim_arr,
+             v_pert_arr, div_local_arr) = run_native_loop(
+                y0.astype(np.float64),
+                float(cfg.stim.t_sim),
+                dt_internal,
+                dt_eval_f,
+                physics,
+                l_diag,
+                morph["parent_idx"].astype(np.int32),
+                morph["hines_order"].astype(np.int32),
+                morph["g_axial_to_parent"].astype(np.float64),
+                morph["g_axial_parent_to_child"].astype(np.float64),
+                calc_lle,
+                lle_delta,
+                lle_t_evolve,
+                lle_subspace_mode_int,
+                lle_custom_mask,
+                lle_weights,
+            )
 
         if diverged:
             # Return partial result with warning flag

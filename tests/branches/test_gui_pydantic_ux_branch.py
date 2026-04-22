@@ -58,10 +58,28 @@ def test_pydantic_form_search_filter_does_not_mutate_hidden_fields():
         form.close()
 
 
+def test_research_priority_fields_hide_without_resetting_defaults():
+    app = _app()
+    stim = SimulationParams(noise_sigma=0.33)
+    form = PydanticFormWidget(stim, "Stimulus")
+    try:
+        form.show()
+        app.processEvents()
+        form.set_priority_filter("basic")
+        assert form.widgets_map["noise_sigma"].isHidden()
+        assert abs(float(stim.noise_sigma) - 0.33) < 1e-12
+        form.widgets_map["Iext"].setValue(11.0)
+        assert abs(float(stim.Iext) - 11.0) < 1e-12
+        assert abs(float(stim.noise_sigma) - 0.33) < 1e-12
+    finally:
+        form.close()
+
+
 def _run_as_script() -> int:
     tests = [
         test_pydantic_form_priority_filter_keeps_model_binding,
         test_pydantic_form_search_filter_does_not_mutate_hidden_fields,
+        test_research_priority_fields_hide_without_resetting_defaults,
     ]
     passed = 0
     for fn in tests:

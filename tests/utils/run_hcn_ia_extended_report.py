@@ -189,12 +189,12 @@ def main() -> int:
     args = parser.parse_args()
 
     hcn_presets = [
-        "K: Thalamic Relay (Ih + ICa + Burst)",
-        "L: Hippocampal CA1 (Theta rhythm)",
+        "K: Thalamic Relay (Ih + ITCa + Burst)",
+        "L: Hippocampal CA1 Pyramidal (Adapting)",
     ]
     ia_presets = [
         "C: FS Interneuron (Wang-Buzsaki)",
-        "L: Hippocampal CA1 (Theta rhythm)",
+        "L: Hippocampal CA1 Pyramidal (Adapting)",
     ]
 
     hcn_probe_rows = []

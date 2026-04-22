@@ -18,6 +18,7 @@ from typing import Optional
 from core.models import FullModelConfig
 from core.presets import apply_preset, apply_synaptic_stimulus
 from core.unit_converter import density_to_absolute_current
+from gui.locales import T
 
 
 class ConfigManager(QObject):
@@ -284,6 +285,13 @@ class ConfigManager(QObject):
             mode_note = f"Mode flags: O mode={pm.hypoxia_mode}."
         elif "multiple sclerosis" in p:
             mode_note = "Mode flags: F is single-stage (no progressive/terminal switch)."
+        elif "purkinje" in p:
+            mode_note = "Mode flags: E mode is tonic by default."
+
+        if "purkinje" in p:
+            mode_note = f"{mode_note} {T.desc('preset_e_recalibrated')}"
+        elif "thalamic" in p:
+            mode_note = f"{mode_note} {T.desc('preset_k_recalibrated')}"
         
         if dual_enabled:
             priority_note = (

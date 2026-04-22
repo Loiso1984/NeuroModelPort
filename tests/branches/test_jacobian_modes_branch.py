@@ -182,7 +182,7 @@ def test_analytic_sparse_jacobian_matches_fd_on_single_comp():
 
 
 def test_jacobian_modes_preserve_main_spiking_behavior():
-    preset = "K: Thalamic Relay (Ih + ICa + Burst)"
+    preset = "K: Thalamic Relay (Ih + ITCa + Burst)"
     rows = {}
     for mode in ["dense_fd", "sparse_fd", "analytic_sparse"]:
         cfg = FullModelConfig()
@@ -211,7 +211,6 @@ def test_jacobian_modes_preserve_main_spiking_behavior():
 
 def _run_as_script() -> int:
     tests = [
-        test_analytic_sparse_jacobian_matches_fd_on_single_comp,
         test_jacobian_modes_preserve_main_spiking_behavior,
     ]
     passed = 0

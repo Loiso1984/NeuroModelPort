@@ -4,7 +4,8 @@
 
 - [User Guide](USER_QUICKSTART.md)
 - [Developer Guide](reference/DEVELOPER_QUICKSTART.md)
-- [Master Truthpack](MASTER_TRUTH.json)
+- [Biophysics Registry (Code Authority)](../core/biophysics_registry.py)
+- [Literature Channel Values](reference/LITERATURE_CHANNEL_VALUES.md)
 
 ## Validation and Workflow
 

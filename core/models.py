@@ -529,6 +529,80 @@ class FullModelConfig(BaseModel):
         return density_to_absolute_current(float(self.stim.Iext), soma_area_cm2)
 
 
+_CRITICAL_VISIBILITY_FIELDS = {
+    "stim_type",
+    "Iext",
+    "pulse_start",
+    "pulse_dur",
+    "alpha_tau",
+    "jacobian_mode",
+    "t_sim",
+    "dt_eval",
+    "gNa_max",
+    "gK_max",
+    "gL",
+    "ENa",
+    "EK",
+    "EL",
+    "location",
+}
+
+_BASIC_VISIBILITY_FIELDS = _CRITICAL_VISIBILITY_FIELDS | {
+    "single_comp",
+    "d_soma",
+    "N_ais",
+    "gNa_ais_mult",
+    "gK_ais_mult",
+    "N_trunk",
+    "Ra",
+    "distance_um",
+    "space_constant_um",
+    "tau_dendritic_ms",
+    "T_celsius",
+    "Q10",
+    "enable_Ih",
+    "gIh_max",
+    "enable_ITCa",
+    "gTCa_max",
+    "enable_IM",
+    "gIM_max",
+    "enable_SK",
+    "gSK_max",
+}
+
+
+def _visibility_priority_for_field(field_name: str) -> str:
+    if field_name in _CRITICAL_VISIBILITY_FIELDS:
+        return "critical"
+    if field_name in _BASIC_VISIBILITY_FIELDS:
+        return "basic"
+    return "research"
+
+
+def _inject_visibility_metadata() -> None:
+    models = (
+        MorphologyParams,
+        ChannelParams,
+        CalciumParams,
+        MetabolismParams,
+        EnvironmentParams,
+        DendriticFilterParams,
+        StimulationLocationParams,
+        SimulationParams,
+        AnalysisParams,
+        PresetModeParams,
+        FullModelConfig,
+    )
+    for model_cls in models:
+        for field_name, field_info in model_cls.model_fields.items():
+            extra = dict(field_info.json_schema_extra or {})
+            extra["priority"] = _visibility_priority_for_field(field_name)
+            field_info.json_schema_extra = extra
+
+
+_inject_visibility_metadata()
+
+
 # Rebuild FullModelConfig after importing DualStimulationConfig (optional)
 try:
     from .dual_stimulation import DualStimulationConfig

@@ -23,7 +23,7 @@ def test_invalid_dt_eval_vs_t_sim_raises_custom_error():
     cfg.stim.t_sim = 10.0
     cfg.stim.dt_eval = 20.0
     try:
-        NeuronSolver(cfg).run_single()
+        validate_simulation_config(cfg)
     except SimulationParameterError:
         return
     raise AssertionError("Expected SimulationParameterError for dt_eval > t_sim")
@@ -35,7 +35,7 @@ def test_invalid_dynamic_calcium_tau_raises_custom_error():
     cfg.calcium.dynamic_Ca = True
     cfg.calcium.tau_Ca = 0.0
     try:
-        NeuronSolver(cfg).run_single()
+        validate_simulation_config(cfg)
     except SimulationParameterError:
         return
     raise AssertionError("Expected SimulationParameterError for tau_Ca <= 0")
@@ -43,11 +43,11 @@ def test_invalid_dynamic_calcium_tau_raises_custom_error():
 
 def test_invalid_enabled_channel_with_zero_conductance_raises_custom_error():
     cfg = FullModelConfig()
-    apply_preset(cfg, "L: Hippocampal CA1 (Theta rhythm)")
+    apply_preset(cfg, "L: Hippocampal CA1 Pyramidal (Adapting)")
     cfg.channels.enable_IA = True
     cfg.channels.gA_max = 0.0
     try:
-        NeuronSolver(cfg).run_single()
+        validate_simulation_config(cfg)
     except SimulationParameterError:
         return
     raise AssertionError("Expected SimulationParameterError for IA enabled with gA_max <= 0")
@@ -114,16 +114,16 @@ def test_validation_warns_modes_ignored_for_non_kno_presets():
     apply_preset(cfg, "F: Multiple Sclerosis (Demyelination)")
     w = build_preset_mode_warnings(cfg, "F: Multiple Sclerosis (Demyelination)")
     assert any("single-stage" in s for s in w), "Expected explicit single-stage note for F preset"
-    assert any("ignored for this preset" in s for s in w), (
-        "Expected warning that K/N/O mode flags are ignored for non-K/N/O preset"
+    assert any("do not apply" in s for s in w), (
+        "Expected warning that K/N/O mode flags do not apply for non-K/N/O preset"
     )
 
 
 def test_validation_reports_thalamic_mode_note():
     cfg = FullModelConfig()
     cfg.preset_modes.k_mode = "activated"
-    apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
-    wk = build_preset_mode_warnings(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
+    apply_preset(cfg, "K: Thalamic Relay (Ih + ITCa + Burst)")
+    wk = build_preset_mode_warnings(cfg, "K: Thalamic Relay (Ih + ITCa + Burst)")
     assert any("K mode=activated" in w for w in wk), "Expected K activated mode note"
 
 

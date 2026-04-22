@@ -18,6 +18,8 @@ BASIC_FIELDS = CRITICAL_FIELDS | {
     "gNa_max",
     "gK_max",
     "gL",
+    "gNa_ais_mult",
+    "gK_ais_mult",
     "T_celsius",
     "single_comp",
     "Ra",
@@ -30,4 +32,4 @@ def default_priority_for_field(field_name: str) -> str:
         return "critical"
     if field_name in BASIC_FIELDS:
         return "basic"
-    return "advanced"
+    return "research"

@@ -771,7 +771,7 @@ class MainWindow(QMainWindow):
         self._form_search.textChanged.connect(self._apply_form_ux_filters)
         ux_row.addWidget(self._form_search, 1)
         self._form_priority = QComboBox()
-        self._form_priority.addItems(["all", "critical", "basic", "advanced"])
+        self._form_priority.addItems(["all", "critical", "basic", "research"])
         self._form_priority.setCurrentText("basic")
         self._form_priority.currentTextChanged.connect(self._apply_form_ux_filters)
         ux_row.addWidget(self._form_priority)
@@ -1482,7 +1482,10 @@ class MainWindow(QMainWindow):
             
             # Force single-compartment mode
             self.config_manager.config.morphology.single_comp = True
+            if hasattr(self, "_form_priority"):
+                self._form_priority.setCurrentText("basic")
             self._refresh_all_forms()
+            self._apply_form_ux_filters()
             
         elif mode == "🌉 Bridge":
             # Show all docks
@@ -1495,6 +1498,9 @@ class MainWindow(QMainWindow):
             # Show all sidebar groups
             if hasattr(self, 'grp_morph'):
                 self.grp_morph.setVisible(True)
+            if hasattr(self, "_form_priority"):
+                self._form_priority.setCurrentText("all")
+            self._apply_form_ux_filters()
             
         elif mode == "🧪 Research":
             # Identical to Bridge for now (future SWC/Network support)
@@ -1506,6 +1512,9 @@ class MainWindow(QMainWindow):
             
             if hasattr(self, 'grp_morph'):
                 self.grp_morph.setVisible(True)
+            if hasattr(self, "_form_priority"):
+                self._form_priority.setCurrentText("all")
+            self._apply_form_ux_filters()
 
     def _val_to_live_slider(self, param_name: str, row_i: int | None = None) -> int:
         # Try custom path resolution first

@@ -422,6 +422,13 @@ class PhysicsParams(NamedTuple):
     rng_state: Optional[np.ndarray]  # RNG state for reproducibility
     state_offsets: StateOffsets
 
+    # Adaptive time-stepping (Heuristic Voltage-Rate Adaptive Controller)
+    # When True and dispatcher conditions are met (no LLE, no dendritic delay),
+    # NeuronSolver.run_native routes to run_native_loop_adaptive which varies dt
+    # per step to capture fast Na+ upstrokes while coarsening during sub-threshold
+    # epochs. See run_native_loop_adaptive docstring for the controller formula.
+    adaptive_dt: boolean
+
 
 def create_physics_params(**kwargs) -> PhysicsParams:
     """
@@ -500,6 +507,9 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         'dfilter_input_freq_hz_2': 100.0,
         'dfilter_filter_mode_2': 0,
         'dfilter_delay_steps_2': np.int32(1),
+        # Adaptive dt: opt-in. Dispatcher forces fixed-step when calc_lle=True or
+        # dfilter_delay_steps > 1 (Task 2 policy — see run_native_loop_adaptive).
+        'adaptive_dt': False,
     }
     for k, v in defaults.items():
         if k not in kwargs:

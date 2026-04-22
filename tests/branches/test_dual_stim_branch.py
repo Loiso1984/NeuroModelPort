@@ -35,7 +35,7 @@ def _build_l5() -> FullModelConfig:
 def _build_k_activated() -> FullModelConfig:
     cfg = FullModelConfig()
     cfg.preset_modes.k_mode = "activated"
-    apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
+    apply_preset(cfg, "K: Thalamic Relay (Ih + ITCa + Burst)")
     cfg.stim.t_sim = 300.0
     cfg.stim.dt_eval = 0.2
     cfg.stim.jacobian_mode = "native_hines"
@@ -83,8 +83,10 @@ def test_secondary_inhibition_reduces_spiking():
 
 def test_soma_plus_ais_stimulation_runs():
     cfg = _build_l5()
+    cfg.stim_location.location = "soma"
+    cfg.dendritic_filter.enabled = False
     cfg.stim.stim_type = "alpha"
-    cfg.stim.Iext = 8.0
+    cfg.stim.Iext = 24.0
     cfg.stim.pulse_start = 20.0
     cfg.stim.pulse_dur = 3.0
     cfg.stim.alpha_tau = 2.0
@@ -92,7 +94,7 @@ def test_soma_plus_ais_stimulation_runs():
     dual.enabled = True
     dual.secondary_location = "ais"
     dual.secondary_stim_type = "alpha"
-    dual.secondary_Iext = 6.0
+    dual.secondary_Iext = 18.0
     dual.secondary_start = 35.0
     dual.secondary_duration = 3.0
     dual.secondary_alpha_tau = 2.0
@@ -106,9 +108,11 @@ def test_soma_plus_ais_stimulation_runs():
 
 def test_main_primary_with_dual_secondary_can_drive_spiking():
     cfg = _build_l5()
+    cfg.stim_location.location = "soma"
+    cfg.dendritic_filter.enabled = False
     # Primary stimulus now lives in cfg.stim.
     cfg.stim.stim_type = "const"
-    cfg.stim.Iext = 12.0
+    cfg.stim.Iext = 32.0
     cfg.stim.pulse_start = 0.0
     cfg.stim.pulse_dur = cfg.stim.t_sim
 

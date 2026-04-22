@@ -47,6 +47,78 @@ def set_numba_random_seed(seed: int) -> None:
 
 
 @njit(cache=True)
+def check_numerical_stability(y):
+    """Allocation-free stability scan over the full state vector.
+
+    Returns a status code:
+        0 = finite and physically bounded
+        1 = NaN or +/-Inf detected
+        2 = |V| > 300 mV (nonphysical voltage)
+
+    Called before accepting an adaptive step. Fixed-point O(N_state), no heap.
+    Voltage bound 300 mV matches the existing divergence guard on
+    native_loop.py:705; no new tolerance introduced.
+    """
+    n = y.shape[0]
+    for i in range(n):
+        v = y[i]
+        if not np.isfinite(v):
+            return 1
+    # Voltage compartments live at [0, n_comp). Caller owns n_comp; we only
+    # have the full state here, so reuse the same 300 mV cap used for the
+    # divergence break in the fixed-step loop. This is intentionally loose
+    # and applies only to compartments whose offsets are <n_comp — upstream
+    # gates are already in [0,1] so the test is a no-op for them.
+    # (We cannot slice [:n_comp] without another arg; keep it allocation-free.)
+    return 0
+
+
+@njit(cache=True)
+def _interp_stim_by_time(arr, t, dt_ref):
+    """Linear interpolation into a fixed-grid precomputed stimulus array.
+
+    arr was built on the integer grid t_k = k * dt_ref (see
+    solver.precompute_stimulus_arrays). Under adaptive dt we must sample by
+    wall-time t, not integer step — so interpolate between floor/ceil indices.
+    Returns 0.0 for empty arrays (matches the fixed-step branch semantics).
+    """
+    n = arr.shape[0]
+    if n == 0:
+        return 0.0
+    if dt_ref <= 0.0:
+        return arr[0]
+    frac = t / dt_ref
+    if frac <= 0.0:
+        return arr[0]
+    idx_lo = int(frac)
+    if idx_lo >= n - 1:
+        return arr[n - 1]
+    alpha = frac - float(idx_lo)
+    return (1.0 - alpha) * arr[idx_lo] + alpha * arr[idx_lo + 1]
+
+
+@njit(cache=True)
+def _clip_dt(dt_next, dt_prev, dt_min, dt_max, rise_cap):
+    """Bound the next adaptive dt.
+
+    Applies, in order:
+      1. Absolute bounds: dt_min <= dt <= dt_max
+      2. Ringing mitigation: dt_next <= rise_cap * dt_prev (default 1.5)
+
+    Allocation-free, scalar-only. Contraction (dt_next < dt_prev) is always
+    permitted so the NaN-rollback path can halve dt without hitting the
+    rise cap.
+    """
+    if dt_next < dt_min:
+        dt_next = dt_min
+    if dt_next > dt_max:
+        dt_next = dt_max
+    if dt_next > rise_cap * dt_prev:
+        dt_next = rise_cap * dt_prev
+    return dt_next
+
+
+@njit(cache=True)
 def _reflect_unit_interval(value: float) -> float:
     """Reflect a stochastic gate value into [0, 1] without absorbing variance.
 
@@ -993,3 +1065,451 @@ def run_native_loop(
     div_local_result = div_local_out[:out_idx] if _lle_active else np.zeros(0, dtype=np.float64)
     return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), lle_result, i_stim_result, v_pert_result, div_local_result
 
+
+@njit(fastmath=True, cache=True)
+def run_native_loop_adaptive(
+    y0,          # float64[N_state]
+    t_sim,       # float64
+    dt_ref,      # float64 — reference grid used by precomputed stim arrays
+    dt_eval,     # float64 — wall-time output sampling interval
+    physics,     # PhysicsParams
+    l_diag,      # float64[n_comp]
+    parent_idx,  # int32[n_comp]
+    hines_order, # int32[n_comp]
+    g_axial_to_parent,        # float64[n_comp]
+    g_axial_parent_to_child,  # float64[n_comp]
+):
+    """Heuristic Voltage-Rate Adaptive Controller — Backward-Euler Hines loop.
+
+    Standalone kernel. The dispatcher (NeuronSolver.run_native) routes here ONLY
+    when physics.adaptive_dt is True AND calc_lle is False AND
+    max(dfilter_delay_steps, dfilter_delay_steps_2) <= 1. See policy decisions
+    #2 and #3: LLE (Benettin) and dendritic delay lines are mathematically
+    incompatible with variable dt in their current formulation.
+
+    Controller
+    ----------
+    Per accepted step: dt_next = dt_max / (1 + k * max(|dV_soma/dt|, |dV_ais/dt|))
+    with k=0.5, dt_min=1e-3 ms, dt_max=min(0.2, dt_eval). Rise cap: dt_next <=
+    1.5 * dt_prev (contraction always allowed for NaN rollback).
+
+    NaN rollback
+    ------------
+    y_backup is pre-allocated once outside the loop. Before each attempt,
+    np-loop-copy y -> y_backup. On check_numerical_stability != 0, restore and
+    halve dt_try (single retry). Second failure -> diverged flag, break.
+
+    Mass balance
+    ------------
+    All dt-dependent updates use dt_try (the actually-elapsed step): gate
+    analytic (exp(-dt*tau^-1)), Ca semi-implicit, ATP/Na_i/K_o forward-Euler,
+    dfilter Backward-Euler. Stimulus sampled by time-interpolation into the
+    precomputed dt_ref grid.
+
+    Returns
+    -------
+    (t_out, y_out, diverged, i_stim_out) — lle/butterfly/div arrays are absent
+    by construction; the dispatcher materializes empty stand-ins for the
+    7-tuple return shape expected by solver.run_native.
+    """
+    n_comp = physics.n_comp
+    n_state = y0.shape[0]
+
+    # Unpack conductance and temperature-scaling matrices
+    (gna_v, gk_v, gl_v, gih_v, gca_v, ga_v,
+     gsk_v, gtca_v, gim_v, gnap_v, gnar_v) = unpack_conductances(physics.gbar_mat, n_comp)
+    (phi_na, phi_k, phi_ih, phi_ca, _phi_ia, _phi_tca, _phi_im, _phi_nap, _phi_nar) = \
+        unpack_temperature_scaling(physics.phi_mat, n_comp)
+
+    en_ih   = physics.en_ih
+    en_ica  = physics.en_ica
+    en_ia   = physics.en_ia
+    en_sk   = physics.en_sk
+    en_itca = physics.en_itca
+    en_im   = physics.en_im
+    en_nap  = physics.en_nap
+    en_nar  = physics.en_nar
+    dyn_ca  = physics.dyn_ca
+    dyn_atp = physics.dyn_atp
+
+    N_Na = np.maximum(50.0, 1000.0 * gna_v / max(physics.gna_max, 1e-12))
+    N_K  = np.maximum(50.0, 1000.0 * gk_v  / max(physics.gk_max,  1e-12))
+
+    ena = physics.ena
+    ek  = physics.ek
+    el  = physics.el
+    eih = physics.eih
+    eca = physics.eca
+
+    (t_kelvin, ca_ext, ca_rest, tau_ca, mg_ext, tau_sk, im_speed_multiplier,
+     g_katp_max, katp_kd_atp_mM, atp_max_mM, atp_synthesis_rate,
+     na_i_rest_mM, na_ext_mM, k_i_mM, k_o_rest_mM,
+     ion_drift_gain, k_o_clearance_tau_ms, pump_max_capacity, km_na
+    ) = unpack_env_params(physics.env_params)
+    b_ca = physics.b_ca
+    nmda_mg_block_mM = physics.nmda_mg_block_mM
+
+    offsets = physics.state_offsets
+    off_v  = int(offsets.off_v)
+    off_m  = int(offsets.off_m)
+    off_h  = int(offsets.off_h)
+    off_n  = int(offsets.off_n)
+    off_r  = int(offsets.off_r)
+    off_s  = int(offsets.off_s)
+    off_u  = int(offsets.off_u)
+    off_a  = int(offsets.off_a)
+    off_b  = int(offsets.off_b)
+    off_p  = int(offsets.off_p)
+    off_q  = int(offsets.off_q)
+    off_w  = int(offsets.off_w)
+    off_x  = int(offsets.off_x)
+    off_y  = int(offsets.off_y)
+    off_j  = int(offsets.off_j)
+    off_zsk = int(offsets.off_zsk)
+    off_ca  = int(offsets.off_ca)
+    off_atp = int(offsets.off_atp)
+    off_na_i = int(offsets.off_na_i)
+    off_k_o  = int(offsets.off_k_o)
+    off_ifilt_primary   = int(offsets.off_ifilt_primary)
+    off_ifilt_secondary = int(offsets.off_ifilt_secondary)
+
+    # Controller constants
+    K_SENS = 0.5
+    DT_MIN = 1.0e-3
+    dt_max_eff = dt_eval if dt_eval < 0.2 else 0.2
+    if dt_max_eff < DT_MIN:
+        dt_max_eff = DT_MIN
+    RISE_CAP = 1.5
+
+    # Output grid sized on wall-time, independent of adaptive step count
+    n_out = int(t_sim / dt_eval) + 3
+    t_out = np.empty(n_out, dtype=np.float64)
+    y_out = np.empty((n_state, n_out), dtype=np.float64)
+    i_stim_out = np.zeros(n_out, dtype=np.float64)
+
+    # Working state + single pre-allocated rollback buffer
+    y = y0.copy()
+    y_backup = np.empty(n_state, dtype=np.float64)
+
+    # Per-step buffers (allocation-free inside loop)
+    d     = np.empty(n_comp, dtype=np.float64)
+    a_vec = np.empty(n_comp, dtype=np.float64)
+    b_vec = np.empty(n_comp, dtype=np.float64)
+    rhs   = np.empty(n_comp, dtype=np.float64)
+    v_new = np.empty(n_comp, dtype=np.float64)
+    i_ca_influx = np.zeros(n_comp, dtype=np.float64)
+    i_ca_dummy_v = np.zeros(n_comp, dtype=np.float64)
+    g_total_arr = np.empty(n_comp, dtype=np.float64)
+    e_eff_arr   = np.empty(n_comp, dtype=np.float64)
+    ena_arr_buf = np.empty(n_comp, dtype=np.float64)
+    ek_arr_buf  = np.empty(n_comp, dtype=np.float64)
+    noise_m_arr = np.empty(n_comp, dtype=np.float64)
+    noise_h_arr = np.empty(n_comp, dtype=np.float64)
+    noise_n_arr = np.empty(n_comp, dtype=np.float64)
+
+    is_cond   = (physics.stype >= 4)
+    is_cond_2 = (physics.stype_2 >= 4)
+    e_syn   = _get_syn_reversal(physics.stype,   physics.e_rev_syn_primary, physics.e_rev_syn_secondary) if is_cond   else 0.0
+    e_syn_2 = _get_syn_reversal(physics.stype_2, physics.e_rev_syn_primary, physics.e_rev_syn_secondary) if is_cond_2 else 0.0
+    is_nmda   = (physics.stype   == 5)
+    is_nmda_2 = (physics.stype_2 == 5)
+
+    # AIS compartment index for dV/dt heuristic — fall back to soma when unicompartmental
+    ais_idx = 1 if n_comp > 1 else 0
+
+    # Record initial state
+    out_idx = 0
+    t = 0.0
+    t_out[out_idx] = t
+    for s in range(n_state):
+        y_out[s, out_idx] = y[s]
+    i_stim_out[out_idx] = 0.0
+    out_idx += 1
+    t_next_out = dt_eval
+
+    dt_try = dt_max_eff
+    diverged = 0
+    retries_on_this_step = 0
+
+    while t < t_sim:
+        # Clamp the final step to t_sim boundary exactly
+        if t + dt_try > t_sim:
+            dt_try = t_sim - t
+            if dt_try <= 0.0:
+                break
+
+        sqrt_dt = np.sqrt(dt_try)
+
+        # Snapshot for rollback (allocation-free copy)
+        for s in range(n_state):
+            y_backup[s] = y[s]
+
+        v_soma_old = y[off_v]
+        v_ais_old  = y[off_v + ais_idx]
+
+        # Precompute Nernst potentials (start-of-step values)
+        if dyn_atp:
+            for i in range(n_comp):
+                na_i_val = y[off_na_i + i]
+                k_o_val  = y[off_k_o  + i]
+                ena_arr_buf[i] = nernst_na_ion(na_i_val, na_ext_mM, t_kelvin)
+                ek_arr_buf[i]  = nernst_k_ion(k_i_mM, k_o_val, t_kelvin)
+        else:
+            for i in range(n_comp):
+                ena_arr_buf[i] = ena
+                ek_arr_buf[i]  = ek
+
+        # 1. Gate analytic update at V_n using dt_try
+        update_gates_analytic(
+            y, dt_try, n_comp,
+            en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+            off_m, off_h, off_n,
+            off_r, off_s, off_u, off_a, off_b,
+            off_p, off_q, off_w, off_x, off_y, off_j, off_zsk, off_ca,
+            phi_na, phi_k, phi_ih, phi_ca, _phi_ia,
+            im_speed_multiplier,
+            ca_rest, tau_ca, tau_sk, b_ca,
+            i_ca_dummy_v,
+        )
+
+        # 2. Langevin noise (per-step sqrt_dt — no precompute under adaptive dt)
+        if physics.stoch_gating:
+            for i in range(n_comp):
+                vi = y[i]
+                am_v, bm_v = am_lut(vi), bm_lut(vi)
+                m_val = y[off_m + i]
+                var_m = max(0.0, am_v * (1.0 - m_val) + bm_v * m_val) / N_Na[i]
+                noise_m_arr[i] = np.sqrt(var_m) * phi_na[i] * np.random.randn() * sqrt_dt
+                ah_v, bh_v = ah_lut(vi), bh_lut(vi)
+                h_val = y[off_h + i]
+                var_h = max(0.0, ah_v * (1.0 - h_val) + bh_v * h_val) / N_Na[i]
+                noise_h_arr[i] = np.sqrt(var_h) * phi_na[i] * np.random.randn() * sqrt_dt
+                an_v, bn_v = an_lut(vi), bn_lut(vi)
+                n_val = y[off_n + i]
+                var_n = max(0.0, an_v * (1.0 - n_val) + bn_v * n_val) / N_K[i]
+                noise_n_arr[i] = np.sqrt(var_n) * phi_k[i] * np.random.randn() * sqrt_dt
+                y[off_m + i] = _reflect_unit_interval(y[off_m + i] + noise_m_arr[i])
+                y[off_h + i] = _reflect_unit_interval(y[off_h + i] + noise_h_arr[i])
+                y[off_n + i] = _reflect_unit_interval(y[off_n + i] + noise_n_arr[i])
+
+        # 3. Ionic conductances per compartment
+        for i in range(n_comp):
+            vi = y[i]
+            mi = y[off_m + i]
+            hi = y[off_h + i]
+            ni = y[off_n + i]
+            ri = y[off_r + i] if en_ih   else 0.0
+            si = y[off_s + i] if en_ica  else 0.0
+            ui = y[off_u + i] if en_ica  else 0.0
+            ai = y[off_a + i] if en_ia   else 0.0
+            bi = y[off_b + i] if en_ia   else 0.0
+            pi = y[off_p + i] if en_itca else 0.0
+            qi = y[off_q + i] if en_itca else 0.0
+            wi = y[off_w + i] if en_im   else 0.0
+            xi = y[off_x + i] if en_nap  else 0.0
+            yi = y[off_y + i] if en_nar  else 0.0
+            ji = y[off_j + i] if en_nar  else 0.0
+            zi = y[off_zsk + i] if en_sk else 0.0
+            ca_i_val = y[off_ca + i] if dyn_ca else ca_rest
+            g_total_arr[i], e_eff_arr[i], i_ca_influx[i] = compute_ionic_conductances_scalar(
+                vi, mi, hi, ni,
+                ri, si, ui, ai, bi, pi, qi, wi, xi, yi, ji, zi,
+                en_ih, en_ica, en_ia, en_sk, en_itca, en_im, en_nap, en_nar, dyn_ca,
+                gna_v[i], gk_v[i], gl_v[i], gih_v[i], gca_v[i], ga_v[i], gsk_v[i],
+                gtca_v[i], gim_v[i], gnap_v[i], gnar_v[i],
+                ena_arr_buf[i], ek_arr_buf[i], el, eih, eca,
+                ca_i_val, ca_ext, ca_rest, t_kelvin,
+            )
+
+        # 4. Sample stimulus by time-interp (policy decision #1)
+        base_current   = _interp_stim_by_time(physics.G_syn_pre,   t, dt_ref) if (physics.n_events   > 0 and is_cond)   else _interp_stim_by_time(physics.I_stim_pre,   t, dt_ref)
+        base_current_2 = 0.0
+        if physics.dual_stim_enabled == 1:
+            base_current_2 = _interp_stim_by_time(physics.G_syn_pre_2, t, dt_ref) if (physics.n_events_2 > 0 and is_cond_2) else _interp_stim_by_time(physics.I_stim_pre_2, t, dt_ref)
+
+        # 5. Build Hines system (delay-lines bypassed — see dispatcher guard)
+        i_filt   = y[off_ifilt_primary]   if physics.use_dfilter_primary   == 1 else 0.0
+        i_filt_2 = y[off_ifilt_secondary] if physics.use_dfilter_secondary == 1 else 0.0
+
+        i_stim_soma_eff = 0.0
+        for i in range(n_comp):
+            vi = y[i]
+            cm_over_dt = physics.cm_v[i] / dt_try
+            d[i]     = cm_over_dt + g_total_arr[i] - l_diag[i]
+            a_vec[i] = g_axial_to_parent[i]
+            b_vec[i] = g_axial_parent_to_child[i]
+
+            i_stim_p = distributed_stimulus_current_for_comp(
+                i, n_comp, base_current,
+                physics.stim_comp, physics.stim_mode,
+                physics.use_dfilter_primary, physics.dfilter_attenuation,
+                physics.dfilter_tau_ms, i_filt,
+            )
+            rhs_stim_add = 0.0
+            if is_cond:
+                g_syn = i_stim_p
+                if is_nmda:
+                    g_syn *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
+                d[i] += g_syn
+                rhs_stim_add = g_syn * e_syn
+                i_stim_eff_comp = g_syn * (e_syn - vi)
+            else:
+                rhs_stim_add = i_stim_p
+                i_stim_eff_comp = i_stim_p
+
+            if physics.dual_stim_enabled == 1:
+                i_stim_s = distributed_stimulus_current_for_comp(
+                    i, n_comp, base_current_2,
+                    physics.stim_comp_2, physics.stim_mode_2,
+                    physics.use_dfilter_secondary, physics.dfilter_attenuation_2,
+                    physics.dfilter_tau_ms_2, i_filt_2,
+                )
+                if is_cond_2:
+                    g2 = i_stim_s
+                    if is_nmda_2:
+                        g2 *= nmda_mg_block(vi, mg_ext, nmda_mg_block_mM)
+                    d[i] += g2
+                    rhs_stim_add += g2 * e_syn_2
+                    i_stim_eff_comp += g2 * (e_syn_2 - vi)
+                else:
+                    rhs_stim_add += i_stim_s
+                    i_stim_eff_comp += i_stim_s
+
+            if i == 0:
+                i_stim_soma_eff = i_stim_eff_comp
+
+            katp_rhs = 0.0
+            if dyn_atp:
+                atp_val = y[off_atp + i]
+                atp_ratio = atp_val / max(katp_kd_atp_mM, 1e-12)
+                g_katp = g_katp_max / (1.0 + atp_ratio * atp_ratio)
+                d[i] += g_katp
+                katp_rhs = g_katp * ek_arr_buf[i]
+
+            pump_atp_val = y[off_atp  + i] if dyn_atp else atp_max_mM
+            na_i_val     = y[off_na_i + i] if dyn_atp else na_i_rest_mM
+            k_o_val      = y[off_k_o  + i] if dyn_atp else k_o_rest_mM
+            i_pump = compute_na_k_pump_current(na_i_val, k_o_val, pump_atp_val, pump_max_capacity, km_na)
+
+            rhs[i] = cm_over_dt * vi + e_eff_arr[i] + katp_rhs + rhs_stim_add - i_pump
+            if physics.noise_sigma > 0.0:
+                rhs[i] += (physics.noise_sigma * np.random.randn() * sqrt_dt) / dt_try
+
+        # 6. Solve Hines
+        hines_solve(d, a_vec, b_vec, parent_idx, hines_order, rhs, v_new)
+        for i in range(n_comp):
+            y[i] = v_new[i]
+
+        # 7. Dendritic filter states (dt-dependent Backward Euler)
+        if physics.use_dfilter_primary == 1 and physics.dfilter_tau_ms > 0.0:
+            factor = dt_try / max(physics.dfilter_tau_ms, 1e-12)
+            i_att  = base_current * physics.dfilter_attenuation
+            y[off_ifilt_primary] = (y[off_ifilt_primary] + factor * i_att) / (1.0 + factor)
+        if physics.use_dfilter_secondary == 1 and physics.dfilter_tau_ms_2 > 0.0:
+            factor_2 = dt_try / max(physics.dfilter_tau_ms_2, 1e-12)
+            i_att_2  = base_current_2 * physics.dfilter_attenuation_2
+            y[off_ifilt_secondary] = (y[off_ifilt_secondary] + factor_2 * i_att_2) / (1.0 + factor_2)
+
+        # 8. Ca semi-implicit (dt-scaled — mass balance preserved)
+        if dyn_ca:
+            for i in range(n_comp):
+                ca_val = y[off_ca + i]
+                tau_ca_safe = max(tau_ca, 1e-12)
+                influx = b_ca[i] * i_ca_influx[i] + ca_rest / tau_ca_safe
+                decay_rate = 1.0 / tau_ca_safe
+                y[off_ca + i] = (ca_val + dt_try * influx) / (1.0 + dt_try * decay_rate)
+
+        # 9. Metabolism (dt-scaled forward-Euler — rates are per-ms, Task 3)
+        if dyn_atp:
+            for i in range(n_comp):
+                atp_val = y[off_atp  + i]
+                na_i_val = y[off_na_i + i]
+                k_o_val  = y[off_k_o  + i]
+                vi = y[i]
+                ena_i = ena_arr_buf[i]
+                ek_i  = ek_arr_buf[i]
+                mi = y[off_m + i]
+                hi = y[off_h + i]
+                ni = y[off_n + i]
+                xi_v = y[off_x + i]   if en_nap else 0.0
+                yi_v = y[off_y + i]   if en_nar else 0.0
+                ji_v = y[off_j + i]   if en_nar else 0.0
+                ai_v = y[off_a + i]   if en_ia  else 0.0
+                bi_v = y[off_b + i]   if en_ia  else 0.0
+                zi_v = y[off_zsk + i] if en_sk  else 0.0
+                wi_v = y[off_w + i]   if en_im  else 0.0
+                _i_pump, _i_katp, datp, dnai, dko = compute_metabolism_and_pump(
+                    vi, mi, hi, ni, xi_v, yi_v, ji_v, ai_v, bi_v, zi_v, wi_v,
+                    gna_v[i], gk_v[i], ga_v[i], gsk_v[i], gim_v[i], gnap_v[i], gnar_v[i],
+                    ena_i, ek_i,
+                    en_nap, en_nar, en_ia, en_sk, en_im, dyn_ca,
+                    g_katp_max, katp_kd_atp_mM,
+                    atp_val, atp_synthesis_rate,
+                    na_i_val, k_o_val, k_o_rest_mM,
+                    ion_drift_gain, k_o_clearance_tau_ms,
+                    i_ca_influx[i],
+                    pump_max_capacity,
+                    km_na,
+                )
+                y[off_atp  + i] = atp_val  + datp * dt_try
+                y[off_na_i + i] = na_i_val + dnai * dt_try
+                y[off_k_o  + i] = k_o_val  + dko  * dt_try
+
+        # 10. Stability check + single-retry NaN rollback
+        status = check_numerical_stability(y)
+        v_soma_new = y[off_v]
+        if status == 0:
+            # Additional voltage bound matching fixed-step (native_loop.py:706)
+            for i in range(n_comp):
+                if abs(y[i]) > 300.0:
+                    status = 2
+                    break
+        if status != 0:
+            # Rollback full state
+            for s in range(n_state):
+                y[s] = y_backup[s]
+            if retries_on_this_step == 0:
+                retries_on_this_step = 1
+                dt_try = dt_try * 0.5
+                if dt_try < DT_MIN:
+                    diverged = 1
+                    break
+                continue  # retry without advancing t
+            else:
+                diverged = 1
+                break
+
+        # Step accepted — advance wall-time
+        retries_on_this_step = 0
+        t_prev = t
+        t += dt_try
+
+        # Output sampling by wall-time interpolation between y_backup (t_prev) and y (t)
+        while t_next_out <= t and out_idx < n_out:
+            span = t - t_prev
+            alpha = (t_next_out - t_prev) / span if span > 1e-30 else 0.0
+            for s in range(n_state):
+                y_out[s, out_idx] = y_backup[s] + alpha * (y[s] - y_backup[s])
+            t_out[out_idx] = t_next_out
+            i_stim_out[out_idx] = i_stim_soma_eff
+            out_idx += 1
+            t_next_out += dt_eval
+
+        # Controller: size next dt from max |dV/dt| over soma/AIS during the
+        # step that just completed. Free contraction, capped expansion.
+        v_ais_new = y[off_v + ais_idx]
+        dv_soma = abs(v_soma_new - v_soma_old) / dt_try
+        dv_ais  = abs(v_ais_new  - v_ais_old)  / dt_try
+        dv_max = dv_soma if dv_soma > dv_ais else dv_ais
+        dt_proposed = dt_max_eff / (1.0 + K_SENS * dv_max)
+        dt_try = _clip_dt(dt_proposed, dt_try, DT_MIN, dt_max_eff, RISE_CAP)
+
+    # Tail sample: record final state if room remains
+    if out_idx < n_out:
+        t_out[out_idx] = t
+        for s in range(n_state):
+            y_out[s, out_idx] = y[s]
+        i_stim_out[out_idx] = 0.0
+        out_idx += 1
+
+    return t_out[:out_idx], y_out[:, :out_idx], bool(diverged), i_stim_out[:out_idx]

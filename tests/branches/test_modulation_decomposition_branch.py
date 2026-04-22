@@ -98,6 +98,7 @@ def test_full_analysis_exposes_modulation_metrics():
         "Leak": np.zeros_like(v),
     }
     res.atp_estimate = 0.0
+    res.atp_breakdown = {}
     res.v_dendritic_filtered = None
 
     stats = full_analysis(res)

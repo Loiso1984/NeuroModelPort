@@ -47,6 +47,8 @@ ACTIVE_UTILS = [
             "tests/utils/run_impedance_zap_report.py",
             "--strict",
             "--print-failures",
+            "--fmax",
+            "40.0",
         ],
     },
 ]

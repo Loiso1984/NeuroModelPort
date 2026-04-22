@@ -109,7 +109,7 @@ def main() -> int:
     for mode in ["baseline", "activated"]:
         cfg = FullModelConfig()
         cfg.preset_modes.k_mode = mode
-        apply_preset(cfg, "K: Thalamic Relay (Ih + ICa + Burst)")
+        apply_preset(cfg, "K: Thalamic Relay (Ih + ITCa + Burst)")
         cfg.stim.t_sim = 1000.0
         cfg.stim.dt_eval = 0.5
         cfg.stim.jacobian_mode = "native_hines"

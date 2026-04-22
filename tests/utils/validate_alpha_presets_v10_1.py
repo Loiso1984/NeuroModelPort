@@ -26,7 +26,7 @@ PRESETS_TO_CHECK = [
     "B: Pyramidal L5 (Mainen 1996)",
     "C: FS Interneuron (Wang-Buzsaki)",
     "E: Cerebellar Purkinje (De Schutter)",
-    "K: Thalamic Relay (Ih + ICa + Burst)",
+    "K: Thalamic Relay (Ih + ITCa + Burst)",
 ]
 
 
