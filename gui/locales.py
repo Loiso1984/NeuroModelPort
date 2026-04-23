@@ -163,6 +163,14 @@ class Translator:
                 'Thalamic relay preset now separates low-throughput relay mode from activated burst mode; '
                 'theta-like behavior is treated as event-driven network context, not intrinsic resonance.'
             ),
+            'preset_l_recalibrated': (
+                'CA1 preset now uses stronger leak/repolarization reserve and distal filtering so theta-paced '
+                'firing remains in physiological low-throughput range under aggregated synaptic drive.'
+            ),
+            'preset_q_recalibrated': (
+                'SPN preset now reduces tonic up-state proxy drive and keeps delayed recruitment, preventing '
+                'non-physiological high-rate firing while preserving dendritic-filtered integration.'
+            ),
 
             # ── Core Function Translations ───────────────────────────
             'func_gax': 'Axial conductance of uniform cylinder (mS).',
@@ -408,6 +416,14 @@ class Translator:
                 '???????????? ?????? ????????? relay-????? (?????? ?????????? ???????????) '
                 '? activated burst-?????; ???? ?????????? ??? ??????? ?????????? ????????, '
                 '? ?? ??? ?????????? ????????? ?????? ???????.'
+            ),
+            'preset_l_recalibrated': (
+                'CA1 preset recalibrated: stronger leak/repolarization plus distal filtering keeps theta-paced '
+                'activity in low-throughput physiological range.'
+            ),
+            'preset_q_recalibrated': (
+                'SPN preset recalibrated: weaker tonic up-state proxy drive preserves delayed recruitment and '
+                'prevents non-physiological high-rate spiking.'
             ),
 
             # ── Перевод основных функций ───────────────────────────

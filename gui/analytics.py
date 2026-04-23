@@ -26,7 +26,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget,
                                 QLabel, QTextEdit, QHBoxLayout, QSplitter,
                                 QSizePolicy, QScrollArea, QPushButton, QMainWindow, QComboBox)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 import matplotlib
@@ -49,8 +49,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from scipy.integrate import cumulative_trapezoid
-from scipy.interpolate import griddata
-from scipy.stats import expon
+from scipy.stats import expon, gaussian_kde, norm
 from scipy.signal import stft
 from gui.text_sanitize import repair_text, repair_widget_tree
 
@@ -450,9 +449,11 @@ class FullscreenPlotViewer(QMainWindow):
     - Crosshair cursor showing coordinates
     - Interactive zoom/pan
     - Copy data to clipboard
+    - Auto-update on new simulation results (v15.0)
     """
     
-    def __init__(self, fig: Figure, title: str = "Plot Viewer", parent=None):
+    def __init__(self, fig: Figure, title: str = "Plot Viewer", parent=None, 
+                 tab_name: str = "", update_callback=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(repair_text(f"NeuroModelPort - {title}"))
@@ -460,6 +461,11 @@ class FullscreenPlotViewer(QMainWindow):
         self.canvas = FigureCanvas(fig)
         self.crosshair_lines = []
         self.crosshair_text = None
+        
+        # v15.0: Track tab name and update callback for auto-refresh
+        self._tab_name = tab_name
+        self._update_callback = update_callback
+        self._parent_analytics = parent
         
         self._build_ui()
         self._setup_crosshair()
@@ -535,6 +541,25 @@ class FullscreenPlotViewer(QMainWindow):
             clipboard = QApplication.clipboard()
             clipboard.setText(f"{x:.6f}, {y:.6f}")
             
+    def refresh_plot(self):
+        """Refresh plot with latest data from parent analytics (v15.0).
+        
+        Called when new simulation results are available.
+        """
+        if self._update_callback is None or self._parent_analytics is None:
+            return
+        
+        # Check if parent has new data
+        if not hasattr(self._parent_analytics, '_last_result') or self._parent_analytics._last_result is None:
+            return
+        
+        # Call the update callback to regenerate the figure content
+        try:
+            self._update_callback()
+            self.canvas.draw_idle()
+        except Exception as e:
+            logging.warning(f"Failed to refresh fullscreen plot '{self._tab_name}': {e}")
+    
     def closeEvent(self, event):
         """Cleanup on close."""
         # Disconnect using stored connection IDs
@@ -544,10 +569,15 @@ class FullscreenPlotViewer(QMainWindow):
                     self.canvas.mpl_disconnect(cid)
                 except Exception:
                     pass
+        super().closeEvent(event)
 
 
 class AnalyticsWidget(QTabWidget):
     """Main analytics widget — updated by MainWindow after each run."""
+    
+    # Signals for cross-tab synchronization (v15.0)
+    spike_selected = Signal(int)      # Emitted when user selects a spike (0-based index)
+    time_highlighted = Signal(float)  # Emitted when user highlights a time point (ms)
     
     def __init__(self, parent=None):
         """
@@ -583,12 +613,34 @@ class AnalyticsWidget(QTabWidget):
         self._time_marker = None  # Store vertical line marker for linked cursor
         self._build_tabs()
         repair_widget_tree(self)
-    
+
+    def closeEvent(self, event):
+        """Cleanup on close: stop CSD animation timer and close fullscreen windows."""
+        # Stop CSD play timer if active
+        if hasattr(self, '_csd_play_timer') and self._csd_play_timer is not None:
+            if self._csd_play_timer.isActive():
+                self._csd_play_timer.stop()
+            self._csd_play_timer = None
+
+        # Close any fullscreen windows
+        if hasattr(self, '_fullscreen_windows'):
+            for viewer in list(self._fullscreen_windows):
+                try:
+                    viewer.close()
+                except Exception:
+                    pass
+            self._fullscreen_windows.clear()
+
+        super().closeEvent(event)
+
     # ─────────────────────────────────────────────────────────────────
     #  TAB CONSTRUCTION
     # ─────────────────────────────────────────────────────────────────
     def _open_fullscreen_plot(self, tab_name: str):
-        """Open a fullscreen viewer for the specified tab's plot."""
+        """Open a fullscreen viewer for the specified tab's plot.
+        
+        v15.0: Now tracks tab_name and update callback for auto-refresh on new simulations.
+        """
         if tab_name not in self._tab_figures:
             return
 
@@ -608,13 +660,67 @@ class AnalyticsWidget(QTabWidget):
             # Fallback: if pickle fails, use original (may have conflicts)
             fig_copy = fig
 
-        viewer = FullscreenPlotViewer(fig_copy, title=f"Analytics - {tab_name}", parent=self)
+        # Find update callback for this tab (for auto-refresh)
+        update_callback = self._get_fullscreen_update_callback(tab_name)
+
+        viewer = FullscreenPlotViewer(
+            fig_copy, 
+            title=f"Analytics - {tab_name}", 
+            parent=self,
+            tab_name=tab_name,
+            update_callback=update_callback
+        )
         self._fullscreen_windows.append(viewer)
         
         def _cleanup(*_):
             self._fullscreen_windows = [w for w in self._fullscreen_windows if w is not viewer]
         
         viewer.destroyed.connect(_cleanup)
+    
+    def _get_fullscreen_update_callback(self, tab_name: str):
+        """Get the appropriate _update_* method for a fullscreen tab (v15.0)."""
+        # Map tab names to their update methods
+        tab_to_updater = {
+            'Spike Mechanism': self._update_spike_mechanism,
+            'Phase Plane': self._update_phase,
+            'Lyapunov (LLE)': self._update_chaos,
+            'Kymograph': self._update_kymo,
+            'Spectrogram': self._update_spectrogram,
+            'Impedance': self._update_impedance,
+            'Phase-Locking': self._update_modulation,
+            'Currents': self._update_currents,
+            'Gates': self._update_gates,
+            'Energy & Balance': self._update_energy_balance,
+            'Spike Shape': self._update_spike_shape,
+            'Poincare (ISI)': self._update_poincare,
+            'ISI Distribution': self._update_isi_dist,
+            'Oscilloscope': self._update_osc,
+            'CSD': self._update_csd,
+            'Metabolic': self._update_metabolic,
+        }
+        
+        updater = tab_to_updater.get(tab_name)
+        if updater is None:
+            return None
+        
+        # Return a wrapper that calls the updater with correct arguments
+        def _update_wrapper():
+            if self._last_result is None:
+                return
+            
+            # Get stats for updaters that need them
+            if tab_name in ['Spike Mechanism', 'Phase Plane', 'Phase-Locking', 
+                            'Spike Shape', 'Poincare (ISI)', 'ISI Distribution', 'Metabolic']:
+                updater(self._last_result, self._last_stats)
+            elif tab_name == 'Lyapunov (LLE)':
+                updater(self._last_result, self._last_stats)
+            elif tab_name == 'Energy & Balance':
+                if self._last_result.morph:
+                    updater(self._last_result)
+            else:
+                updater(self._last_result)
+        
+        return _update_wrapper
     
     def _build_tabs(self):
         # Corner widget with category filter buttons and actions
@@ -674,6 +780,7 @@ class AnalyticsWidget(QTabWidget):
             15: {'builder': '_build_tab_spike_shape', 'updater': '_update_spike_shape', 'title': 'Spike Shape', 'needs_stats': True},
             16: {'builder': '_build_tab_poincare',    'updater': '_update_poincare',       'title': 'Poincare (ISI)', 'needs_stats': True},
             17: {'builder': '_build_tab_isi_dist',    'updater': '_update_isi_dist',       'title': 'ISI Distribution', 'needs_stats': True},
+            18: {'builder': '_build_tab_osc',           'updater': '_update_osc',            'title': 'Oscilloscope'},
             19: {'builder': '_build_tab_csd',         'updater': '_update_csd',            'title': 'CSD', 'needs_morph': True},
             21: {'builder': '_build_tab_metabolic',   'updater': '_update_metabolic',      'title': 'Metabolic', 'needs_stats': True},
         }
@@ -1029,8 +1136,8 @@ class AnalyticsWidget(QTabWidget):
         )
 
     def _build_tab_spike_mech(self) -> QWidget:
-        self.fig_spike_mech, cvs = _mpl_fig(5, 1, figsize=(11, 24), tight=False)
-        self.ax_spike_mech = [self.fig_spike_mech.add_subplot(5, 1, k) for k in range(1, 6)]
+        self.fig_spike_mech, cvs = _mpl_fig(6, 1, figsize=(11, 28), tight=False)
+        self.ax_spike_mech = [self.fig_spike_mech.add_subplot(6, 1, k) for k in range(1, 7)]
         for ax in self.ax_spike_mech:
             ax.set_navigate(True)
         _set_canvas_margins(self.fig_spike_mech, left=0.08, right=0.97, top=0.97, bottom=0.05, hspace=0.55, wspace=0.28)
@@ -1076,7 +1183,7 @@ class AnalyticsWidget(QTabWidget):
             fullscreen_callback=lambda: self._open_fullscreen_plot('Spike Mechanism'),
             extra_widget=controls,
             scroll_canvas=True,
-            min_canvas_height=1600,
+            min_canvas_height=1900,
         )
 
     def _build_tab_currents(self) -> QWidget:
@@ -1521,6 +1628,14 @@ class AnalyticsWidget(QTabWidget):
         self._isi_hist_bars = None
         self._isi_fit_line = None
         self._isi_metrics_text = None
+        
+        # Spike data for cross-tab synchronization (v15.0)
+        self._isi_spike_times: np.ndarray = np.array([])
+        self._isi_selected_spike: int = -1
+        self._isi_selected_vline = ax_hist.axvline(0, color='#F38BA8', lw=2, ls='--', visible=False, label='Selected ISI')
+        
+        # Connect to spike_selected signal from Oscilloscope tab
+        self.spike_selected.connect(self._on_isi_spike_selected)
 
         ax_hist.set_xlabel('ISI (ms)')
         ax_hist.set_ylabel('Count')
@@ -1988,9 +2103,36 @@ class AnalyticsWidget(QTabWidget):
         self._update_spike_shape(result, stats)
         self._update_poincare(result, stats)
         self._update_isi_dist(result, stats)
+        self._update_osc(result)  # v15.0: Oscilloscope copy in Analytics
         self._update_metabolic(result, stats)
+        
+        # v15.0: Refresh any fullscreen windows that are still open
+        self._refresh_fullscreen_windows()
 
-
+    def _refresh_fullscreen_windows(self):
+        """Refresh all open fullscreen analytics windows with latest data (v15.0).
+        
+        Called automatically after each simulation update. Only refreshes windows
+        that are still visible to avoid wasting resources on hidden/minimized windows.
+        """
+        if not hasattr(self, '_fullscreen_windows') or len(self._fullscreen_windows) == 0:
+            return
+        
+        refreshed_count = 0
+        for viewer in self._fullscreen_windows[:]:
+            # Skip if window was closed
+            if not viewer.isVisible():
+                continue
+            
+            # Refresh the plot
+            try:
+                viewer.refresh_plot()
+                refreshed_count += 1
+            except Exception as e:
+                logging.warning(f"Failed to refresh fullscreen window: {e}")
+        
+        if refreshed_count > 0:
+            logging.debug(f"Refreshed {refreshed_count} fullscreen analytics windows")
 
     def mark_analysis_pending(self, result):
         """Show a non-empty Analytics state while background analysis is running."""
@@ -2026,6 +2168,32 @@ class AnalyticsWidget(QTabWidget):
         self._passport_status_label.setText(
             f"Analysis ready | {n_comp} compartments | {t_end:.1f} ms | spikes={n_spikes} | {freq_text}"
         )
+
+    def _on_passport_link_clicked(self, url):
+        """Handle in-passport action links and route to target analytics tabs."""
+        action = ""
+        try:
+            action = (url.path() or "").lstrip("/")
+            if not action:
+                text = url.toString()
+                if ":" in text:
+                    action = text.split(":", 1)[1]
+        except Exception:
+            action = ""
+
+        if action != "goto_currents":
+            return
+
+        self._ensure_built("_build_tab_currents")
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, _LazyPlaceholder):
+                continue
+            if self.tabText(i) == "Currents":
+                self.setCurrentIndex(i)
+                if self._last_result is not None and hasattr(self, "fig_currents"):
+                    self._update_currents(self._last_result)
+                return
     # ─────────────────────────────────────────────────────────────────
     #  0 — NEURON PASSPORT DASHBOARD
     # ─────────────────────────────────────────────────────────────────
@@ -2084,8 +2252,8 @@ class AnalyticsWidget(QTabWidget):
         self._radar_text = None
         self._current_radar_values = None
         
-        # Default L5 baseline (for comparison when no user reference)
-        self._DEFAULT_L5_BASELINE = [0.5, 0.5, 0.5, 0.5, 0.3, 0.5]
+        # Fallback baseline if no profile can be inferred.
+        self._DEFAULT_RADAR_BASELINE = [0.5, 0.5, 0.5, 0.5, 0.3, 0.5]
         
         left_layout.addWidget(cvs, stretch=1)
         
@@ -2132,7 +2300,9 @@ class AnalyticsWidget(QTabWidget):
         # HTML browser for rich text display
         self.passport_view = QTextBrowser()
         self.passport_view.setReadOnly(True)
-        self.passport_view.setOpenExternalLinks(True)
+        self.passport_view.setOpenExternalLinks(False)
+        self.passport_view.setOpenLinks(False)
+        self.passport_view.anchorClicked.connect(self._on_passport_link_clicked)
         self.passport_view.setMinimumWidth(350)
         self.passport_view.setStyleSheet("background:#0D1117; color:#C9D1D9; border:none;")
         
@@ -2243,6 +2413,11 @@ class AnalyticsWidget(QTabWidget):
             Computed biophysical metrics. If None, uses cached values.
         """
         from core.analysis import compute_biophysical_metrics
+        from core.biophysics_registry import (
+            get_radar_baseline,
+            get_reference_profile,
+            infer_reference_selector,
+        )
         
         ax = self.ax_passport_radar
         
@@ -2265,8 +2440,18 @@ class AnalyticsWidget(QTabWidget):
         self._current_radar_values = values.copy()
         values_closed = values + values[:1]
         
-        # Default L5 baseline
-        default_ref = self._DEFAULT_L5_BASELINE + self._DEFAULT_L5_BASELINE[:1]
+        default_label = "Default Ref"
+        default_ref_base = self._DEFAULT_RADAR_BASELINE
+        if hasattr(self, "_last_result") and self._last_result is not None:
+            cfg = getattr(self._last_result, "config", None)
+            if cfg is not None:
+                code, variant, context = infer_reference_selector(cfg)
+                prof = get_reference_profile(code, variant=variant, context=context)
+                baseline = get_radar_baseline(code, variant=variant, context=context)
+                if prof is not None and baseline is not None:
+                    default_ref_base = baseline
+                    default_label = f"{prof.code}:{prof.variant} ({prof.context})"
+        default_ref = list(default_ref_base) + [default_ref_base[0]]
         
         # User reference if set
         user_ref = None
@@ -2283,10 +2468,10 @@ class AnalyticsWidget(QTabWidget):
             ax.set_yticklabels(['0.25', '0.5', '0.75', '1.0'], color='#6C7086', size=8)
             ax.grid(True, color='#313244', alpha=0.5)
             
-            # Default L5 reference (dashed gray) - always show if no user ref
+            # Profile-aware default reference (dashed gray) - always show if no user ref
             self._radar_line_default, = ax.plot(
                 self._radar_angles, default_ref, '--', linewidth=1.5,
-                color='#6C7086', alpha=0.7, label='Default L5 Ref'
+                color='#6C7086', alpha=0.7, label=default_label
             )
             
             # User reference (dashed orange) - only if saved
@@ -2322,7 +2507,13 @@ class AnalyticsWidget(QTabWidget):
                 self._radar_line_ref.set_visible(False)
                 self._radar_line_default.set_visible(True)
                 self._radar_line_default.set_data(self._radar_angles, default_ref)
-        
+                self._radar_line_default.set_label(default_label)
+
+        ax.set_title(f'Biophysical Fingerprint — {default_label}', color='#CDD6F4', pad=20)
+        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1),
+                 fontsize=8, framealpha=0.8, facecolor='#1E1E2E',
+                 edgecolor='#313244', labelcolor='#CDD6F4')
+
         # Redraw
         self.fig_passport_radar.canvas.draw_idle()
 
@@ -2578,15 +2769,18 @@ class AnalyticsWidget(QTabWidget):
         # ── EXPERT INSIGHTS (v11.5 bilingual) ──
         expert_html = ""
         try:
-            from core.expert_system import (
-                generate_expert_insights, 
-                get_quick_recommendations,
-                get_language
-            )
+            from core.expert_system import generate_expert_insights, get_quick_recommendations
             
             current_lang = getattr(cfg, 'language', 'EN') or 'EN'
             
             # Build comprehensive expert stats dictionary
+            spike_amps = np.asarray(stats.get('spike_amps', []), dtype=float).reshape(-1)
+            first_spike_amp = np.nan
+            last_spike_amp = np.nan
+            if spike_amps.size > 0:
+                first_spike_amp = float(spike_amps[0])
+                last_spike_amp = float(spike_amps[-1])
+
             expert_stats = {
                 'firing_rate_hz': (fi + fs) / 2 if ns > 0 else 0,
                 'f_initial_hz': fi,
@@ -2612,6 +2806,26 @@ class AnalyticsWidget(QTabWidget):
                 'f_res_hz': stats.get('f_res_hz', np.nan),
                 'dfilter_attenuation': getattr(cfg.stim, 'dfilter_attenuation', 1.0),
                 'stim_mode': getattr(cfg.stim, 'stype', 0),
+                'spike_amps': spike_amps,
+                'first_spike_amplitude_mV': first_spike_amp,
+                'last_spike_amplitude_mV': last_spike_amp,
+                # ── v14.0 NEW: Information Theory & Efficiency metrics ──
+                'permutation_entropy_norm': stats.get('permutation_entropy_norm', 0),
+                'bits_per_nj': stats.get('bits_per_nj', np.nan),
+                'atp_nmol_cm2': stats.get('atp_nmol_cm2', 0),
+                # ── v14.0 NEW: Firing Reliability & Latency ──
+                'firing_reliability': stats.get('firing_reliability', np.nan),
+                'first_spike_latency_ms': stats.get('first_spike_latency_ms', np.nan),
+                # ── v14.0 NEW: Lyapunov Transient ──
+                'lyapunov_transient_ms': stats.get('lyapunov_transient_ms', np.nan),
+                # ── v14.0 NEW: Modulation Analysis ──
+                'modulation_valid': stats.get('modulation_valid', False),
+                'modulation_plv': stats.get('modulation_plv', np.nan),
+                'modulation_p_value': stats.get('modulation_p_value', np.nan),
+                'modulation_preferred_phase_rad': stats.get('modulation_preferred_phase_rad', np.nan),
+                'modulation_band_low_hz': stats.get('modulation_band_low_hz', np.nan),
+                'modulation_band_high_hz': stats.get('modulation_band_high_hz', np.nan),
+                'modulation_low_statistical_power': stats.get('modulation_low_statistical_power', False),
             }
             
             insights = generate_expert_insights(expert_stats, language=current_lang)
@@ -2620,8 +2834,24 @@ class AnalyticsWidget(QTabWidget):
             if insights or recommendations:
                 expert_boxes = []
                 for insight in insights:
-                    severity = insight.get('severity', 'info')
-                    msg = insight.get('message', '')
+                    msg = str(insight)
+                    msg_lower = msg.lower()
+                    if "calcium" in msg_lower or "ca2" in msg_lower or "кальц" in msg_lower:
+                        msg = (
+                            f'{msg} '
+                            f'<a href="action:goto_currents" style="color:#89B4FA">Analyze Currents</a>'
+                        )
+                    if "critical" in msg_lower or "крити" in msg_lower:
+                        severity = "critical"
+                    elif (
+                        "warning" in msg_lower
+                        or "alert" in msg_lower
+                        or "вниман" in msg_lower
+                        or "risk" in msg_lower
+                    ):
+                        severity = "warning"
+                    else:
+                        severity = "info"
                     expert_boxes.append(f'<div class="expert-box {severity}">{msg}</div>')
                 
                 if recommendations:
@@ -2825,6 +3055,13 @@ class AnalyticsWidget(QTabWidget):
         i_stim = reconstruct_stimulus_trace(result)
         imp = compute_membrane_impedance(result.t, result.v_soma, i_stim)
 
+        # Compute Q-factor from impedance (v15.0: Tier 1 feature #16)
+        from core.analysis import compute_q_factor
+        q_result = compute_q_factor(imp)
+        q_factor = q_result.get("q_factor", np.nan)
+        fwhm = q_result.get("fwhm_hz", np.nan)
+        classification = q_result.get("classification", "none")
+
         if not imp.get("valid", False):
             self._impedance_lines["zmag"].set_data([], [])
             self._impedance_lines["zph"].set_data([], [])
@@ -2853,11 +3090,19 @@ class AnalyticsWidget(QTabWidget):
             self._impedance_lines["fres"].set_visible(False)
         ax_mag.relim()
         ax_mag.autoscale_view()
+        # Build title with Q-factor info (v15.0)
+        title_parts = ["Membrane Impedance |Z(f)|"]
+        if np.isfinite(fres):
+            title_parts.append(f"peak={zres:.2f} kΩ·cm² @ {fres:.2f} Hz")
+        if np.isfinite(q_factor):
+            q_label = {"integrator": "Integrator", "moderate": "Moderate", "resonator": "Resonator"}.get(classification, classification)
+            title_parts.append(f"Q={q_factor:.2f} ({q_label})")
+        
         _configure_ax_interactive(
             ax_mag,
-            title=f"Membrane Impedance |Z(f)|  (peak={zres:.2f} kΩ·cmÂ˛ @ {fres:.2f} Hz)" if np.isfinite(fres) else "Membrane Impedance |Z(f)|",
+            title=" | ".join(title_parts),
             xlabel="Frequency (Hz)",
-            ylabel="|Z| (kΩ·cmÂ˛)",
+            ylabel="|Z| (kΩ·cm²)",
             show_legend=True,
         )
 
@@ -3068,6 +3313,12 @@ class AnalyticsWidget(QTabWidget):
             if np.max(np.abs(curr_arr)) > 1e-9:
                 currents[name] = curr_arr
         currents_signature = tuple(currents.keys())
+        n_rows = max(1, len(currents) + 1)
+        required_height = int(max(800, n_rows * 160))
+        self.cvs_currents.setMinimumHeight(required_height)
+        target_figheight = required_height / max(float(self.fig_currents.dpi), 1.0)
+        if abs(float(self.fig_currents.get_figheight()) - target_figheight) > 1e-2:
+            self.fig_currents.set_figheight(target_figheight)
 
         # Rebuild checkboxes if currents changed
         if self._currents_signature != currents_signature:
@@ -3352,7 +3603,7 @@ class AnalyticsWidget(QTabWidget):
         self._spike_mech_last_stats = stats
         t = np.asarray(result.t, dtype=float)
         v = np.asarray(result.v_soma, dtype=float)
-        ax1, ax2, ax3, ax4, ax5 = self.ax_spike_mech
+        ax1, ax2, ax3, ax4, ax5, ax6 = self.ax_spike_mech
         self._reset_spike_mech_axes()
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
@@ -3361,7 +3612,7 @@ class AnalyticsWidget(QTabWidget):
         self._spike_mech_spike_times = np.asarray(spike_times, dtype=float)
 
         if len(peak_idx) == 0:
-            for ax, title in zip(self.ax_spike_mech, ['Overview', 'Aligned spike', 'Currents', 'Gates and state', 'Interpretation']):
+            for ax, title in zip(self.ax_spike_mech, ['Overview', 'Aligned spike', 'Currents', 'Gates and state', 'V vs dV/dt', 'Interpretation']):
                 ax.text(0.5, 0.5, 'No spikes detected for the current trace.', ha='center', va='center', transform=ax.transAxes, fontsize=11)
                 _configure_ax_interactive(ax, title=title, xlabel='', ylabel='', show_legend=False)
             self.cvs_spike_mech.draw_idle()
@@ -3446,7 +3697,13 @@ class AnalyticsWidget(QTabWidget):
             if normalize:
                 y = y / (np.max(np.abs(y)) + 1e-12)
             ax3.plot(t_win, y, lw=1.6, color=CHAN_COLORS.get(name, '#888888'), label=name)
-        _configure_ax_interactive(ax3, title='Current decomposition around selected spike', xlabel='Time from peak (ms)', ylabel='Normalized current' if normalize else 'Current (uA/cm^2)', show_legend=True)
+        _configure_ax_interactive(
+            ax3,
+            title='Current decomposition around selected spike',
+            xlabel='Time from peak (ms)',
+            ylabel='Normalized [0-1]' if normalize else 'True Scale (µA/cm²)',
+            show_legend=True,
+        )
 
         gates = extract_gate_traces(result)
         gate_items = sorted(gates.items(), key=lambda kv: float(np.nanmax(kv[1]) - np.nanmin(kv[1])), reverse=True)
@@ -3469,6 +3726,23 @@ class AnalyticsWidget(QTabWidget):
             if np.max(np.abs(atp_seg)) > 0:
                 ax4.plot(t_win, atp_seg / (np.max(np.abs(atp_seg)) + 1e-12), ':', color='#A6E3A1', label='ATP (norm)')
         _configure_ax_interactive(ax4, title='Gate and state context', xlabel='Time from peak (ms)', ylabel='State / normalized pool', show_legend=True)
+
+        # Neurobiology standard view: phase portrait of the selected spike (V vs dV/dt).
+        ax5.plot(v_win, dvdt_win, color='#89B4FA', lw=2.0, label='Spike loop')
+        ax5.scatter([v_win[0]], [dvdt_win[0]], s=42, color='#A6E3A1', zorder=4, label='Window start')
+        ax5.scatter([v_win[-1]], [dvdt_win[-1]], s=42, color='#F9E2AF', zorder=4, label='Window end')
+        if np.isfinite(thr):
+            thr_idx = int(np.argmin(np.abs(v_win - thr)))
+            dvdt_thr = float(dvdt_win[thr_idx]) if len(dvdt_win) > thr_idx else 0.0
+            ax5.scatter([thr], [dvdt_thr], s=54, color='#F38BA8', zorder=5, label='Threshold')
+            ax5.axvline(thr, color='#F38BA8', lw=1.2, ls='--', alpha=0.75)
+        _configure_ax_interactive(
+            ax5,
+            title='Spike Phase Portrait (V vs dV/dt)',
+            xlabel='V (mV)',
+            ylabel='dV/dt (mV/ms)',
+            show_legend=True,
+        )
 
         inward = []
         outward = []
@@ -3499,8 +3773,8 @@ class AnalyticsWidget(QTabWidget):
             summary_lines.append('Interpretation: A-type potassium current is likely delaying re-excitation and sharpening onset.')
         else:
             summary_lines.append('Interpretation: classic Na/K balance dominates this spike waveform.')
-        ax5.axis('off')
-        ax5.text(0.02, 0.98, '\n'.join(summary_lines), ha='left', va='top', transform=ax5.transAxes, fontsize=11,
+        ax6.axis('off')
+        ax6.text(0.02, 0.98, '\n'.join(summary_lines), ha='left', va='top', transform=ax6.transAxes, fontsize=11,
                  bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.92), color='#CDD6F4')
 
         self.cvs_spike_mech.draw_idle()
@@ -3844,42 +4118,41 @@ class AnalyticsWidget(QTabWidget):
 
         # ── Vector Field Overlay ───────────────────────────────────────
         if hasattr(self, '_cb_vector_field') and self._cb_vector_field.isChecked():
-            # v11.7: Check for sufficient variance to prevent griddata singular matrix crash
-            # when neuron is silent (constant V) or gate is frozen
-            has_variance = len(t) > 1 and len(V) > 1 and np.std(V) > 1e-4 and np.std(gate_t) > 1e-4
-            if has_variance:
-                dt = float(np.median(np.diff(t)))
-                dV = np.gradient(V, dt)
-                dgate = np.gradient(gate_t, dt)
-                # Create grid for quiver plot
-                V_grid = np.linspace(-90, 40, 15)
-                gate_grid = np.linspace(0, 1, 10)
-                VG, GG = np.meshgrid(V_grid, gate_grid)
-                # Interpolate derivatives to grid
-                points = np.column_stack([V, gate_t])
-                dV_grid = griddata(points, dV, (VG, GG), method='linear', fill_value=0)
-                dG_grid = griddata(points, dgate, (VG, GG), method='linear', fill_value=0)
-                # Normalize arrows
-                mag = np.sqrt(dV_grid**2 + dG_grid**2)
-                mag[mag == 0] = 1
-                scale = 5.0
+            field = self._compute_true_phase_vector_field(
+                result,
+                gate_key,
+                tuple(ax.get_xlim()),
+                tuple(ax.get_ylim()),
+            )
+            if field is not None:
+                vg, gg, dv_grid, dg_grid, mag = field
+                ref = float(np.nanpercentile(mag, 90)) if np.any(np.isfinite(mag)) else 1.0
+                if ref <= 1e-12:
+                    ref = 1.0
+                u = np.nan_to_num(dv_grid / ref, nan=0.0, posinf=0.0, neginf=0.0)
+                w = np.nan_to_num(dg_grid / ref, nan=0.0, posinf=0.0, neginf=0.0)
+                color_mag = np.nan_to_num(np.log10(np.maximum(mag, 1e-12)), nan=0.0, posinf=0.0, neginf=0.0)
                 if self._vector_field_quiver is None:
                     self._vector_field_quiver = ax.quiver(
-                        VG, GG, dV_grid/mag*scale, dG_grid/mag*scale,
-                        mag, cmap='viridis', scale=20, width=0.003, alpha=0.7
+                        vg,
+                        gg,
+                        u,
+                        w,
+                        color_mag,
+                        cmap='viridis',
+                        angles='xy',
+                        scale_units='xy',
+                        scale=1.0,
+                        width=0.0028,
+                        alpha=0.75,
+                        zorder=2,
                     )
                 else:
-                    self._vector_field_quiver.set_offsets(np.column_stack([VG.ravel(), GG.ravel()]))
-                    self._vector_field_quiver.set_UVC(
-                        (dV_grid/mag*scale).ravel(),
-                        (dG_grid/mag*scale).ravel(),
-                        mag.ravel()
-                    )
-            else:
-                # Remove quiver if insufficient variance (silent neuron)
-                if self._vector_field_quiver is not None:
-                    self._vector_field_quiver.remove()
-                    self._vector_field_quiver = None
+                    self._vector_field_quiver.set_offsets(np.column_stack([vg.ravel(), gg.ravel()]))
+                    self._vector_field_quiver.set_UVC(u.ravel(), w.ravel(), color_mag.ravel())
+            elif self._vector_field_quiver is not None:
+                self._vector_field_quiver.remove()
+                self._vector_field_quiver = None
         else:
             if self._vector_field_quiver is not None:
                 self._vector_field_quiver.remove()
@@ -3898,6 +4171,268 @@ class AnalyticsWidget(QTabWidget):
         """Handle vector field checkbox change."""
         if hasattr(self, '_last_result') and self._last_result is not None:
             self._update_phase(self._last_result, self._last_stats)
+
+    def _build_phase_physics_params(self, result):
+        """Build a PhysicsParams object for local phase-plane RHS evaluation."""
+        from core.physics_params import create_physics_params
+        from core.solver import NeuronSolver
+
+        cfg = result.config
+        morph = getattr(result, "morph", None)
+        if not isinstance(morph, dict):
+            return None
+
+        n_comp = int(getattr(result, "n_comp", 0))
+        if n_comp <= 0:
+            return None
+
+        def _vec(name: str, fallback: float = 0.0) -> np.ndarray:
+            raw = morph.get(name)
+            if raw is None:
+                return np.full(n_comp, fallback, dtype=np.float64)
+            arr = np.asarray(raw, dtype=np.float64).reshape(-1)
+            if arr.size == n_comp:
+                return arr
+            out = np.full(n_comp, fallback, dtype=np.float64)
+            n_copy = min(n_comp, arr.size)
+            out[:n_copy] = arr[:n_copy]
+            return out
+
+        stim_mode_map = {"soma": 0, "ais": 1, "dendritic_filtered": 2}
+        primary_mode = stim_mode_map.get(getattr(cfg.stim_location, "location", "soma"), 0)
+        use_dfilter_primary = int(
+            primary_mode == 2
+            and bool(getattr(cfg.dendritic_filter, "enabled", False))
+            and float(getattr(cfg.dendritic_filter, "tau_dendritic_ms", 0.0)) > 0.0
+        )
+        dfilter_lambda_um = float(getattr(cfg.dendritic_filter, "space_constant_um", 150.0))
+        dfilter_distance_um = float(getattr(cfg.dendritic_filter, "distance_um", 0.0))
+        dfilter_tau_ms = float(getattr(cfg.dendritic_filter, "tau_dendritic_ms", 0.0))
+        dfilter_mode = 1 if (
+            getattr(cfg.dendritic_filter, "filter_mode", "Classic (DC)") == "Physiological (AC)"
+        ) else 0
+        dfilter_attenuation = 1.0
+        if use_dfilter_primary and dfilter_lambda_um > 0.0:
+            dfilter_attenuation = float(np.exp(-dfilter_distance_um / dfilter_lambda_um))
+
+        dual_cfg = getattr(cfg, "dual_stimulation", None)
+        dual_enabled = int(bool(dual_cfg is not None and getattr(dual_cfg, "enabled", False)))
+        secondary_location = getattr(dual_cfg, "secondary_location", "soma") if dual_cfg is not None else "soma"
+        secondary_mode = stim_mode_map.get(secondary_location, 0)
+        secondary_tau = float(getattr(dual_cfg, "secondary_tau_dendritic_ms", 0.0)) if dual_cfg is not None else 0.0
+        use_dfilter_secondary = int(dual_enabled == 1 and secondary_mode == 2 and secondary_tau > 0.0)
+        dfilter_lambda_um_2 = float(getattr(dual_cfg, "secondary_space_constant_um", 150.0)) if dual_cfg is not None else 150.0
+        dfilter_distance_um_2 = float(getattr(dual_cfg, "secondary_distance_um", 0.0)) if dual_cfg is not None else 0.0
+        dfilter_mode_2 = 1 if (
+            dual_cfg is not None
+            and getattr(dual_cfg, "secondary_filter_mode", "Classic (DC)") == "Physiological (AC)"
+        ) else 0
+        dfilter_attenuation_2 = 1.0
+        if use_dfilter_secondary and dfilter_lambda_um_2 > 0.0:
+            dfilter_attenuation_2 = float(np.exp(-dfilter_distance_um_2 / dfilter_lambda_um_2))
+
+        na_i_rest = float(getattr(cfg.metabolism, "na_i_rest_mM", 12.0))
+        k_o_rest = float(getattr(cfg.metabolism, "k_o_rest_mM", 3.5))
+        na_i = getattr(result, "na_i", None)
+        k_o = getattr(result, "k_o", None)
+        if na_i is not None:
+            na_arr = np.asarray(na_i, dtype=float)
+            if na_arr.size > 0:
+                na_i_rest = float(np.nanmean(na_arr[0, :] if na_arr.ndim == 2 else na_arr))
+        if k_o is not None:
+            ko_arr = np.asarray(k_o, dtype=float)
+            if ko_arr.size > 0:
+                k_o_rest = float(np.nanmean(ko_arr[0, :] if ko_arr.ndim == 2 else ko_arr))
+
+        phi_mat = np.vstack([
+            cfg.env.build_phi_vector(cfg.env.Q10_Na, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_K, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_Ih, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_Ca, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_IA, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_TCa, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_IM, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_NaP, n_comp),
+            cfg.env.build_phi_vector(cfg.env.Q10_NaR, n_comp),
+        ]).astype(np.float64, copy=False)
+
+        try:
+            return create_physics_params(
+                n_comp=n_comp,
+                en_ih=bool(cfg.channels.enable_Ih),
+                en_ica=bool(cfg.channels.enable_ICa),
+                en_ia=bool(cfg.channels.enable_IA),
+                en_sk=bool(cfg.channels.enable_SK),
+                dyn_ca=bool(cfg.calcium.dynamic_Ca),
+                en_itca=bool(cfg.channels.enable_ITCa),
+                en_im=bool(cfg.channels.enable_IM),
+                en_nap=bool(cfg.channels.enable_NaP),
+                en_nar=bool(cfg.channels.enable_NaR),
+                dyn_atp=bool(cfg.metabolism.enable_dynamic_atp),
+                gbar_mat=np.vstack([
+                    _vec("gNa_v"),
+                    _vec("gK_v"),
+                    _vec("gL_v"),
+                    _vec("gIh_v"),
+                    _vec("gCa_v"),
+                    _vec("gA_v"),
+                    _vec("gSK_v"),
+                    _vec("gTCa_v"),
+                    _vec("gIM_v"),
+                    _vec("gNaP_v"),
+                    _vec("gNaR_v"),
+                ]),
+                ena=float(cfg.channels.ENa),
+                ek=float(cfg.channels.EK),
+                el=float(cfg.channels.EL),
+                eih=float(cfg.channels.E_Ih),
+                ea=float(cfg.channels.EK),
+                eca=float(cfg.channels.E_Ca),
+                e_rev_syn_primary=float(cfg.channels.e_rev_syn_primary),
+                e_rev_syn_secondary=float(cfg.channels.e_rev_syn_secondary),
+                cm_v=_vec("Cm_v", fallback=float(cfg.channels.Cm)),
+                l_data=np.asarray(morph.get("L_data", np.zeros(0, dtype=np.float64)), dtype=np.float64),
+                l_indices=np.asarray(morph.get("L_indices", np.zeros(0, dtype=np.int32)), dtype=np.int32),
+                l_indptr=np.asarray(morph.get("L_indptr", np.zeros(0, dtype=np.int32)), dtype=np.int32),
+                phi_mat=phi_mat,
+                t_kelvin=float(cfg.env.T_celsius + 273.15),
+                ca_ext=float(cfg.calcium.Ca_ext),
+                ca_rest=float(cfg.calcium.Ca_rest),
+                tau_ca=float(cfg.calcium.tau_Ca),
+                b_ca=NeuronSolver._build_b_ca_vector(cfg, morph),
+                mg_ext=float(cfg.env.Mg_ext),
+                nmda_mg_block_mM=float(getattr(cfg.env, "nmda_mg_block_mM", 3.57)),
+                tau_sk=float(getattr(cfg.channels, "tau_SK", 15.0)),
+                im_speed_multiplier=float(getattr(cfg.channels, "im_speed_multiplier", 1.0)),
+                g_katp_max=float(cfg.metabolism.g_katp_max),
+                katp_kd_atp_mM=float(cfg.metabolism.katp_kd_atp_mM),
+                atp_max_mM=float(cfg.metabolism.atp_max_mM),
+                atp_synthesis_rate=float(cfg.metabolism.atp_synthesis_rate),
+                na_i_rest_mM=na_i_rest,
+                na_ext_mM=float(cfg.metabolism.na_ext_mM),
+                k_i_mM=float(cfg.metabolism.k_i_mM),
+                k_o_rest_mM=k_o_rest,
+                ion_drift_gain=float(cfg.metabolism.ion_drift_gain),
+                k_o_clearance_tau_ms=float(cfg.metabolism.k_o_clearance_tau_ms),
+                pump_max_capacity=float(getattr(cfg.metabolism, "pump_max_capacity", 0.25)),
+                km_na=float(getattr(cfg.metabolism, "km_na", 15.0)),
+                stype=np.int32(0),
+                iext=0.0,
+                t0=0.0,
+                td=max(float(getattr(cfg.stim, "pulse_dur", 1.0)), 1.0),
+                atau=max(float(getattr(cfg.stim, "alpha_tau", 1.0)), 1e-6),
+                zap_f0_hz=float(getattr(cfg.stim, "zap_f0_hz", 0.5)),
+                zap_f1_hz=float(getattr(cfg.stim, "zap_f1_hz", 40.0)),
+                event_times_arr=np.zeros(0, dtype=np.float64),
+                n_events=np.int32(0),
+                event_times_arr_2=np.zeros(0, dtype=np.float64),
+                n_events_2=np.int32(0),
+                stim_comp=np.int32(int(getattr(cfg.stim, "stim_comp", 0))),
+                stim_mode=np.int32(primary_mode),
+                use_dfilter_primary=np.int32(use_dfilter_primary),
+                dfilter_distance_um=float(dfilter_distance_um),
+                dfilter_lambda_um=float(max(dfilter_lambda_um, 1e-9)),
+                dfilter_tau_ms=float(dfilter_tau_ms),
+                dfilter_input_freq_hz=float(getattr(cfg.dendritic_filter, "input_frequency", 100.0)),
+                dfilter_filter_mode=np.int32(dfilter_mode),
+                dfilter_attenuation=float(dfilter_attenuation),
+                dual_stim_enabled=np.int32(dual_enabled),
+                stype_2=np.int32(0),
+                iext_2=0.0,
+                t0_2=0.0,
+                td_2=max(float(getattr(dual_cfg, "secondary_duration", 1.0)) if dual_cfg is not None else 1.0, 1.0),
+                atau_2=max(float(getattr(dual_cfg, "secondary_alpha_tau", 1.0)) if dual_cfg is not None else 1.0, 1e-6),
+                zap_f0_hz_2=float(getattr(dual_cfg, "secondary_zap_f0_hz", getattr(cfg.stim, "zap_f0_hz", 0.5)) if dual_cfg is not None else getattr(cfg.stim, "zap_f0_hz", 0.5)),
+                zap_f1_hz_2=float(getattr(dual_cfg, "secondary_zap_f1_hz", getattr(cfg.stim, "zap_f1_hz", 40.0)) if dual_cfg is not None else getattr(cfg.stim, "zap_f1_hz", 40.0)),
+                stim_comp_2=np.int32(0),
+                stim_mode_2=np.int32(secondary_mode),
+                use_dfilter_secondary=np.int32(use_dfilter_secondary),
+                dfilter_distance_um_2=float(dfilter_distance_um_2),
+                dfilter_lambda_um_2=float(max(dfilter_lambda_um_2, 1e-9)),
+                dfilter_tau_ms_2=float(secondary_tau),
+                dfilter_input_freq_hz_2=float(getattr(dual_cfg, "secondary_input_frequency", 100.0) if dual_cfg is not None else 100.0),
+                dfilter_filter_mode_2=np.int32(dfilter_mode_2),
+                dfilter_attenuation_2=float(dfilter_attenuation_2),
+                gna_max=float(cfg.channels.gNa_max),
+                gk_max=float(cfg.channels.gK_max),
+            )
+        except Exception:
+            logging.exception("Failed to build phase-plane PhysicsParams")
+            return None
+
+    def _compute_true_phase_vector_field(self, result, gate_key: str, v_bounds: tuple[float, float], gate_bounds: tuple[float, float]):
+        """Compute true local derivatives on a V-gate mesh using rhs_multicompartment."""
+        from core.physics_params import state_slices_from_offsets
+        from core.rhs import rhs_multicompartment
+
+        physics = self._build_phase_physics_params(result)
+        if physics is None:
+            return None
+
+        gate_map = {
+            "m": "m",
+            "h": "h",
+            "n": "n",
+            "r": "r",
+            "s": "s",
+            "u": "u",
+            "a": "a",
+            "b": "b",
+            "p": "p",
+            "q": "q",
+            "w": "w",
+            "x": "x",
+            "y": "y_nr",
+            "j": "j_nr",
+            "z_sk": "z_sk",
+        }
+        gate_state = gate_map.get(gate_key)
+        if gate_state is None:
+            return None
+
+        slices = state_slices_from_offsets(physics.state_offsets, int(result.n_comp))
+        gate_slice = slices.get(gate_state)
+        if gate_slice is None:
+            return None
+
+        source_result = self._last_result if getattr(self, "_last_result", None) is not None else result
+        y_matrix = np.asarray(getattr(source_result, "y", np.array([])), dtype=np.float64)
+        if y_matrix.ndim != 2 or y_matrix.shape[0] == 0 or y_matrix.shape[1] == 0:
+            return None
+
+        y_mock = np.mean(y_matrix, axis=1, dtype=np.float64)
+        y_mock = np.asarray(y_mock, dtype=np.float64).copy()
+        dydt = np.zeros_like(y_mock)
+
+        v_idx = int(physics.state_offsets.off_v)
+        gate_idx = int(gate_slice.start)
+        if gate_idx < 0 or gate_idx >= y_mock.size or v_idx < 0 or v_idx >= y_mock.size:
+            return None
+
+        v_lo, v_hi = float(v_bounds[0]), float(v_bounds[1])
+        g_lo, g_hi = float(gate_bounds[0]), float(gate_bounds[1])
+        if not np.isfinite(v_lo) or not np.isfinite(v_hi) or v_hi <= v_lo:
+            v_lo, v_hi = -100.0, 60.0
+        if not np.isfinite(g_lo) or not np.isfinite(g_hi) or g_hi <= g_lo:
+            g_lo, g_hi = -0.05, 1.05
+
+        v_grid = np.linspace(v_lo, v_hi, 18)
+        gate_grid = np.linspace(g_lo, g_hi, 14)
+        vg, gg = np.meshgrid(v_grid, gate_grid)
+        dv_grid = np.zeros_like(vg)
+        dg_grid = np.zeros_like(vg)
+
+        for i in range(vg.shape[0]):
+            for j in range(vg.shape[1]):
+                y_mock[v_idx] = vg[i, j]
+                y_mock[gate_idx] = gg[i, j]
+                dydt.fill(0.0)
+                rhs_multicompartment(0.0, y_mock, physics, dydt)
+                dv_grid[i, j] = dydt[v_idx]
+                dg_grid[i, j] = dydt[gate_idx]
+
+        mag = np.sqrt(dv_grid ** 2 + dg_grid ** 2)
+        return vg, gg, dv_grid, dg_grid, mag
 
     def _update_kymo(self, result):
         if not hasattr(self, 'fig_kymo'):
@@ -4388,10 +4923,17 @@ class AnalyticsWidget(QTabWidget):
         self.cvs_spike_shape.draw_idle()
 
     # ─────────────────────────────────────────────────────────────────
-    #  17 — POINCARĂ‰ PLOT (ISI DYNAMICS)
+    #  17 — POINCARĂ‰ PLOT (ISI DYNAMICS) — v15.0 Enhanced
     # ─────────────────────────────────────────────────────────────────
     def _update_poincare(self, result, stats: dict):
-        """Poincare plot of ISI dynamics: ISI[n+1] vs ISI[n]."""
+        """Poincare plot of ISI dynamics: ISI[n+1] vs ISI[n] with scientific metrics.
+        
+        v15.0 Enhancements:
+        - SD1/SD2 cardiac-like analysis (short-term vs long-term variability)
+        - Covariance ellipse showing data distribution
+        - Regression line for trend analysis
+        - Pattern classification (regular, chaotic, bursting)
+        """
         if not hasattr(self, 'fig_poincare'):
             return  # tab not yet visited
         from core.analysis import detect_spikes
@@ -4399,6 +4941,14 @@ class AnalyticsWidget(QTabWidget):
         t = np.asarray(result.t, dtype=float)
         v = np.asarray(result.v_soma, dtype=float)
         ax = self.ax_poincare
+
+        # Clear previous dynamic elements
+        for artist in getattr(self, '_poincare_dynamic_artists', []):
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self._poincare_dynamic_artists = []
 
         kwargs = _spike_detect_kwargs_from_stats(stats)
         peak_idx, spike_times, _ = detect_spikes(v, t, **kwargs)
@@ -4409,11 +4959,11 @@ class AnalyticsWidget(QTabWidget):
             self._poincare_lines["scatter"].set_offsets(np.empty((0, 2)))
             self._poincare_lines["scatter"].set_array(np.array([]))
             _set_line_data(self._poincare_lines["diag"])
-            self._poincare_lines["msg"].set_text('Need >=3 spikes for Poincare plot')
+            self._poincare_lines["msg"].set_text('Need ≥3 spikes for Poincaré plot')
             self._poincare_lines["msg"].set_visible(True)
             _configure_ax_interactive(
                 ax,
-                title='Poincare Plot (ISI Dynamics)',
+                title='Poincaré Plot (ISI Dynamics)',
                 xlabel='ISI[n] (ms)',
                 ylabel='ISI[n+1] (ms)',
                 show_legend=False,
@@ -4424,10 +4974,11 @@ class AnalyticsWidget(QTabWidget):
         # Calculate ISIs
         isi = np.diff(spike_times)
 
-        # Poincare plot: ISI[n+1] vs ISI[n]
+        # Poincaré plot: ISI[n+1] vs ISI[n]
         isi_n = isi[:-1]
         isi_n_plus_1 = isi[1:]
 
+        # Update scatter with time-based coloring
         offsets = np.column_stack([isi_n, isi_n_plus_1])
         self._poincare_lines["scatter"].set_offsets(offsets)
         self._poincare_lines["scatter"].set_array(np.arange(len(isi_n), dtype=float))
@@ -4435,25 +4986,164 @@ class AnalyticsWidget(QTabWidget):
         # Diagonal line (ISI[n+1] = ISI[n])
         isi_min = min(isi_n.min(), isi_n_plus_1.min())
         isi_max = max(isi_n.max(), isi_n_plus_1.max())
-        _set_line_data(self._poincare_lines["diag"], [isi_min, isi_max], [isi_min, isi_max], name="poincare_diag")
+        margin = (isi_max - isi_min) * 0.05 if isi_max > isi_min else 1.0
+        plot_min = isi_min - margin
+        plot_max = isi_max + margin
+        _set_line_data(self._poincare_lines["diag"], [plot_min, plot_max], [plot_min, plot_max], name="Identity (regular firing)")
+
+        # ── Scientific Analysis ──
+        if len(isi_n) >= 3:
+            # SD1/SD2 analysis (cardiac RR interval analysis applied to neurons)
+            # SD1: short-term variability (perpendicular to identity line)
+            # SD2: long-term variability (along identity line)
+            sd1, sd2 = self._compute_poincare_sd(isi_n, isi_n_plus_1)
+            
+            # Covariance ellipse (shows data distribution)
+            if len(isi_n) >= 5:
+                ellipse = self._draw_poincare_ellipse(ax, isi_n, isi_n_plus_1, sd1, sd2)
+                if ellipse:
+                    self._poincare_dynamic_artists.append(ellipse)
+            
+            # Pattern classification based on SD1/SD2 ratio
+            pattern_type = self._classify_poincare_pattern(sd1, sd2, isi)
+            
+            # Regression line for trend
+            if len(isi_n) >= 5:
+                try:
+                    z = np.polyfit(isi_n, isi_n_plus_1, 1)
+                    p = np.poly1d(z)
+                    trend_line = ax.plot([isi_min, isi_max], [p(isi_min), p(isi_max)], 
+                                        'r--', alpha=0.5, lw=1, label=f'Trend (r={np.corrcoef(isi_n, isi_n_plus_1)[0,1]:.2f})')[0]
+                    self._poincare_dynamic_artists.append(trend_line)
+                except Exception:
+                    pass
+        else:
+            sd1 = sd2 = np.nan
+            pattern_type = "Insufficient data"
+
+        # Build informative title
+        title_parts = [f"Poincaré Plot (N={n_sp} spikes, {len(isi)} ISIs)"]
+        if not np.isnan(sd1):
+            title_parts.append(f"SD1={sd1:.1f}ms, SD2={sd2:.1f}ms ({pattern_type})")
 
         _configure_ax_interactive(
             ax,
-            title=f'Poincare Plot (ISI Dynamics, N={n_sp})',
+            title=" | ".join(title_parts),
             xlabel='ISI[n] (ms)',
             ylabel='ISI[n+1] (ms)',
             show_legend=True,
         )
         ax.grid(alpha=0.2)
         ax.set_aspect('equal', adjustable='datalim')
+        ax.set_xlim(plot_min, plot_max)
+        ax.set_ylim(plot_min, plot_max)
+
+        # ── Interactivity: Click to select spike ──
+        # Store spike indices for pick event mapping
+        self._poincare_spike_indices = np.arange(1, len(isi))  # ISI[n+1] corresponds to spike 1,2,3...
+        
+        # Connect pick event for scatter plot
+        if not hasattr(self, '_poincare_pick_connected'):
+            self.cvs_poincare.mpl_connect('pick_event', self._on_poincare_pick)
+            self._poincare_pick_connected = True
+        
+        # Enable picking on scatter plot
+        self._poincare_lines["scatter"].set_picker(5)  # 5 pixel tolerance
 
         self.cvs_poincare.draw_idle()
 
+    def _on_poincare_pick(self, event):
+        """Handle pick event on Poincaré plot - emit spike selection."""
+        if event.artist == self._poincare_lines["scatter"]:
+            ind = event.ind[0] if hasattr(event, 'ind') and len(event.ind) > 0 else None
+            if ind is not None and hasattr(self, '_poincare_spike_indices'):
+                spike_idx = int(self._poincare_spike_indices[ind])
+                self.spike_selected.emit(spike_idx)
+                # Also emit time highlight for sync
+                if hasattr(self, '_isi_spike_times') and spike_idx < len(self._isi_spike_times):
+                    t_spike = self._isi_spike_times[spike_idx]
+                    self.time_highlighted.emit(t_spike)
+
+    def _compute_poincare_sd(self, x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+        """Compute SD1 and SD2 from Poincaré plot coordinates.
+        
+        SD1: Standard deviation perpendicular to identity line (short-term variability)
+        SD2: Standard deviation along identity line (long-term variability)
+        
+        Returns:
+            (SD1, SD2) in same units as input
+        """
+        # Rotate coordinates by 45 degrees
+        # x' = (x + y) / sqrt(2) — along identity line
+        # y' = (y - x) / sqrt(2) — perpendicular to identity line
+        x_rot = (x + y) / np.sqrt(2)
+        y_rot = (y - x) / np.sqrt(2)
+        
+        sd1 = float(np.std(y_rot, ddof=1))  # Perpendicular (short-term)
+        sd2 = float(np.std(x_rot, ddof=1))  # Along line (long-term)
+        
+        return sd1, sd2
+
+    def _draw_poincare_ellipse(self, ax, x: np.ndarray, y: np.ndarray, sd1: float, sd2: float):
+        """Draw covariance ellipse on Poincaré plot."""
+        try:
+            from matplotlib.patches import Ellipse
+            
+            # Center at mean
+            center_x = float(np.mean(x))
+            center_y = float(np.mean(y))
+            
+            # Ellipse parameters (1 SD = ~68% confidence)
+            width = 2 * sd2 * np.sqrt(2)  # Convert back from rotated coordinates
+            height = 2 * sd1 * np.sqrt(2)
+            
+            # Angle is 45 degrees (aligned with identity line)
+            angle = 45.0
+            
+            ellipse = Ellipse((center_x, center_y), width, height, angle=angle,
+                             fill=False, edgecolor='#E67E22', linestyle='--', 
+                             linewidth=1.5, alpha=0.7, label='1 SD ellipse')
+            ax.add_patch(ellipse)
+            return ellipse
+        except Exception:
+            return None
+
+    def _classify_poincare_pattern(self, sd1: float, sd2: float, isi: np.ndarray) -> str:
+        """Classify ISI pattern based on Poincaré geometry.
+        
+        Returns:
+            Pattern type string for display
+        """
+        if np.isnan(sd1) or np.isnan(sd2) or sd2 < 1e-6:
+            return "Unknown"
+        
+        ratio = sd1 / sd2
+        cv_isi = float(np.std(isi) / np.mean(isi)) if np.mean(isi) > 0 else 0
+        
+        # Classification based on SD1/SD2 ratio and CV
+        if ratio < 0.3 and cv_isi < 0.2:
+            return "Regular (periodic)"
+        elif ratio > 0.8 and cv_isi > 0.7:
+            return "Chaotic/Random"
+        elif ratio > 0.5 and cv_isi > 0.3:
+            return "Bursting"
+        elif sd2 > 2 * sd1:
+            return "Trending (adaptation)"
+        else:
+            return "Complex"
+
     # ─────────────────────────────────────────────────────────────────
-    #  18 — ISI DISTRIBUTION (Shannon Entropy Dashboard)
+    #  18 — ISI DISTRIBUTION (Shannon Entropy Dashboard) — v15.0 Enhanced
     # ─────────────────────────────────────────────────────────────────
     def _update_isi_dist(self, result, stats: dict):
-        """Update ISI Distribution histogram with Shannon entropy metrics."""
+        """Update ISI Distribution with Shannon entropy and goodness-of-fit metrics.
+        
+        v15.0 Enhancements:
+        - Local Variation (LV) metric for robust burst detection
+        - Goodness-of-fit: KS test, AIC for model selection
+        - Scientific classification with confidence levels
+        - Enhanced visualization with fit quality indicators
+        """
         if not hasattr(self, 'fig_isi_dist'):
             return
 
@@ -4487,79 +5177,479 @@ class AnalyticsWidget(QTabWidget):
         # Calculate ISIs
         isi = np.diff(spike_times)
 
-        # Histogram
+        # Histogram with optimal binning (Sturges' rule)
         ax_hist.clear()
-        bins = min(20, max(5, n_spikes // 2))
-        counts, bin_edges, patches = ax_hist.hist(isi, bins=bins, alpha=0.7, color='#89B4FA', edgecolor='#45475A')
+        n_bins = max(5, int(np.ceil(np.log2(len(isi)) + 1))) if len(isi) >= 5 else 5
+        counts, bin_edges, patches = ax_hist.hist(isi, bins=n_bins, alpha=0.7, color='#89B4FA', edgecolor='#45475A', density=False)
 
-        # Fit exponential if enough data
-        if len(isi) >= 5:
+        # ── Statistics ──
+        mean_isi = float(np.mean(isi))
+        std_isi = float(np.std(isi, ddof=1))
+        cv_isi = (std_isi / mean_isi) if mean_isi > 0 else 0.0
+        median_isi = float(np.median(isi))
+        min_isi = float(np.min(isi))
+        max_isi = float(np.max(isi))
+
+        # Local Variation (LV) - more robust than CV for short spike trains
+        # LV = (3/(N-1)) * Σ (ISI_i - ISI_{i+1})² / (ISI_i + ISI_{i+1})²
+        if len(isi) >= 3:
+            lv = np.mean([3 * (isi[i] - isi[i+1])**2 / (isi[i] + isi[i+1])**2 
+                         for i in range(len(isi)-1)])
+        else:
+            lv = np.nan
+
+        # ── Distribution Fitting with Goodness-of-Fit ──
+        fit_result = {"model": "None", "params": {}, "aic": np.nan, "ks_stat": np.nan, "ks_pvalue": np.nan}
+        
+        if len(isi) >= 8 and len(bin_edges) >= 2:
             try:
-                loc, scale = expon.fit(isi)
-                x_fit = np.linspace(isi.min(), isi.max(), 100)
-                y_fit = expon.pdf(x_fit, loc, scale) * len(isi) * (bin_edges[1] - bin_edges[0])
-                ax_hist.plot(x_fit, y_fit, 'r--', lw=2, label=f'Exp fit (τ={scale:.1f}ms)')
-                ax_hist.legend(fontsize=9)
-            except Exception:
-                pass
+                x_fit = np.linspace(min_isi, max_isi, 200)
+                bin_w = float(bin_edges[1] - bin_edges[0])
+                
+                # Fit multiple models and compare
+                from scipy.stats import kstest
+                
+                candidates = []
+                
+                # 1. Normal fit (good for regular firing)
+                if cv_isi < 0.7:  # Only fit normal if not too exponential-looking
+                    mu, sigma = norm.fit(isi)
+                    sigma = max(float(sigma), 1e-9)
+                    y_fit_norm = norm.pdf(x_fit, loc=float(mu), scale=sigma) * len(isi) * bin_w
+                    # KS test against fitted normal
+                    ks_norm = kstest(isi, lambda x: norm.cdf(x, mu, sigma))
+                    # AIC: -2*ln(L) + 2*k where k=2 params
+                    logL_norm = np.sum(np.log(norm.pdf(isi, mu, sigma) + 1e-12))
+                    aic_norm = -2 * logL_norm + 4
+                    candidates.append(("Normal", mu, sigma, aic_norm, ks_norm.statistic, ks_norm.pvalue, y_fit_norm, f"μ={mu:.1f}ms, σ={sigma:.1f}ms"))
+                
+                # 2. Exponential fit (good for Poisson/random)
+                loc, scale = expon.fit(isi, floc=0.0)
+                scale = max(float(scale), 1e-9)
+                y_fit_exp = expon.pdf(x_fit, loc=float(loc), scale=scale) * len(isi) * bin_w
+                ks_exp = kstest(isi, lambda x: expon.cdf(x, loc, scale))
+                logL_exp = np.sum(np.log(expon.pdf(isi, loc, scale) + 1e-12))
+                aic_exp = -2 * logL_exp + 4
+                candidates.append(("Exponential", loc, scale, aic_exp, ks_exp.statistic, ks_exp.pvalue, y_fit_exp, f"τ={scale:.1f}ms"))
+                
+                # 3. Gamma fit (flexible, good for bursting/intermediate)
+                try:
+                    from scipy.stats import gamma
+                    shape, loc_g, scale_g = gamma.fit(isi, floc=0.0)
+                    if shape > 0 and scale_g > 0:
+                        y_fit_gamma = gamma.pdf(x_fit, shape, loc_g, scale_g) * len(isi) * bin_w
+                        ks_gamma = kstest(isi, lambda x: gamma.cdf(x, shape, loc_g, scale_g))
+                        logL_gamma = np.sum(np.log(gamma.pdf(isi, shape, loc_g, scale_g) + 1e-12))
+                        aic_gamma = -2 * logL_gamma + 6  # k=3 params
+                        candidates.append(("Gamma", shape, scale_g, aic_gamma, ks_gamma.statistic, ks_gamma.pvalue, y_fit_gamma, f"k={shape:.2f}, θ={scale_g:.1f}ms"))
+                except Exception:
+                    pass
+                
+                # Select best model by AIC (lowest = best)
+                if candidates:
+                    candidates.sort(key=lambda x: x[3])  # Sort by AIC
+                    best = candidates[0]
+                    fit_result = {
+                        "model": best[0],
+                        "params": {"param1": best[1], "param2": best[2]},
+                        "aic": best[3],
+                        "ks_stat": best[4],
+                        "ks_pvalue": best[5],
+                    }
+                    
+                    # Plot best fit
+                    color_fit = {'Normal': '#F38BA8', 'Exponential': '#A6E3A1', 'Gamma': '#FAB387'}[best[0]]
+                    ax_hist.plot(x_fit, best[6], '--', color=color_fit, lw=2.5, 
+                                label=f'{best[0]}: {best[7]} (AIC={best[3]:.1f})')
+                    
+                    # Plot alternative fits with lower alpha if close in AIC
+                    for alt in candidates[1:]:
+                        if alt[3] - best[3] < 10:  # ΔAIC < 10 is competitive
+                            ax_hist.plot(x_fit, alt[6], '--', color='#6C7086', lw=1, alpha=0.4)
+                    
+                    ax_hist.legend(fontsize=8, loc='upper right')
+            except Exception as e:
+                logging.debug(f"ISI fit failed: {e}")
 
         ax_hist.set_xlabel('ISI (ms)')
         ax_hist.set_ylabel('Count')
-        ax_hist.set_title(f'ISI Distribution (N={n_spikes} spikes, {len(isi)} ISIs)')
+        ax_hist.set_title(f'ISI Distribution (N={n_spikes} spikes, {len(isi)} ISIs, bins={n_bins})')
         ax_hist.grid(alpha=0.2)
 
-        # Metrics panel with Shannon entropy
+        # ── Metrics Panel with Enhanced Statistics ──
         ax_metrics.clear()
         ax_metrics.set_xlim(0, 1)
         ax_metrics.set_ylim(0, 1)
         ax_metrics.axis('off')
 
-        # Compute statistics
-        mean_isi = np.mean(isi)
-        std_isi = np.std(isi)
-        cv_isi = std_isi / mean_isi if mean_isi > 0 else 0
-
-        # Shannon entropy (need at least 5 ISIs for meaningful calculation)
-        n_bins = max(2, min(20, len(isi) // 2)) if len(isi) >= 5 else 2
-        if len(isi) >= 5:
-            entropy_bits = shannon_entropy_isi(spike_times, bins=n_bins)
-        else:
-            entropy_bits = 0.0  # Not enough data for meaningful entropy
-
-        # Max entropy for comparison (uniform distribution)
+        # Shannon entropy
+        entropy_bits = shannon_entropy_isi(spike_times, bins=n_bins) if len(isi) >= 5 else 0.0
         max_entropy = np.log2(n_bins) if n_bins > 0 else 0
         entropy_ratio = entropy_bits / max_entropy if max_entropy > 0 else 0
 
-        # Regularity metrics
-        is_regular = cv_isi < 0.1
-        is_bursting = np.any(isi[:-1] / np.maximum(isi[1:], 1e-10) > 3)
+        # Scientific classification
+        pattern_type = self._classify_isi_pattern(cv_isi, lv, fit_result.get("model", "Unknown"), isi)
+        
+        # Build metrics text
+        metrics_lines = [
+            f"ISI Statistics:",
+            f"  Mean: {mean_isi:.2f} ms  |  Median: {median_isi:.2f} ms",
+            f"  Std:  {std_isi:.2f} ms  |  Range: [{min_isi:.1f}, {max_isi:.1f}] ms",
+            f"  CV:   {cv_isi:.3f}  |  LV: {lv:.3f}" if not np.isnan(lv) else f"  CV:   {cv_isi:.3f}",
+            f"",
+            f"Shannon Entropy:",
+            f"  H = {entropy_bits:.2f} bits  |  H/Hmax = {entropy_ratio:.1%}",
+            f"",
+        ]
+        
+        # Add fit quality if available
+        if not np.isnan(fit_result["aic"]):
+            metrics_lines.extend([
+                f"Best Fit: {fit_result['model']}",
+                f"  AIC = {fit_result['aic']:.1f}  |  KS = {fit_result['ks_stat']:.3f} (p={fit_result['ks_pvalue']:.3f})",
+                f"",
+            ])
+        
+        metrics_lines.extend([
+            f"Classification: {pattern_type}",
+        ])
 
-        # Format metrics text
-        metrics_text = (
-            f"ISI Statistics:\n"
-            f"  Mean: {mean_isi:.2f} ms\n"
-            f"  Std:  {std_isi:.2f} ms\n"
-            f"  CV:   {cv_isi:.3f} {'(regular)' if is_regular else '(irregular)'}\n"
-            f"\n"
-            f"Shannon Entropy:\n"
-            f"  H = {entropy_bits:.2f} bits\n"
-            f"  H/Hmax = {entropy_ratio:.2%}\n"
-            f"  Pattern: {'Regular/Poisson' if entropy_ratio > 0.7 else 'Bursting/Structured' if is_bursting else 'Adaptive/Mixed'}\n"
-            f"\n"
-            f"Classification:\n"
-            f"  {'✓ Regular spiking' if is_regular else '⚡ Irregular spiking'}\n"
-            f"  {'⚡ Bursting detected' if is_bursting else '✓ No bursting'}"
-        )
+        metrics_text = "\n".join(metrics_lines)
 
         ax_metrics.text(0.05, 0.95, metrics_text, transform=ax_metrics.transAxes,
                        fontsize=10, verticalalignment='top', fontfamily='monospace',
                        color='#CDD6F4',
                        bbox=dict(boxstyle='round', facecolor='#1E1E2E', alpha=0.8, edgecolor='#45475A'))
 
+        # Store spike times for cross-tab synchronization
+        self._isi_spike_times = spike_times
+        
+        # Update selected spike highlight if valid
+        if self._isi_selected_spike >= 0 and self._isi_selected_spike < len(spike_times):
+            self._highlight_isi_spike(self._isi_selected_spike)
+
+        # ── Interactivity: Click histogram bar to highlight spikes ──
+        if not hasattr(self, '_isi_pick_connected'):
+            self.cvs_isi_dist.mpl_connect('button_press_event', self._on_isi_histogram_click)
+            self._isi_pick_connected = True
+
         self.cvs_isi_dist.draw_idle()
 
+    def _on_isi_histogram_click(self, event):
+        """Handle click on ISI histogram - find nearest spike with matching ISI."""
+        if event.inaxes != self._isi_dist_axes[0]:
+            return
+        
+        if not hasattr(self, '_isi_spike_times') or len(self._isi_spike_times) < 2:
+            return
+        
+        clicked_isi = event.xdata
+        if clicked_isi is None:
+            return
+        
+        # Find ISI closest to click
+        isi_values = np.diff(self._isi_spike_times)
+        closest_idx = np.argmin(np.abs(isi_values - clicked_isi))
+        
+        # Emit spike selection (the spike that ENDS this ISI)
+        spike_idx = closest_idx + 1  # ISI[i] is time between spike i and i+1
+        self.spike_selected.emit(spike_idx)
+        
+        # Also emit time highlight
+        t_spike = self._isi_spike_times[spike_idx]
+        self.time_highlighted.emit(t_spike)
+        
+        # Update visual highlight
+        self._highlight_isi_spike(spike_idx)
+        self.cvs_isi_dist.draw_idle()
+
+    def _classify_isi_pattern(self, cv: float, lv: float, best_model: str, isi: np.ndarray) -> str:
+        """Classify ISI pattern based on statistical metrics.
+        
+        Returns:
+            Pattern type with confidence level
+        """
+        if len(isi) < 3:
+            return "Insufficient data"
+        
+        # Local Variation interpretation (Shinomoto et al.)
+        # LV < 1: Regular/Clock-like
+        # LV ≈ 1: Poisson/Random  
+        # LV > 1: Bursting/Irregular
+        
+        if np.isnan(lv):
+            lv = cv  # Fallback to CV if LV not computed
+        
+        # Burst detection: ratio of consecutive ISIs
+        burst_ratio_threshold = 3.0
+        n_burst_events = np.sum(isi[:-1] / np.maximum(isi[1:], 1e-10) > burst_ratio_threshold)
+        n_burst_events += np.sum(isi[1:] / np.maximum(isi[:-1], 1e-10) > burst_ratio_threshold)
+        burst_fraction = n_burst_events / (2 * len(isi) - 2) if len(isi) > 1 else 0
+        
+        # Classification logic
+        if cv < 0.1 and lv < 0.5:
+            return "Regular (periodic)"
+        elif cv > 0.7 and lv > 1.2:
+            if burst_fraction > 0.2:
+                return f"Bursting ({burst_fraction:.0%} events)"
+            return "Chaotic/Irregular"
+        elif best_model == "Exponential" and cv > 0.8:
+            return "Poisson-like (random)"
+        elif best_model == "Gamma" and cv > 0.3:
+            return "Adaptive/Mixed"
+        elif burst_fraction > 0.1:
+            return f"Weak bursting ({burst_fraction:.0%})"
+        else:
+            return "Adaptive/Mixed"
+
+    def _on_isi_spike_selected(self, spike_idx: int):
+        """Handle spike selection from Oscilloscope tab - highlight corresponding ISI."""
+        if not hasattr(self, '_isi_spike_times') or len(self._isi_spike_times) == 0:
+            return
+        
+        self._isi_selected_spike = spike_idx
+        self._highlight_isi_spike(spike_idx)
+        self.cvs_isi_dist.draw_idle()
+
+    def _highlight_isi_spike(self, spike_idx: int):
+        """Highlight the ISI corresponding to selected spike."""
+        if spike_idx < 1 or spike_idx >= len(self._isi_spike_times):
+            # First spike has no preceding ISI - hide line
+            self._isi_selected_vline.set_visible(False)
+            return
+        
+        # Calculate ISI for this spike (time from previous spike)
+        isi_ms = self._isi_spike_times[spike_idx] - self._isi_spike_times[spike_idx - 1]
+        
+        # Update vertical line position and show it
+        self._isi_selected_vline.set_xdata([isi_ms, isi_ms])
+        self._isi_selected_vline.set_visible(True)
+        
+        # Add to legend if not already
+        ax_hist = self._isi_dist_axes[0]
+        if ax_hist.get_legend() is None or 'Selected ISI' not in str(ax_hist.get_legend().get_texts()):
+            ax_hist.legend(fontsize=8, loc='upper right')
+
     # ─────────────────────────────────────────────────────────────────
-    #  12 — SPECTROGRAM  (STFT of soma Vm)
+    #  12 — ANALYTICS OSCILLOSCOPE (Enhanced with spike navigation & sync)
+    # ─────────────────────────────────────────────────────────────────
+    def _build_tab_osc(self) -> QWidget:
+        """Build enhanced Oscilloscope for Analytics with spike navigation.
+        
+        Features:
+        - Spike navigation (prev/next spike buttons)
+        - Time synchronization with main oscilloscope (bidirectional)
+        - ISI/Poincaré integration: click on ISI → highlight on scope
+        - Spike counter and jump-to-spike input
+        """
+        from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSpinBox, QFrame
+        from gui.plots import OscilloscopeWidget
+        
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(4)
+        
+        # ── Navigation Toolbar ──
+        toolbar = QFrame()
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(8, 4, 8, 4)
+        toolbar_layout.setSpacing(8)
+        
+        # Spike navigation
+        self._osc_nav_prev = QPushButton("◀ Prev Spike")
+        self._osc_nav_prev.setEnabled(False)
+        self._osc_nav_prev.clicked.connect(self._on_osc_prev_spike)
+        toolbar_layout.addWidget(self._osc_nav_prev)
+        
+        self._osc_nav_next = QPushButton("Next Spike ▶")
+        self._osc_nav_next.setEnabled(False)
+        self._osc_nav_next.clicked.connect(self._on_osc_next_spike)
+        toolbar_layout.addWidget(self._osc_nav_next)
+        
+        toolbar_layout.addSpacing(16)
+        
+        # Spike counter / jump-to
+        toolbar_layout.addWidget(QLabel("Spike:"))
+        self._osc_spike_spin = QSpinBox()
+        self._osc_spike_spin.setMinimum(1)
+        self._osc_spike_spin.setMaximum(1)
+        self._osc_spike_spin.setEnabled(False)
+        self._osc_spike_spin.valueChanged.connect(self._on_osc_spike_jump)
+        toolbar_layout.addWidget(self._osc_spike_spin)
+        
+        self._osc_spike_count = QLabel("/ 0")
+        toolbar_layout.addWidget(self._osc_spike_count)
+        
+        toolbar_layout.addStretch()
+        
+        # Sync status
+        self._osc_sync_label = QLabel("● Sync: ON")
+        self._osc_sync_label.setStyleSheet("color: #A6E3A1; font-size: 11px;")
+        toolbar_layout.addWidget(self._osc_sync_label)
+        
+        main_layout.addWidget(toolbar)
+        
+        # ── Section Visibility Toolbar ──
+        sections_bar = QFrame()
+        sections_layout = QHBoxLayout(sections_bar)
+        sections_layout.setContentsMargins(8, 2, 8, 2)
+        sections_layout.setSpacing(12)
+        
+        sections_layout.addWidget(QLabel("Sections:"))
+        
+        # Quick toggles for oscilloscope panes (connected to widget's internal checkboxes)
+        self._osc_sec_v = QPushButton("⚡ Voltage")
+        self._osc_sec_v.setCheckable(True)
+        self._osc_sec_v.setChecked(True)
+        self._osc_sec_v.setStyleSheet("QPushButton:checked { background-color: #89B4FA; color: #1E1E2E; }")
+        sections_layout.addWidget(self._osc_sec_v)
+        
+        self._osc_sec_g = QPushButton("🔀 Gates")
+        self._osc_sec_g.setCheckable(True)
+        self._osc_sec_g.setChecked(True)
+        self._osc_sec_g.setStyleSheet("QPushButton:checked { background-color: #A6E3A1; color: #1E1E2E; }")
+        sections_layout.addWidget(self._osc_sec_g)
+        
+        self._osc_sec_i = QPushButton("⚛ Currents")
+        self._osc_sec_i.setCheckable(True)
+        self._osc_sec_i.setChecked(True)
+        self._osc_sec_i.setStyleSheet("QPushButton:checked { background-color: #FAB387; color: #1E1E2E; }")
+        sections_layout.addWidget(self._osc_sec_i)
+        
+        self._osc_sec_ca = QPushButton("🔬 Ca²⁺")
+        self._osc_sec_ca.setCheckable(True)
+        self._osc_sec_ca.setChecked(True)
+        self._osc_sec_ca.setStyleSheet("QPushButton:checked { background-color: #F38BA8; color: #1E1E2E; }")
+        sections_layout.addWidget(self._osc_sec_ca)
+        
+        sections_layout.addStretch()
+        main_layout.addWidget(sections_bar)
+        
+        # ── Main Oscilloscope ──
+        self._osc_copy = OscilloscopeWidget()
+        self._osc_copy.setMinimumHeight(400)
+        main_layout.addWidget(self._osc_copy, 1)  # stretch
+        
+        # ── Connect section toggles to oscilloscope visibility (after widget creation)
+        self._osc_sec_v.clicked.connect(lambda checked: self._toggle_osc_section('v', checked))
+        self._osc_sec_g.clicked.connect(lambda checked: self._toggle_osc_section('g', checked))
+        self._osc_sec_i.clicked.connect(lambda checked: self._toggle_osc_section('i', checked))
+        self._osc_sec_ca.clicked.connect(lambda checked: self._toggle_osc_section('ca', checked))
+        
+        # ── Synchronization ──
+        # Forward: Analytics osc → Main window
+        if hasattr(self, 'time_highlighted'):
+            self._osc_copy.time_highlighted.connect(self.time_highlighted.emit)
+        
+        # Store spike times for navigation
+        self._osc_spike_times: np.ndarray = np.array([])
+        self._osc_current_spike_idx: int = 0
+        
+        return container
+
+    def _toggle_osc_section(self, section: str, visible: bool):
+        """Toggle visibility of oscilloscope section (v, g, i, ca)."""
+        if not hasattr(self, '_osc_copy'):
+            return
+        
+        osc = self._osc_copy
+        if section == 'v':
+            # Voltage is always visible (main plot), toggle individual traces
+            for name, cb in osc._cb_v.items():
+                cb.setChecked(visible)
+                if name in osc._curves_v:
+                    osc._curves_v[name].setVisible(visible)
+        elif section == 'g':
+            osc._p_g.setVisible(visible)
+            for name, cb in osc._cb_g.items():
+                cb.setChecked(visible)
+                if name in osc._curves_gate:
+                    osc._curves_gate[name].setVisible(visible)
+        elif section == 'i':
+            osc._p_i.setVisible(visible)
+            for name, cb in osc._cb_i.items():
+                if name not in ('Stim_input', 'Stim_filtered'):
+                    cb.setChecked(visible)
+                if name in osc._curves_i:
+                    osc._curves_i[name].setVisible(visible and cb.isChecked())
+        elif section == 'ca':
+            osc._p_ca.setVisible(visible)
+            if 'calcium' in osc._cb_ca:
+                osc._cb_ca['calcium'].setChecked(visible)
+            if 'calcium' in osc._curves_ca:
+                osc._curves_ca['calcium'].setVisible(visible)
+        
+        # Update splitter sizes after visibility change
+        osc._apply_plot_layout_profile()
+
+    def _on_osc_prev_spike(self):
+        """Navigate to previous spike."""
+        if len(self._osc_spike_times) == 0:
+            return
+        self._osc_current_spike_idx = max(0, self._osc_current_spike_idx - 1)
+        self._osc_spike_spin.setValue(self._osc_current_spike_idx + 1)
+        self._highlight_spike_on_osc(self._osc_current_spike_idx)
+
+    def _on_osc_next_spike(self):
+        """Navigate to next spike."""
+        if len(self._osc_spike_times) == 0:
+            return
+        self._osc_current_spike_idx = min(len(self._osc_spike_times) - 1, 
+                                           self._osc_current_spike_idx + 1)
+        self._osc_spike_spin.setValue(self._osc_current_spike_idx + 1)
+        self._highlight_spike_on_osc(self._osc_current_spike_idx)
+
+    def _on_osc_spike_jump(self, spike_num: int):
+        """Jump to specific spike number."""
+        if len(self._osc_spike_times) == 0:
+            return
+        idx = spike_num - 1  # Convert to 0-based
+        idx = max(0, min(len(self._osc_spike_times) - 1, idx))
+        self._osc_current_spike_idx = idx
+        self._highlight_spike_on_osc(idx)
+
+    def _highlight_spike_on_osc(self, spike_idx: int):
+        """Highlight specific spike on oscilloscope by emitting time signal."""
+        if spike_idx < len(self._osc_spike_times):
+            t_spike = self._osc_spike_times[spike_idx]
+            # Emit signal to sync with main oscilloscope and other tabs
+            self.time_highlighted.emit(t_spike)
+            # Also notify ISI and Poincaré tabs about selected spike
+            self.spike_selected.emit(spike_idx)
+
+    def _update_osc(self, result):
+        """Update Analytics Oscilloscope with spike detection for navigation."""
+        if not hasattr(self, '_osc_copy'):
+            return  # tab not yet visited
+        
+        # Update main oscilloscope display
+        self._osc_copy.update_plots(result)
+        
+        # Detect spikes for navigation
+        from core.analysis import detect_spikes
+        t = np.asarray(result.t, dtype=float)
+        v = np.asarray(result.v_soma, dtype=float)
+        
+        peak_idx, spike_times, _ = detect_spikes(v, t)
+        self._osc_spike_times = spike_times
+        n_spikes = len(spike_times)
+        
+        # Update navigation controls
+        has_spikes = n_spikes > 0
+        self._osc_nav_prev.setEnabled(has_spikes)
+        self._osc_nav_next.setEnabled(has_spikes)
+        self._osc_spike_spin.setEnabled(has_spikes)
+        self._osc_spike_spin.setMaximum(max(1, n_spikes))
+        self._osc_spike_count.setText(f"/ {n_spikes}")
+        
+        # Reset to first spike
+        self._osc_current_spike_idx = 0
+        if has_spikes:
+            self._osc_spike_spin.setValue(1)
+
+    # ─────────────────────────────────────────────────────────────────
+    #  13 — SPECTROGRAM  (STFT of soma Vm)
     # ─────────────────────────────────────────────────────────────────
     def _update_spectrogram(self, result):
         if not hasattr(self, 'fig_spectro'):

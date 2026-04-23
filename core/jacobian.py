@@ -452,6 +452,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
         
         # Morphology and axial coupling
         cm_v = physics_params.cm_v
+        inv_cm_v = physics_params.inv_cm_v  # Division Trick #24
         l_data = physics_params.l_data
         l_indices = physics_params.l_indices
         l_indptr = physics_params.l_indptr
@@ -595,7 +596,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
         for i in range(n_comp):
             v_row = idx["v"].start + i
-            cm = max(cm_v[i], 1e-12)  # Guard against zero capacitance
+            inv_cm = inv_cm_v[i]  # Division Trick #24: precomputed 1.0/cm
             ena_i = ena_v[i]
             ek_i = ek_v[i]
             dena_dna_i = dena_dna[i]
@@ -604,7 +605,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
             # Axial coupling
             for p in range(int(l_indptr[i]), int(l_indptr[i + 1])):
                 col = int(l_indices[p])
-                _add(v_row, idx["v"].start + col, l_data[p] / cm)
+                _add(v_row, idx["v"].start + col, l_data[p] * inv_cm)
 
             d_iion_dv = gl_v[i] + gna_v[i] * (m[i] ** 3) * h[i] + gk_v[i] * (n[i] ** 4)
             d_iion_dm = gna_v[i] * 3.0 * (m[i] ** 2) * h[i] * (v[i] - ena_i)
@@ -623,7 +624,7 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
 
             if en_ih:
                 d_iion_dv += gih_v[i] * r[i]
-                _add(v_row, idx["r"].start + i, -(gih_v[i] * (v[i] - eih)) / cm)
+                _add(v_row, idx["r"].start + i, -(gih_v[i] * (v[i] - eih)) * inv_cm)
 
             i_ca_val = 0.0
             if en_ica:
@@ -640,15 +641,15 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 dIcadca = gca_v[i] * (s[i] ** 2) * u[i] * (-deca_dca)
                 i_ca_val = gca_v[i] * (s[i] ** 2) * u[i] * (v[i] - eca)
                 d_iion_dv += dIcadv
-                _add(v_row, idx["s"].start + i, -dIcads / cm)
-                _add(v_row, idx["u"].start + i, -dIcadu / cm)
+                _add(v_row, idx["s"].start + i, -dIcads * inv_cm)
+                _add(v_row, idx["u"].start + i, -dIcadu * inv_cm)
                 if dyn_ca:
                     d_iion_dca += dIcadca
 
             if en_ia:
                 d_iion_dv += ga_v[i] * a[i] * b[i]
-                _add(v_row, idx["a"].start + i, -(ga_v[i] * b[i] * (v[i] - ek_i)) / cm)
-                _add(v_row, idx["b"].start + i, -(ga_v[i] * a[i] * (v[i] - ek_i)) / cm)
+                _add(v_row, idx["a"].start + i, -(ga_v[i] * b[i] * (v[i] - ek_i)) * inv_cm)
+                _add(v_row, idx["b"].start + i, -(ga_v[i] * a[i] * (v[i] - ek_i)) * inv_cm)
                 if dyn_atp and idx["k_o"] is not None:
                     d_iion_dko += ga_v[i] * a[i] * b[i] * (-dek_dko_i)
 
@@ -672,8 +673,8 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 dItdca = gtca_v[i] * (p_g[i] ** 2) * q_g[i] * (-deca_t_dca)
                 i_tca_val = gtca_v[i] * (p_g[i] ** 2) * q_g[i] * (v[i] - eca_t)
                 d_iion_dv += dItdv
-                _add(v_row, idx["p"].start + i, -dItdp / cm)
-                _add(v_row, idx["q"].start + i, -dItdq / cm)
+                _add(v_row, idx["p"].start + i, -dItdp * inv_cm)
+                _add(v_row, idx["q"].start + i, -dItdq * inv_cm)
                 if dyn_ca:
                     d_iion_dca += dItdca
 
@@ -681,26 +682,26 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 z_sk_val = y[idx["z_sk"].start + i]
                 d_iion_dv += gsk_v[i] * z_sk_val
                 d_iion_dz = gsk_v[i] * (v[i] - ek_i)
-                _add(v_row, idx["z_sk"].start + i, -d_iion_dz / cm)
+                _add(v_row, idx["z_sk"].start + i, -d_iion_dz * inv_cm)
                 if dyn_atp and idx["k_o"] is not None:
                     d_iion_dko += gsk_v[i] * z_sk_val * (-dek_dko_i)
 
             if en_im and idx["w"] is not None:
                 d_iion_dv += gim_v[i] * w_g[i]
-                _add(v_row, idx["w"].start + i, -(gim_v[i] * (v[i] - ek_i)) / cm)
+                _add(v_row, idx["w"].start + i, -(gim_v[i] * (v[i] - ek_i)) * inv_cm)
                 if dyn_atp and idx["k_o"] is not None:
                     d_iion_dko += gim_v[i] * w_g[i] * (-dek_dko_i)
 
             if en_nap and idx["x"] is not None:
                 d_iion_dv += gnap_v[i] * x_g[i]
-                _add(v_row, idx["x"].start + i, -(gnap_v[i] * (v[i] - ena_i)) / cm)
+                _add(v_row, idx["x"].start + i, -(gnap_v[i] * (v[i] - ena_i)) * inv_cm)
                 if dyn_atp and idx["na_i"] is not None:
                     d_iion_dna += gnap_v[i] * x_g[i] * (-dena_dna_i)
 
             if en_nar and idx["y_nr"] is not None:
                 d_iion_dv += gnar_v[i] * y_nr[i] * j_nr[i]
-                _add(v_row, idx["y_nr"].start + i, -(gnar_v[i] * j_nr[i] * (v[i] - ena_i)) / cm)
-                _add(v_row, idx["j_nr"].start + i, -(gnar_v[i] * y_nr[i] * (v[i] - ena_i)) / cm)
+                _add(v_row, idx["y_nr"].start + i, -(gnar_v[i] * j_nr[i] * (v[i] - ena_i)) * inv_cm)
+                _add(v_row, idx["j_nr"].start + i, -(gnar_v[i] * y_nr[i] * (v[i] - ena_i)) * inv_cm)
                 if dyn_atp and idx["na_i"] is not None:
                     d_iion_dna += gnar_v[i] * y_nr[i] * j_nr[i] * (-dena_dna_i)
 
@@ -715,23 +716,23 @@ def make_analytic_jacobian(sparsity_csr: csr_matrix):
                 if dyn_atp and idx["k_o"] is not None:
                     d_iion_dko += g_katp * (-dek_dko_i)
 
-            _add(v_row, idx["v"].start + i, -d_iion_dv / cm)
-            _add(v_row, idx["m"].start + i, -d_iion_dm / cm)
-            _add(v_row, idx["h"].start + i, -d_iion_dh / cm)
-            _add(v_row, idx["n"].start + i, -d_iion_dn / cm)
+            _add(v_row, idx["v"].start + i, -d_iion_dv * inv_cm)
+            _add(v_row, idx["m"].start + i, -d_iion_dm * inv_cm)
+            _add(v_row, idx["h"].start + i, -d_iion_dh * inv_cm)
+            _add(v_row, idx["n"].start + i, -d_iion_dn * inv_cm)
             if dyn_ca and idx["ca"] is not None:
-                _add(v_row, idx["ca"].start + i, -d_iion_dca / cm)
+                _add(v_row, idx["ca"].start + i, -d_iion_dca * inv_cm)
             if dyn_atp and idx["na_i"] is not None:
-                _add(v_row, idx["na_i"].start + i, -d_iion_dna / cm)
+                _add(v_row, idx["na_i"].start + i, -d_iion_dna * inv_cm)
             if dyn_atp and idx["k_o"] is not None:
-                _add(v_row, idx["k_o"].start + i, -d_iion_dko / cm)
+                _add(v_row, idx["k_o"].start + i, -d_iion_dko * inv_cm)
             if dyn_atp and idx["atp"] is not None:
-                _add(v_row, idx["atp"].start + i, -d_iion_datp / cm)
+                _add(v_row, idx["atp"].start + i, -d_iion_datp * inv_cm)
             if i == 0:
                 if idx["dfilter_primary"] is not None:
-                    _add(v_row, int(idx["dfilter_primary"]), 1.0 / cm)
+                    _add(v_row, int(idx["dfilter_primary"]), 1.0 * inv_cm)
                 if idx["dfilter_secondary"] is not None:
-                    _add(v_row, int(idx["dfilter_secondary"]), 1.0 / cm)
+                    _add(v_row, int(idx["dfilter_secondary"]), 1.0 * inv_cm)
 
             # HH gate rows
             v_col = idx["v"].start + i

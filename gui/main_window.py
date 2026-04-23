@@ -444,14 +444,16 @@ class MainWindow(QMainWindow):
         self._dock_params = QDockWidget("Parameters", self)
         self._dock_params.setObjectName("dock_params")
         self._dock_params.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | 
-            Qt.DockWidgetArea.RightDockWidgetArea
+            Qt.DockWidgetArea.LeftDockWidgetArea |
+            Qt.DockWidgetArea.RightDockWidgetArea |
+            Qt.DockWidgetArea.TopDockWidgetArea |
+            Qt.DockWidgetArea.BottomDockWidgetArea
         )
         
         self._sidebar_frame = QFrame()
         self._sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self._sidebar_frame.setMinimumWidth(320)
-        self._sidebar_frame.setMaximumWidth(900)
+        self._sidebar_frame.setMaximumWidth(1200)
         self._build_sidebar_panel()
         self._dock_params.setWidget(self._sidebar_frame)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._dock_params)

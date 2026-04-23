@@ -57,6 +57,16 @@ class StateOffsets(NamedTuple):
     off_k_o: int32
     off_ifilt_primary: int32
     off_ifilt_secondary: int32
+    # Kinetic synapse Exp2Syn state (A/B per type). Map: 0=AMPA, 1=NMDA, 2=GABAA, 3=GABAB.
+    # Offsets are -1 when en_kinetic_synapses=False (legacy event-summation path).
+    off_ampa_a: int32
+    off_ampa_b: int32
+    off_nmda_a: int32
+    off_nmda_b: int32
+    off_gabaa_a: int32
+    off_gabaa_b: int32
+    off_gabab_a: int32
+    off_gabab_b: int32
     n_state: int32
 
 
@@ -119,6 +129,7 @@ def build_state_offsets(
     dyn_atp: bool,
     use_dfilter_primary: int,
     use_dfilter_secondary: int,
+    en_kinetic_synapses: bool = False,
 ) -> StateOffsets:
     cursor = 0
     off_v = cursor
@@ -198,6 +209,27 @@ def build_state_offsets(
     if use_dfilter_secondary == 1:
         cursor += 1
 
+    # Kinetic synapse Exp2Syn (A/B) states: 4 types × 2 vars × n_comp.
+    # Gated by en_kinetic_synapses so legacy (event-summation) path keeps its n_state.
+    if en_kinetic_synapses:
+        off_ampa_a = cursor;  cursor += n_comp
+        off_ampa_b = cursor;  cursor += n_comp
+        off_nmda_a = cursor;  cursor += n_comp
+        off_nmda_b = cursor;  cursor += n_comp
+        off_gabaa_a = cursor; cursor += n_comp
+        off_gabaa_b = cursor; cursor += n_comp
+        off_gabab_a = cursor; cursor += n_comp
+        off_gabab_b = cursor; cursor += n_comp
+    else:
+        off_ampa_a = -1
+        off_ampa_b = -1
+        off_nmda_a = -1
+        off_nmda_b = -1
+        off_gabaa_a = -1
+        off_gabaa_b = -1
+        off_gabab_a = -1
+        off_gabab_b = -1
+
     return StateOffsets(
         np.int32(off_v),
         np.int32(off_m),
@@ -221,6 +253,14 @@ def build_state_offsets(
         np.int32(off_k_o),
         np.int32(off_ifilt_primary),
         np.int32(off_ifilt_secondary),
+        np.int32(off_ampa_a),
+        np.int32(off_ampa_b),
+        np.int32(off_nmda_a),
+        np.int32(off_nmda_b),
+        np.int32(off_gabaa_a),
+        np.int32(off_gabaa_b),
+        np.int32(off_gabab_a),
+        np.int32(off_gabab_b),
         np.int32(cursor),
     )
 
@@ -255,6 +295,14 @@ def state_slices_from_offsets(offsets: StateOffsets, n_comp: int) -> dict[str, s
         "k_o": _slice(offsets.off_k_o),
         "dfilter_primary": _scalar(offsets.off_ifilt_primary),
         "dfilter_secondary": _scalar(offsets.off_ifilt_secondary),
+        "ampa_a": _slice(offsets.off_ampa_a),
+        "ampa_b": _slice(offsets.off_ampa_b),
+        "nmda_a": _slice(offsets.off_nmda_a),
+        "nmda_b": _slice(offsets.off_nmda_b),
+        "gabaa_a": _slice(offsets.off_gabaa_a),
+        "gabaa_b": _slice(offsets.off_gabaa_b),
+        "gabab_a": _slice(offsets.off_gabab_a),
+        "gabab_b": _slice(offsets.off_gabab_b),
     }
 
 
@@ -293,6 +341,7 @@ class PhysicsParams(NamedTuple):
     
     # Morphology and axial coupling
     cm_v: np.ndarray
+    inv_cm_v: np.ndarray  # Precomputed 1.0 / cm_v for fast multiplication (Division Trick #24)
     l_data: np.ndarray
     l_indices: np.ndarray
     l_indptr: np.ndarray
@@ -419,7 +468,20 @@ class PhysicsParams(NamedTuple):
     noise_sigma: float64    # Additive membrane current noise
     gna_max: float64        # Max Na conductance for channel count scaling
     gk_max: float64         # Max K conductance for channel count scaling
+    inv_gna_max: float64     # Precomputed 1.0/gna_max for fast multiplication
+    inv_gk_max: float64      # Precomputed 1.0/gk_max for fast multiplication
     rng_state: Optional[np.ndarray]  # RNG state for reproducibility
+
+    # Event-driven kinetic synapse arrays (O(1) architecture — Task 1 schema).
+    # event_matrix shape: [N_events, 4], columns: [time_ms, comp_idx, syn_type, weight].
+    # Populated by solver._compile_event_matrix (Task 2). Empty until then.
+    # syn_* arrays are length 4 (indexed by syn_type: 0=AMPA, 1=NMDA, 2=GABAA, 3=GABAB).
+    event_matrix: np.ndarray
+    syn_tau_r: np.ndarray     # rise time constants [ms]
+    syn_tau_d: np.ndarray     # decay time constants [ms]
+    syn_fnorm: np.ndarray     # Exp2Syn normalization factors (so weight=1 → peak g=1)
+    syn_erev: np.ndarray      # reversal potentials [mV]
+
     state_offsets: StateOffsets
 
     # Adaptive time-stepping (Heuristic Voltage-Rate Adaptive Controller)
@@ -510,6 +572,17 @@ def create_physics_params(**kwargs) -> PhysicsParams:
         # Adaptive dt: opt-in. Dispatcher forces fixed-step when calc_lle=True or
         # dfilter_delay_steps > 1 (Task 2 policy — see run_native_loop_adaptive).
         'adaptive_dt': False,
+        # Event-driven kinetic synapse schema (Task 1). Empty = disabled until Task 2
+        # populates them from cfg.stim / cfg.dual_stimulation. Row layout of event_matrix:
+        # [time_ms, comp_idx, syn_type (0=AMPA, 1=NMDA, 2=GABAA, 3=GABAB), weight].
+        'event_matrix': np.zeros((0, 4), dtype=np.float64),
+        'syn_tau_r': np.zeros(4, dtype=np.float64),
+        'syn_tau_d': np.zeros(4, dtype=np.float64),
+        'syn_fnorm': np.zeros(4, dtype=np.float64),
+        'syn_erev': np.zeros(4, dtype=np.float64),
+        # Gates allocation of A/B state blocks in build_state_offsets.
+        # Remains False through Task 2; flipped True in Task 3 when native loop consumes them.
+        'en_kinetic_synapses': False,
     }
     for k, v in defaults.items():
         if k not in kwargs:
@@ -538,6 +611,22 @@ def create_physics_params(**kwargs) -> PhysicsParams:
             kwargs['km_na'],
         )
 
+    # en_kinetic_synapses is a build-time gate for state-vector layout, NOT a
+    # PhysicsParams field. Pop it so PhysicsParams(**kwargs) does not receive it.
+    en_kinetic_synapses = bool(kwargs.pop('en_kinetic_synapses', False))
+
+    # Division Trick #24: Precompute inverse capacitance for fast multiplication
+    if 'inv_cm_v' not in kwargs and 'cm_v' in kwargs:
+        cm_arr = np.asarray(kwargs['cm_v'], dtype=np.float64)
+        # Clip to avoid division by zero, matching the safety in rhs.py
+        kwargs['inv_cm_v'] = 1.0 / np.clip(cm_arr, 1e-12, None)
+
+    # Precompute inverse max conductances for channel count scaling
+    if 'inv_gna_max' not in kwargs and 'gna_max' in kwargs:
+        kwargs['inv_gna_max'] = 1.0 / max(float(kwargs['gna_max']), 1e-12)
+    if 'inv_gk_max' not in kwargs and 'gk_max' in kwargs:
+        kwargs['inv_gk_max'] = 1.0 / max(float(kwargs['gk_max']), 1e-12)
+
     if 'state_offsets' not in kwargs:
         kwargs['state_offsets'] = build_state_offsets(
             int(kwargs['n_comp']),
@@ -553,6 +642,7 @@ def create_physics_params(**kwargs) -> PhysicsParams:
             dyn_atp=bool(kwargs['dyn_atp']),
             use_dfilter_primary=int(kwargs['use_dfilter_primary']),
             use_dfilter_secondary=int(kwargs['use_dfilter_secondary']),
+            en_kinetic_synapses=en_kinetic_synapses,
         )
 
     return PhysicsParams(**kwargs)

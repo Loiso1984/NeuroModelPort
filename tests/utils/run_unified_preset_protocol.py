@@ -18,6 +18,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from core.analysis import full_analysis
+from core.biophysics_registry import get_reference_profile, infer_reference_selector
 from core.models import FullModelConfig
 from core.presets import apply_preset, get_preset_names
 from core.solver import NeuronSolver
@@ -25,16 +27,65 @@ from core.solver import NeuronSolver
 from tests.shared_utils import _spike_times, _first_cross
 
 
+def _in_window(value: float | None, window: tuple[float, float]) -> bool:
+    if value is None or not np.isfinite(value):
+        return False
+    lo, hi = float(window[0]), float(window[1])
+    return lo <= float(value) <= hi
+
+
+def _estimate_burst_ratio(spike_times: np.ndarray) -> float:
+    if len(spike_times) < 3:
+        return 0.0
+    isi = np.diff(spike_times)
+    if len(isi) == 0:
+        return 0.0
+    median_isi = float(np.median(isi))
+    if median_isi <= 0.0:
+        return 0.0
+    burst_flags = isi < (0.5 * median_isi)
+    # Count spikes participating in burst intervals.
+    burst_spikes = int(np.sum(burst_flags)) + int(np.sum(np.r_[False, burst_flags]))
+    return float(min(1.0, burst_spikes / max(1, len(spike_times))))
+
+
 def _collect_single(cfg: FullModelConfig, name: str) -> dict:
     start_time = time.perf_counter()
     res = NeuronSolver(cfg).run_single()
     wall_time_ms = (time.perf_counter() - start_time) * 1000.0
+    stats = full_analysis(res, compute_lyapunov=False)
     st = _spike_times(res.v_soma, res.t)
     freq_inst = float(1000.0 / np.mean(np.diff(st))) if len(st) > 1 else 0.0
     total_dur_ms = float(res.t[-1] - res.t[0]) if len(res.t) > 1 else 0.0
     freq_global = float(1000.0 * len(st) / total_dur_ms) if total_dur_ms > 0 else 0.0
     active_dur_ms = float(st[-1] - st[0]) if len(st) > 1 else 0.0
     freq_active = float(1000.0 * (len(st) - 1) / active_dur_ms) if active_dur_ms > 0 else 0.0
+
+    code, variant, context = infer_reference_selector(cfg)
+    ref = get_reference_profile(code, variant=variant, context=context) if code else None
+    v_peak = float(stats.get("V_peak", np.max(res.v_soma)))
+    v_thr = float(stats.get("V_threshold", np.nan))
+    v_ahp = float(stats.get("V_ahp", np.nan))
+    amplitude = float(v_peak - v_ahp) if np.isfinite(v_peak) and np.isfinite(v_ahp) else np.nan
+    burst_ratio = _estimate_burst_ratio(np.asarray(st, dtype=float))
+
+    ref_checks = None
+    ref_pass = None
+    if ref is not None:
+        ref_checks = {
+            "freq_steady_hz": _in_window(float(stats.get("f_steady_hz", np.nan)), (ref.frequency_target.low_hz, ref.frequency_target.high_hz)),
+            "amplitude_mV": _in_window(amplitude, ref.spike_shape.amplitude_mV),
+            "halfwidth_ms": _in_window(float(stats.get("halfwidth_ms", np.nan)), ref.spike_shape.halfwidth_ms),
+            "threshold_mV": _in_window(v_thr, ref.spike_shape.threshold_mV),
+            "ahp_mV": _in_window(v_ahp, ref.spike_shape.ahp_mV),
+            "dvdt_up_mV_per_ms": _in_window(float(stats.get("dvdt_max", np.nan)), ref.spike_shape.dvdt_up_mV_per_ms),
+            "dvdt_down_mV_per_ms": _in_window(float(stats.get("dvdt_min", np.nan)), ref.spike_shape.dvdt_down_mV_per_ms),
+            "latency_ms": _in_window(float(stats.get("first_spike_latency_ms", np.nan)), ref.spike_shape.latency_ms),
+            "cv_isi": _in_window(float(stats.get("cv_isi", np.nan)), ref.spike_shape.cv_isi),
+            "burst_ratio": _in_window(burst_ratio, ref.spike_shape.burst_ratio),
+        }
+        ref_pass = bool(all(ref_checks.values()))
+
     row = {
         "preset": name,
         "n_spikes": int(len(st)),
@@ -42,11 +93,29 @@ def _collect_single(cfg: FullModelConfig, name: str) -> dict:
         "freq_global_hz": freq_global,
         "freq_active_window_hz": freq_active,
         "v_rest_tail_mV": float(np.mean(res.v_soma[-100:])),
-        "v_peak_mV": float(np.max(res.v_soma)),
+        "v_peak_mV": v_peak,
         "v_min_mV": float(np.min(res.v_soma)),
         "ca_peak_nM": float(np.max(res.ca_i[0, :]) * 1e6) if res.ca_i is not None else None,
         "stable_finite": bool(np.all(np.isfinite(res.v_soma))),
         "wall_time_ms": wall_time_ms,
+        "stats": {
+            "f_initial_hz": float(stats.get("f_initial_hz", np.nan)),
+            "f_steady_hz": float(stats.get("f_steady_hz", np.nan)),
+            "V_threshold": v_thr,
+            "V_ahp": v_ahp,
+            "halfwidth_ms": float(stats.get("halfwidth_ms", np.nan)),
+            "dvdt_max": float(stats.get("dvdt_max", np.nan)),
+            "dvdt_min": float(stats.get("dvdt_min", np.nan)),
+            "first_spike_latency_ms": float(stats.get("first_spike_latency_ms", np.nan)),
+            "cv_isi": float(stats.get("cv_isi", np.nan)),
+            "spike_amplitude_mV": amplitude,
+            "burst_ratio": burst_ratio,
+        },
+        "reference_profile": None if ref is None else f"{ref.code}:{ref.variant}({ref.context})",
+        "reference_source": None if ref is None else ref.source,
+        "reference_frequency_window_hz": None if ref is None else [float(ref.frequency_target.low_hz), float(ref.frequency_target.high_hz)],
+        "reference_shape_checks": ref_checks,
+        "reference_pass": ref_pass,
     }
     if res.n_comp > 1:
         if cfg.morphology.N_trunk > 0:

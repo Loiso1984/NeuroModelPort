@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -47,6 +48,8 @@ def _simulate_case(
     *,
     single_comp: bool = False,
     jacobian_mode: str = "sparse_fd",
+    compact_native: bool = True,
+    compact_dt_eval: float | None = None,
 ) -> dict:
     cfg = FullModelConfig()
     cfg.preset_modes.hypoxia_mode = "progressive"
@@ -57,7 +60,15 @@ def _simulate_case(
         cfg.dendritic_filter.enabled = False
     cfg.stim.stim_type = "const"
     cfg.stim.t_sim = t_sim
-    cfg.stim.dt_eval = dt_eval
+    use_dt_eval = float(dt_eval)
+    if (
+        compact_native
+        and jacobian_mode == "native_hines"
+        and compact_dt_eval is not None
+        and compact_dt_eval > 0.0
+    ):
+        use_dt_eval = max(use_dt_eval, float(compact_dt_eval))
+    cfg.stim.dt_eval = use_dt_eval
     cfg.stim.jacobian_mode = jacobian_mode
     cfg.channels.EK = case["EK"]
     cfg.channels.EL = case["EL"]
@@ -67,7 +78,11 @@ def _simulate_case(
     cfg.calcium.B_Ca = case["B_Ca"]
     cfg.channels.gCa_max = case["gCa_max"]
 
-    res = NeuronSolver(cfg).run_single()
+    solver = NeuronSolver(cfg)
+    if compact_native and cfg.stim.jacobian_mode == "native_hines":
+        res = solver.run_native(cfg, post_process=False)
+    else:
+        res = solver.run_single()
     st = _spike_times(res.v_soma, res.t)
     half = float(t_sim / 2.0)
     first = int(np.sum(st < half))
@@ -86,6 +101,7 @@ def _simulate_case(
         "v_tail_mV": v_tail,
         "ca_peak_nM": ca_peak_nM,
         "stable": stable,
+        "dt_eval_ms": float(use_dt_eval),
     }
 
 
@@ -117,6 +133,8 @@ def _screen_case(
     quick_t: float,
     quick_dt: float,
     quick_jacobian_mode: str,
+    compact_native: bool = True,
+    compact_dt_eval: float | None = None,
 ) -> dict:
     quick = _simulate_case(
         case,
@@ -124,6 +142,8 @@ def _screen_case(
         quick_dt,
         single_comp=True,
         jacobian_mode=quick_jacobian_mode,
+        compact_native=compact_native,
+        compact_dt_eval=compact_dt_eval,
     )
     quick["quick_score"] = _progressive_score(quick)
     quick["screen_reject"] = bool((not quick["stable"]) or quick["n_spikes"] == 0 or quick["v_peak_mV"] < 5.0)
@@ -275,21 +295,28 @@ def main() -> int:
     parser.add_argument("--final-validate-count", type=int, default=3)
     parser.add_argument("--final-t", type=float, default=260.0)
     parser.add_argument("--final-dt", type=float, default=0.25)
-    parser.add_argument("--quick-jacobian-mode", type=str, default="sparse_fd")
-    parser.add_argument("--full-jacobian-mode", type=str, default="sparse_fd")
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--quick-jacobian-mode", type=str, default="native_hines")
+    parser.add_argument("--full-jacobian-mode", type=str, default="native_hines")
+    parser.add_argument("--workers", type=int, default=max(1, min(8, (os.cpu_count() or 2))))
     parser.add_argument("--allow-parallel", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--compact-native", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--compact-dt-eval", type=float, default=1.0, help="Optional coarser output sampling for compact native mode (ms, <=0 disables).")
+    parser.add_argument("--baseline-compare", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--baseline-jacobian-mode", type=str, default="sparse_fd")
+    parser.add_argument("--baseline-artifact", type=str, default="_test_results/baseline_vs_optimized_hypoxia_search.json")
     args = parser.parse_args()
     workers = max(1, int(args.workers))
     if workers > 1 and not args.allow_parallel:
-        # Local benchmarks in this project consistently showed regressions from threaded execution
-        # on stiff multi-comp hypoxia searches due solver contention/overheads.
-        print(
-            f"[info] workers={workers} requested; forcing workers=1 "
-            "(use --allow-parallel to override)."
-        )
-        workers = 1
+        # Legacy safeguard: sparse_fd multi-comp path was often slower in threaded mode.
+        # Native compact path can still benefit from threading, so only force serial
+        # when at least one stage uses sparse_fd.
+        if args.quick_jacobian_mode != "native_hines" or args.full_jacobian_mode != "native_hines":
+            print(
+                f"[info] workers={workers} requested; forcing workers=1 "
+                "(use --allow-parallel to override, or set native_hines for both quick/full stages)."
+            )
+            workers = 1
 
     out_dir = Path("_test_results")
     out_dir.mkdir(exist_ok=True)
@@ -303,6 +330,8 @@ def main() -> int:
         0.6,
         single_comp=True,
         jacobian_mode=args.quick_jacobian_mode,
+        compact_native=args.compact_native,
+        compact_dt_eval=args.compact_dt_eval,
     )
 
     coarse_rows = []
@@ -333,6 +362,8 @@ def main() -> int:
             quick_t=args.quick_t,
             quick_dt=args.quick_dt,
             quick_jacobian_mode=args.quick_jacobian_mode,
+            compact_native=args.compact_native,
+            compact_dt_eval=args.compact_dt_eval,
         )
 
     coarse_screen_rows = _run_parallel_cases(coarse_cases, _coarse_fn, workers=workers)
@@ -372,6 +403,8 @@ def main() -> int:
             args.full_dt,
             single_comp=False,
             jacobian_mode=args.full_jacobian_mode,
+            compact_native=args.compact_native,
+            compact_dt_eval=args.compact_dt_eval,
         )
 
     # Full multi-comp solves are typically the bottleneck and often scale poorly with local threading.
@@ -402,6 +435,8 @@ def main() -> int:
                 quick_t=args.quick_t,
                 quick_dt=args.quick_dt,
                 quick_jacobian_mode=args.quick_jacobian_mode,
+                compact_native=args.compact_native,
+                compact_dt_eval=args.compact_dt_eval,
             )
 
         quick_rows = _run_parallel_cases(local_cases, _local_quick_fn, workers=workers)
@@ -425,6 +460,8 @@ def main() -> int:
                 args.full_dt,
                 single_comp=False,
                 jacobian_mode=args.full_jacobian_mode,
+                compact_native=args.compact_native,
+                compact_dt_eval=args.compact_dt_eval,
             )
         # Keep full multi-comp validation sequential; parallelism is best used on quick-screen stages.
         full_results = _run_parallel_cases(full_needed, _refine_full_fn, workers=1)
@@ -469,10 +506,86 @@ def main() -> int:
             args.final_dt,
             single_comp=False,
             jacobian_mode=args.full_jacobian_mode,
+            compact_native=args.compact_native,
+            compact_dt_eval=args.compact_dt_eval,
         )
         vrow["score"] = _progressive_score(vrow)
         final_validation.append(vrow)
         _append_jsonl(checkpoint_file, {"phase": "final_validate", **vrow})
+
+    baseline_vs_optimized = None
+    if args.baseline_compare and len(final_validation) > 0:
+        compare_cases = []
+        for row in all_sorted[: max(1, args.final_validate_count)]:
+            compare_cases.append(
+                {
+                    "EK": row["EK"],
+                    "EL": row["EL"],
+                    "gL": row["gL"],
+                    "Iext": row["Iext"],
+                    "tau_Ca": row["tau_Ca"],
+                    "B_Ca": row["B_Ca"],
+                    "gCa_max": row["gCa_max"],
+                }
+            )
+
+        t_base = time.time()
+        baseline_rows = [
+            _simulate_case(
+                case,
+                args.final_t,
+                args.final_dt,
+                single_comp=False,
+                jacobian_mode=args.baseline_jacobian_mode,
+                compact_native=False,
+            )
+            for case in compare_cases
+        ]
+        base_elapsed = float(time.time() - t_base)
+
+        t_opt = time.time()
+        optimized_rows = [
+            _simulate_case(
+                case,
+                args.final_t,
+                args.final_dt,
+                single_comp=False,
+                jacobian_mode=args.full_jacobian_mode,
+                compact_native=args.compact_native,
+                compact_dt_eval=args.compact_dt_eval,
+            )
+            for case in compare_cases
+        ]
+        opt_elapsed = float(time.time() - t_opt)
+
+        baseline_vs_optimized = {
+            "n_cases": len(compare_cases),
+            "baseline_elapsed_sec": base_elapsed,
+            "optimized_elapsed_sec": opt_elapsed,
+            "speedup_x": float(base_elapsed / max(opt_elapsed, 1e-9)),
+            "mean_abs_delta": {
+                "n_spikes": float(
+                    np.mean([abs(float(a["n_spikes"]) - float(b["n_spikes"])) for a, b in zip(baseline_rows, optimized_rows)])
+                ),
+                "v_peak_mV": float(
+                    np.mean([abs(float(a["v_peak_mV"]) - float(b["v_peak_mV"])) for a, b in zip(baseline_rows, optimized_rows)])
+                ),
+                "v_tail_mV": float(
+                    np.mean([abs(float(a["v_tail_mV"]) - float(b["v_tail_mV"])) for a, b in zip(baseline_rows, optimized_rows)])
+                ),
+                "ca_peak_nM": float(
+                    np.mean([
+                        abs(
+                            float(a["ca_peak_nM"] or 0.0) - float(b["ca_peak_nM"] or 0.0)
+                        )
+                        for a, b in zip(baseline_rows, optimized_rows)
+                    ])
+                ),
+            },
+        }
+        artifact_path = Path(args.baseline_artifact)
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(json.dumps(baseline_vs_optimized, indent=2, ensure_ascii=False), encoding="utf-8")
 
     out = {
         "config": {
@@ -490,12 +603,16 @@ def main() -> int:
             "final_dt": args.final_dt,
             "quick_jacobian_mode": args.quick_jacobian_mode,
             "full_jacobian_mode": args.full_jacobian_mode,
+            "compact_native": bool(args.compact_native),
+            "compact_dt_eval": float(args.compact_dt_eval),
+            "baseline_jacobian_mode": args.baseline_jacobian_mode,
         },
         "top10": all_sorted[:10],
         "coarse_screen": coarse_screen_rows,
         "coarse": coarse_rows,
         "refined": refined_rows,
         "final_validation": final_validation,
+        "baseline_vs_optimized": baseline_vs_optimized,
         "elapsed_sec": time.time() - t0,
     }
     out_file = out_dir / "hypoxia_deterministic_search.json"

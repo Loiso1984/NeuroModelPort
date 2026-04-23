@@ -983,6 +983,7 @@ def rhs_multicompartment(
     
     # Morphology and axial coupling
     cm_v = physics_params.cm_v
+    inv_cm_v = physics_params.inv_cm_v  # Division Trick #24: precomputed 1.0/cm_v
     l_data = physics_params.l_data
     l_indices = physics_params.l_indices
     l_indptr = physics_params.l_indptr
@@ -1217,8 +1218,8 @@ def rhs_multicompartment(
             else:
                 i_stim_eff += i_stim_secondary
 
-        # dV/dt
-        dydt[off_v + i] = (i_stim_eff - i_ion - i_pump + i_ax) / max(cm_v[i], 1e-12)
+        # dV/dt (Division Trick #24: use precomputed inverse capacitance)
+        dydt[off_v + i] = (i_stim_eff - i_ion - i_pump + i_ax) * inv_cm_v[i]
 
         # Gate derivatives (HH core) â€” per-compartment Q10 (Stage 6.2: thermal gradient)
         dydt[off_m + i] = phi_na[i] * (am(vi) * (1.0 - mi) - bm(vi) * mi)

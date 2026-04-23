@@ -8,6 +8,13 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.advanced_sim import run_sweep
+from core.batch_validator import (
+    STATUS_D_BLOCK,
+    STATUS_OK,
+    STATUS_SILENT,
+    STATUS_UNSTABLE,
+    run_validation_batch,
+)
 from core.models import FullModelConfig
 from core.physics_params import build_env_params, build_state_offsets, unpack_env_params
 from core.presets import apply_preset
@@ -119,3 +126,52 @@ def test_env_params_roundtrip_preserves_ordering():
     packed = build_env_params(*values)
     unpacked = unpack_env_params(packed)
     np.testing.assert_allclose(np.asarray(unpacked), np.asarray(values), rtol=0.0, atol=1e-12)
+
+
+def test_native_compact_postprocess_toggle_keeps_voltage_trace():
+    cfg = FullModelConfig()
+    apply_preset(cfg, "A: Squid Giant Axon (HH 1952)")
+    cfg.stim.t_sim = 120.0
+    cfg.stim.dt_eval = 0.2
+    cfg.stim.jacobian_mode = "native_hines"
+
+    solver = NeuronSolver(cfg)
+    res_full = solver.run_native(cfg, post_process=True)
+    res_compact = solver.run_native(cfg, post_process=False)
+
+    np.testing.assert_allclose(res_full.v_soma, res_compact.v_soma, rtol=0.0, atol=1e-9)
+    assert isinstance(res_compact.currents, dict)
+    assert len(res_compact.currents) == 0
+
+
+def test_batch_validator_contract_returns_status_and_metrics():
+    cfg_spiking = FullModelConfig()
+    apply_preset(cfg_spiking, "A: Squid Giant Axon (HH 1952)")
+    cfg_spiking.stim.t_sim = 220.0
+    cfg_spiking.stim.dt_eval = 0.25
+    cfg_spiking.stim.jacobian_mode = "native_hines"
+    cfg_spiking.stim.Iext = 8.0
+
+    cfg_silent = FullModelConfig()
+    apply_preset(cfg_silent, "A: Squid Giant Axon (HH 1952)")
+    cfg_silent.stim.t_sim = 220.0
+    cfg_silent.stim.dt_eval = 0.25
+    cfg_silent.stim.jacobian_mode = "native_hines"
+    cfg_silent.stim.Iext = 0.0
+
+    out = run_validation_batch(
+        [cfg_spiking, cfg_silent],
+        workers=1,
+        compact_native=True,
+        quick_prune_ms=180.0,
+    )
+    assert out.n_cases == 2
+    assert len(out.rows) == 2
+    assert sum(out.status_counts.values()) == 2
+
+    valid_codes = {STATUS_OK, STATUS_SILENT, STATUS_D_BLOCK, STATUS_UNSTABLE}
+    for row in out.rows:
+        assert row["status_code"] in valid_codes
+        assert "n_spikes" in row
+        assert "v_peak_mV" in row
+        assert "guard_ok" in row

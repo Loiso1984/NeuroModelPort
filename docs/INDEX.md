@@ -13,6 +13,8 @@
 - [Physiology Validation Memory](PHYSIOLOGY_VALIDATION_MEMORY.md)
 - [Validation Coverage Status](VALIDATION_COVERAGE_STATUS.md)
 - [Master Backlog Contract](MASTER_BACKLOG_CONTRACT.md)
+- [Batch Validator API (CPU sweep path)](../core/batch_validator.py)
+- Baseline vs optimized artifacts: `_test_results/baseline_vs_optimized_*.json`
 
 ## Reference Material
 

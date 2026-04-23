@@ -292,6 +292,10 @@ class ConfigManager(QObject):
             mode_note = f"{mode_note} {T.desc('preset_e_recalibrated')}"
         elif "thalamic" in p:
             mode_note = f"{mode_note} {T.desc('preset_k_recalibrated')}"
+        elif "hippocampal ca1" in p:
+            mode_note = f"{mode_note} {T.desc('preset_l_recalibrated')}"
+        elif "spiny projection" in p:
+            mode_note = f"{mode_note} {T.desc('preset_q_recalibrated')}"
         
         if dual_enabled:
             priority_note = (

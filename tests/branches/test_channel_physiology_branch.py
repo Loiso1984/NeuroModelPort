@@ -337,12 +337,11 @@ def test_ca1_theta_preset_has_theta_band_rate():
     res = NeuronSolver(cfg).run_single()
     _, spike_times, _ = detect_spikes(res.v_soma, res.t, threshold=-20.0, baseline_threshold=-50.0)
     assert len(spike_times) >= 2, "CA1 theta preset should produce repetitive spiking for theta-rate estimation"
-    # The current CA1 preset is a theta-driven single-cell surrogate: the
-    # external pacing is 7 Hz, but intra-cycle spike rate can be much faster.
-    # Validate that it remains a repetitive, moderately adapting train rather
-    # than forcing a literal 4-12 Hz raw spike frequency.
+    # Recalibrated CA1 preset targets a low-throughput theta-paced regime.
+    # We validate raw spike train frequency directly against the operational
+    # in-vivo-like window used by the biophysics registry.
     freq_hz = 1000.0 / float(np.mean(np.diff(spike_times)))
-    assert 15.0 <= freq_hz <= 90.0, f"CA1 surrogate raw spike rate out of guard range: {freq_hz:.2f} Hz"
+    assert 4.0 <= freq_hz <= 12.0, f"CA1 surrogate raw spike rate out of guard range: {freq_hz:.2f} Hz"
 
 
 def test_dynamic_calcium_presets_have_bounded_calcium_range():

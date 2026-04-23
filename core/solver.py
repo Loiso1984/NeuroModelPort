@@ -403,6 +403,51 @@ class SimulationResult:
                 self.currents[key] = arr_np[0, :]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Kinetic synapse (Exp2Syn) literature defaults — event-driven O(1) architecture.
+# Indexed by syn_type: 0=AMPA, 1=NMDA, 2=GABAA, 3=GABAB.
+#
+# Reference: Destexhe, A., Mainen, Z.F., & Sejnowski, T.J. (1994).
+#   "Synthesis of models for excitable membranes, synaptic transmission and
+#    neuromodulation using a common kinetic formalism." J. Comput. Neurosci., 1(3):195-230.
+# NMDA E_rev = 0 mV per Jahr & Stevens (1990), GABAB = -95 mV (K+ via GIRK, Lüscher 1997).
+# ─────────────────────────────────────────────────────────────────────────────
+_SYN_TAU_R_DEFAULTS = np.array([0.2,   5.0,  0.5,  30.0], dtype=np.float64)   # rise  [ms]
+_SYN_TAU_D_DEFAULTS = np.array([2.0, 120.0,  6.0, 250.0], dtype=np.float64)   # decay [ms]
+_SYN_EREV_DEFAULTS  = np.array([0.0,   0.0, -75.0, -95.0], dtype=np.float64)  # reversal [mV]
+
+# cfg.stim.stim_type → kinetic syn_type index. Kainate and Nicotinic map to AMPA
+# (type 0): both are fast excitatory cation channels whose Exp2Syn kinetics are
+# well-approximated by AMPA parameters (Lerma 2003; Dani & Bertrand 2007).
+_STIM_TYPE_TO_SYN_TYPE = {
+    'AMPA': 0, 'NMDA': 1, 'GABAA': 2, 'GABAB': 3,
+    'Kainate': 0, 'Nicotinic': 0,
+}
+
+
+def _compute_syn_fnorm(tau_r: np.ndarray, tau_d: np.ndarray) -> np.ndarray:
+    """Analytic Exp2Syn normalization so that weight=1 yields peak conductance=1.
+
+    Formula (Destexhe 1994; Hines & Carnevale NEURON Exp2Syn):
+        t_peak = tau_r * tau_d / (tau_d - tau_r) * ln(tau_d / tau_r)
+        f_norm = 1 / (exp(-t_peak/tau_d) - exp(-t_peak/tau_r))
+
+    Entries with invalid kinetics (tau<=0 or tau_r≈tau_d) get f_norm=0 — caller
+    must treat 0.0 as "synapse disabled" (weight * 0 = no jump).
+    """
+    fnorm = np.zeros_like(tau_r, dtype=np.float64)
+    for i in range(len(tau_r)):
+        tr = float(tau_r[i]); td = float(tau_d[i])
+        if tr <= 0.0 or td <= 0.0 or abs(td - tr) < 1e-9:
+            continue
+        t_peak = (tr * td) / (td - tr) * np.log(td / tr)
+        denom = np.exp(-t_peak / td) - np.exp(-t_peak / tr)
+        if abs(denom) < 1e-12:
+            continue
+        fnorm[i] = 1.0 / denom
+    return fnorm
+
+
 def generate_effective_event_times(train_type: str, freq_hz: float, duration_ms: float, t_start: float, manual_times: list, seed_hash: int = None) -> np.ndarray:
     """
     Create an array of synaptic event times (in milliseconds) for a stimulus train without modifying config.
@@ -501,6 +546,97 @@ class NeuronSolver:
             b_ca_v[i] = b_ca_base * (av_i / av_soma)
 
         return b_ca_v
+
+    @staticmethod
+    def _compile_event_matrix(
+        cfg,
+        eff_event_times_1: np.ndarray,
+        eff_event_times_2: np.ndarray,
+        dual_cfg,
+        dual_stim_enabled: int,
+    ) -> np.ndarray:
+        """Build the sorted event matrix for the kinetic synapse (Exp2Syn) path.
+
+        Returns shape [N_events, 4] with columns [time_ms, comp_idx, syn_type, weight],
+        sorted ascending by time. Returns shape [0, 4] when no synaptic events are
+        configured (e.g. primary is 'const'/'pulse' and no dual synapse).
+
+        Non-synaptic stim types (const/pulse/alpha/ou_noise/zap) are intentionally
+        skipped — they remain handled by the continuous get_stim_current path in the
+        native loop. This mirrors the "Preserve Continuous Stimuli" architecture rule.
+        """
+        rows = []
+        # Primary
+        pst = getattr(cfg.stim, 'stim_type', 'const')
+        if pst in _STIM_TYPE_TO_SYN_TYPE and eff_event_times_1 is not None and len(eff_event_times_1) > 0:
+            syn_type = float(_STIM_TYPE_TO_SYN_TYPE[pst])
+            comp_idx = float(cfg.stim.stim_comp)
+            weight = float(cfg.stim.Iext)
+            for t_ev in eff_event_times_1:
+                rows.append((float(t_ev), comp_idx, syn_type, weight))
+        # Secondary (dual)
+        if dual_stim_enabled == 1 and dual_cfg is not None:
+            sst = getattr(dual_cfg, 'secondary_stim_type', 'const')
+            if sst in _STIM_TYPE_TO_SYN_TYPE and eff_event_times_2 is not None and len(eff_event_times_2) > 0:
+                syn_type_2 = float(_STIM_TYPE_TO_SYN_TYPE[sst])
+                comp_idx_2 = float(getattr(dual_cfg, 'secondary_stim_comp', 0))
+                weight_2 = float(dual_cfg.secondary_Iext)
+                for t_ev in eff_event_times_2:
+                    rows.append((float(t_ev), comp_idx_2, syn_type_2, weight_2))
+        if not rows:
+            return np.zeros((0, 4), dtype=np.float64)
+        arr = np.asarray(rows, dtype=np.float64)
+        arr = arr[np.argsort(arr[:, 0], kind='stable')]
+        return arr
+
+    @staticmethod
+    def _build_kinetic_syn_dict(
+        cfg,
+        dual_cfg,
+        dual_stim_enabled: int,
+        eff_event_times_1: np.ndarray,
+        eff_event_times_2: np.ndarray,
+    ) -> dict:
+        """Return the 5 PhysicsParams kwargs for the kinetic synapse (Exp2Syn) path.
+
+        Applies cfg.stim.alpha_tau / dual_cfg.secondary_alpha_tau as per-type
+        multipliers to tau_rise and tau_decay, scaled only on the synapse type(s)
+        actually used by the active stimuli. All 4 types' reversal potentials and
+        baseline tau values are populated from literature defaults regardless.
+        """
+        tau_r = _SYN_TAU_R_DEFAULTS.copy()
+        tau_d = _SYN_TAU_D_DEFAULTS.copy()
+        erev  = _SYN_EREV_DEFAULTS.copy()
+
+        pst = getattr(cfg.stim, 'stim_type', 'const')
+        if pst in _STIM_TYPE_TO_SYN_TYPE:
+            k = _STIM_TYPE_TO_SYN_TYPE[pst]
+            mult = max(float(cfg.stim.alpha_tau), 1e-9)
+            tau_r[k] *= mult
+            tau_d[k] *= mult
+
+        if dual_stim_enabled == 1 and dual_cfg is not None:
+            sst = getattr(dual_cfg, 'secondary_stim_type', 'const')
+            if sst in _STIM_TYPE_TO_SYN_TYPE:
+                k2 = _STIM_TYPE_TO_SYN_TYPE[sst]
+                mult2 = max(float(getattr(dual_cfg, 'secondary_alpha_tau', 1.0)), 1e-9)
+                # If primary already scaled this type, the secondary multiplier stacks.
+                # This is an intentional trade-off: only one tau_r/tau_d per syn_type is
+                # carried in PhysicsParams, so dual stimuli of the same type share kinetics.
+                tau_r[k2] *= mult2
+                tau_d[k2] *= mult2
+
+        fnorm = _compute_syn_fnorm(tau_r, tau_d)
+        event_matrix = NeuronSolver._compile_event_matrix(
+            cfg, eff_event_times_1, eff_event_times_2, dual_cfg, dual_stim_enabled,
+        )
+        return {
+            'event_matrix': event_matrix,
+            'syn_tau_r': tau_r,
+            'syn_tau_d': tau_d,
+            'syn_fnorm': fnorm,
+            'syn_erev': erev,
+        }
 
     # ─────────────────────────────────────────────────────────────────
     def run_single(self, custom_config: FullModelConfig = None) -> SimulationResult:
@@ -805,17 +941,25 @@ class NeuronSolver:
             "dfilter_delay_steps_2": np.int32(1),  # SciPy path: delay handled by native loop only
         }
         
+        # ── Kinetic synapse (Exp2Syn) translation layer — Task 2 ──
+        # Populates event_matrix + syn_{tau_r,tau_d,fnorm,erev} on PhysicsParams.
+        # Task 2 scope: data populated but native loop still reads legacy event_times_arr*.
+        # en_kinetic_synapses stays False → no state-vector size change.
+        rhs_values.update(NeuronSolver._build_kinetic_syn_dict(
+            cfg, dual_cfg, dual_stim_enabled, eff_event_times_1, eff_event_times_2,
+        ))
+
         # ── Precompute stimulus arrays (Optimization v11.8) ──
         # Calculate n_steps for precomputation based on t_sim and dt_eval
         t_eval = np.arange(0.0, cfg.stim.t_sim, cfg.stim.dt_eval)
         n_steps = len(t_eval)
         dt = cfg.stim.dt_eval
-        
+
         # Determine if stimuli are conductance-based
         _COND_TYPES = {4, 5, 6, 7, 8, 9}  # AMPA, NMDA, GABA_A, GABA_B, Kainate, Nicotinic
         is_cond_primary = stype in _COND_TYPES
         is_cond_secondary = stype_2 in _COND_TYPES if dual_stim_enabled == 1 else False
-        
+
         # Create temporary physics for precomputation (without precomputed arrays)
         _physics_temp = create_physics_params(**rhs_values)
         I_stim_pre, G_syn_pre, I_stim_pre_2, G_syn_pre_2 = precompute_stimulus_arrays(
@@ -1219,7 +1363,8 @@ class NeuronSolver:
                     lle_t_evolve: float = 1.0,
                     lle_subspace_mode: str | int = "v_only",
                     lle_custom_mask = None,
-                    lle_weights = None) -> SimulationResult:
+                    lle_weights = None,
+                    post_process: bool = True) -> SimulationResult:
         """
         Run the model simulation using the native Hines fixed-step solver.
         
@@ -1227,6 +1372,13 @@ class NeuronSolver:
         and returns a SimulationResult compatible with the rest of the analysis pipeline.
         Requires the solver mode to be configured for native Hines execution.
         
+        Parameters
+        ----------
+        post_process : bool
+            When True (default), reconstruct per-channel currents and ATP estimates.
+            Batch validation paths may set False to avoid heavy post-processing when
+            only compact spike/voltage metrics are required.
+
         Returns:
             SimulationResult: Container with time vector, state matrix, extracted voltages,
             reconstructed currents, ATP estimates, and morphology. If the native solver
@@ -1625,7 +1777,14 @@ class NeuronSolver:
         physics_kwargs['G_syn_pre'] = G_syn_pre
         physics_kwargs['I_stim_pre_2'] = I_stim_pre_2
         physics_kwargs['G_syn_pre_2'] = G_syn_pre_2
-        
+
+        # Task 3: populate kinetic-synapse (Exp2Syn) arrays for native code paths.
+        # en_kinetic_synapses stays False until Task 4 — this only ensures the
+        # PhysicsParams fields are present and well-typed for Numba inference.
+        physics_kwargs.update(NeuronSolver._build_kinetic_syn_dict(
+            cfg, dual_cfg, dual_stim_enabled, event_times_arr, event_times_arr_2,
+        ))
+
         # Create final physics with precomputed arrays
         physics = create_physics_params(**physics_kwargs)
 
@@ -1739,7 +1898,8 @@ class NeuronSolver:
         if diverged:
             # Return partial result with warning flag
             res = SimulationResult(t_out, y_out, n_comp, cfg)
-            self._post_process_physics(res, morph)
+            if post_process:
+                self._post_process_physics(res, morph)
             res.morph = morph
             res.state_offsets = physics.state_offsets  # SSoT v12.2
             res.i_stim_total = i_stim_arr  # v12.2: Precomputed stimulus current
@@ -1752,7 +1912,8 @@ class NeuronSolver:
             return res
 
         res = SimulationResult(t_out, y_out, n_comp, cfg)
-        self._post_process_physics(res, morph)
+        if post_process:
+            self._post_process_physics(res, morph)
         res.morph = morph
         res.state_offsets = physics.state_offsets  # SSoT v12.2
         res.i_stim_total = i_stim_arr  # v12.2: Precomputed stimulus current

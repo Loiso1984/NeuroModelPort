@@ -1,4 +1,4 @@
-"""
+﻿"""
 core/analysis.py — Spike Analysis & Membrane Property Toolkit v10.0
 
 Ports and improves all analysis functions from Scilab hh_utils.sce:
@@ -1438,8 +1438,11 @@ def shannon_entropy_isi(spike_times_ms: np.ndarray, bins: int = 20) -> float:
     if len(isi) == 0:
         return 0.0
 
-    # Create histogram
-    hist, _ = np.histogram(isi, bins=bins, density=True)
+    # Create histogram (counts, not density)
+    hist, _ = np.histogram(isi, bins=bins, density=False)
+
+    # Normalize to probabilities (sum = 1)
+    hist = hist / np.sum(hist)
 
     # Remove zero probabilities
     hist = hist[hist > 0]
@@ -1461,8 +1464,8 @@ def compute_biophysical_metrics(result, stats: dict | None = None) -> dict:
     1. Firing Rate (Hz, normalized to 0-200 Hz)
     2. Adaptation Index (normalized: 0=no adaptation, 1=max adaptation)
     3. Spike Half-width (ms, normalized: 0-2 ms)
-    4. Input Resistance (MOhm*cm², normalized: 0-100)
-    5. Energy Cost (ATP estimate, normalized to 0-1e6 nmol/cm²)
+    4. Input Resistance (MOhm*cm^2, normalized: 0-100)
+    5. Energy Cost (ATP estimate, normalized to 0-1e6 nmol/cm^2)
     6. Peak-to-Threshold Ratio (normalized: 1.0-1.5)
 
     Parameters
@@ -1479,74 +1482,121 @@ def compute_biophysical_metrics(result, stats: dict | None = None) -> dict:
     """
     from core.analysis import spike_halfwidth, adaptation_index
 
+    def _finite_stat(payload: dict | None, *keys: str) -> float | None:
+        if payload is None:
+            return None
+        for key in keys:
+            val = payload.get(key, None)
+            if val is None:
+                continue
+            try:
+                val_f = float(val)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(val_f):
+                return val_f
+        return None
+
     metrics = {
-        'firing_rate_hz': 0.0,
-        'adaptation_index': 0.0,
-        'spike_halfwidth_ms': 0.0,
-        'input_resistance_mohm': 0.0,
-        'energy_cost_atp': 0.0,
-        'peak_threshold_ratio': 1.0,
+        "firing_rate_hz": 0.0,
+        "adaptation_index": 0.0,
+        "spike_halfwidth_ms": 0.0,
+        "input_resistance_mohm": 0.0,
+        "energy_cost_atp": 0.0,
+        "peak_threshold_ratio": 1.0,
         # Normalized values (0-1)
-        'firing_rate_norm': 0.0,
-        'adaptation_norm': 0.5,  # Center = no adaptation
-        'halfwidth_norm': 0.5,
-        'resistance_norm': 0.5,
-        'energy_norm': 0.0,
-        'peak_threshold_norm': 0.0,
+        "firing_rate_norm": 0.0,
+        "adaptation_norm": 0.5,
+        "halfwidth_norm": 0.5,
+        "resistance_norm": 0.5,
+        "energy_norm": 0.0,
+        "peak_threshold_norm": 0.0,
     }
 
-    # Firing rate
-    if stats and 'f_inst' in stats and np.isfinite(stats['f_inst']):
-        metrics['firing_rate_hz'] = float(stats['f_inst'])
-    elif stats and 'f_s' in stats and np.isfinite(stats['f_s']):
-        metrics['firing_rate_hz'] = float(stats['f_s'])
-    metrics['firing_rate_norm'] = np.clip(metrics['firing_rate_hz'] / 150.0, 0, 1)
+    # Firing rate (new keys first, keep legacy fallbacks)
+    firing_hz = _finite_stat(
+        stats,
+        "firing_rate_hz",
+        "f_steady_hz",
+        "f_initial_hz",
+        "f_inst",
+        "f_s",
+    )
+    if firing_hz is not None:
+        metrics["firing_rate_hz"] = firing_hz
+    metrics["firing_rate_norm"] = float(np.clip(metrics["firing_rate_hz"] / 150.0, 0.0, 1.0))
 
-    # Adaptation Index
-    if stats and 'spike_times' in stats and len(stats['spike_times']) >= 3:
-        ai = adaptation_index(stats['spike_times'])
-        metrics['adaptation_index'] = float(ai)
-        # Normalize: -1 to 1 -> 0 to 1
-        metrics['adaptation_norm'] = (ai + 1.0) / 2.0
+    # Adaptation index (prefer precomputed stats)
+    ai_pre = _finite_stat(stats, "adaptation_index")
+    if ai_pre is not None:
+        ai = ai_pre
+    elif stats and "spike_times" in stats and len(stats["spike_times"]) >= 3:
+        ai = float(adaptation_index(stats["spike_times"]))
     else:
-        metrics['adaptation_norm'] = 0.5  # Neutral
+        ai = 0.0
+    metrics["adaptation_index"] = ai
+    metrics["adaptation_norm"] = float(np.clip((ai + 1.0) / 2.0, 0.0, 1.0))
 
-    # Spike Half-width
-    if hasattr(result, 'v_soma') and hasattr(result, 't'):
-        hw = spike_halfwidth(result.v_soma, result.t)
-        if np.isfinite(hw):
-            metrics['spike_halfwidth_ms'] = float(hw)
-            # Normalize: 0-3 ms -> 0-1
-            metrics['halfwidth_norm'] = np.clip(hw / 3.0, 0, 1)
+    # Spike half-width (stats first, then waveform-derived fallback)
+    hw = _finite_stat(stats, "halfwidth_ms")
+    if hw is None and hasattr(result, "v_soma") and hasattr(result, "t"):
+        hw_calc = spike_halfwidth(result.v_soma, result.t)
+        if np.isfinite(hw_calc):
+            hw = float(hw_calc)
+    if hw is not None:
+        metrics["spike_halfwidth_ms"] = hw
+        metrics["halfwidth_norm"] = float(np.clip(hw / 3.0, 0.0, 1.0))
 
-    # Input Resistance
-    if hasattr(result, 'config') and hasattr(result.config, 'channels'):
-        gL = result.config.channels.gL
-        if gL > 0:
-            Rin = 1.0 / gL  # kOhm*cm²
-            metrics['input_resistance_mohm'] = float(Rin)
-            # Normalize: 0-200 -> 0-1
-            metrics['resistance_norm'] = np.clip(Rin / 200.0, 0, 1)
+    # Input resistance (stats first, then conductance inversion fallback)
+    rin = _finite_stat(stats, "Rin_kohm_cm2", "Rin_mohm_cm2")
+    if rin is None and hasattr(result, "config") and hasattr(result.config, "channels"):
+        gL = float(getattr(result.config.channels, "gL", 0.0) or 0.0)
+        if gL > 0.0:
+            rin = 1.0 / gL
+    if rin is not None:
+        metrics["input_resistance_mohm"] = rin
+        metrics["resistance_norm"] = float(np.clip(rin / 200.0, 0.0, 1.0))
 
-    # Energy Cost (ATP estimate)
-    if hasattr(result, 'atp_estimate'):
-        atp = result.atp_estimate
-        metrics['energy_cost_atp'] = float(atp)
-        # Logarithmic normalization: log10(1 to 1e6) -> 0-6 -> 0-1
-        metrics['energy_norm'] = np.clip(np.log10(max(atp, 1.0)) / 6.0, 0, 1)
+    # Energy cost ATP (stats first, result fallback)
+    atp = _finite_stat(stats, "atp_nmol_cm2", "energy_cost_atp")
+    if atp is None and hasattr(result, "atp_estimate"):
+        try:
+            atp_f = float(result.atp_estimate)
+            atp = atp_f if np.isfinite(atp_f) else None
+        except (TypeError, ValueError):
+            atp = None
+    if atp is not None:
+        metrics["energy_cost_atp"] = atp
+        metrics["energy_norm"] = float(np.clip(np.log10(max(atp, 1.0)) / 6.0, 0.0, 1.0))
 
-    # Peak-to-Threshold Ratio
-    if stats and 'peak_V' in stats and 'threshold_V' in stats:
-        peak = stats['peak_V']
-        thresh = stats['threshold_V']
-        if np.isfinite(peak) and np.isfinite(thresh) and thresh != 0:
-            ratio = peak / thresh
-            metrics['peak_threshold_ratio'] = float(ratio)
-            # Normalize: typical range 1.0-1.5 -> 0-1
-            metrics['peak_threshold_norm'] = max(0.0, min(1.0, (ratio - 1.0) / 0.5))
+    # Peak-to-threshold ratio (new keys first + robust excursion-based normalization)
+    v_peak = _finite_stat(stats, "V_peak", "peak_V")
+    v_thr = _finite_stat(stats, "V_threshold", "threshold_V")
+    v_base = _finite_stat(stats, "V_ahp", "v_rest_tail_mV")
+    if v_base is None and hasattr(result, "v_soma"):
+        try:
+            tail = np.asarray(result.v_soma[-50:], dtype=float)
+            if tail.size > 0:
+                vb = float(np.nanmean(tail))
+                if np.isfinite(vb):
+                    v_base = vb
+        except Exception:
+            v_base = None
+
+    ratio = None
+    if v_peak is not None and v_thr is not None:
+        if v_base is not None:
+            denom = v_thr - v_base
+            numer = v_peak - v_base
+            if abs(denom) > 1e-6 and numer > 0.0:
+                ratio = numer / denom
+        if ratio is None and abs(v_thr) > 1e-6:
+            ratio = v_peak / v_thr
+    if ratio is not None and np.isfinite(ratio):
+        metrics["peak_threshold_ratio"] = float(ratio)
+        metrics["peak_threshold_norm"] = float(np.clip((ratio - 1.0) / 2.0, 0.0, 1.0))
 
     return metrics
-
 
 def estimate_spike_modulation(
     spike_times_ms: np.ndarray,
@@ -1781,6 +1831,112 @@ def compute_membrane_impedance(
     return out
 
 
+def compute_q_factor(impedance_result: dict) -> dict:
+    """Compute resonance quality factor Q = f_res / FWHM from impedance sweep.
+    
+    Q-factor characterizes the sharpness of resonance:
+    - Q < 1: Broadband/low selectivity (integrator-like)
+    - Q = 1-2: Moderate resonance
+    - Q > 2: Sharp resonance (resonator-like)
+    
+    Parameters
+    ----------
+    impedance_result : dict
+        Output from compute_membrane_impedance() with keys:
+        - valid: bool
+        - freq_hz: array of frequencies
+        - z_mag_kohm_cm2: impedance magnitude
+        - f_res_hz: resonance frequency
+        - z_res_kohm_cm2: impedance at resonance
+    
+    Returns
+    -------
+    dict with keys:
+        - q_factor: float, Q = f_res / FWHM (NaN if no peak)
+        - f_res_hz: float, peak frequency (copy from input)
+        - z_res_kohm_cm2: float, peak impedance (copy from input)
+        - fwhm_hz: float, full width at half maximum
+        - classification: str, 'integrator', 'moderate', or 'resonator'
+    """
+    out = {
+        "q_factor": np.nan,
+        "f_res_hz": np.nan,
+        "z_res_kohm_cm2": np.nan,
+        "fwhm_hz": np.nan,
+        "classification": "none",
+    }
+    
+    if not impedance_result.get("valid", False):
+        return out
+    
+    freq = impedance_result.get("freq_hz", np.array([]))
+    z_mag = impedance_result.get("z_mag_kohm_cm2", np.array([]))
+    f_res = impedance_result.get("f_res_hz", np.nan)
+    z_res = impedance_result.get("z_res_kohm_cm2", np.nan)
+    
+    if len(freq) < 3 or len(z_mag) < 3 or not np.isfinite(f_res) or not np.isfinite(z_res):
+        return out
+    
+    # Find FWHM: frequency range where |Z| >= Z_max / 2
+    z_half_max = z_res / 2.0
+    above_half = z_mag >= z_half_max
+    
+    if not np.any(above_half):
+        return out
+    
+    # Find first and last points above half-max
+    indices_above = np.where(above_half)[0]
+    if len(indices_above) < 2:
+        return out
+    
+    idx_low = indices_above[0]
+    idx_high = indices_above[-1]
+    
+    # FWHM with linear interpolation for precision
+    f_low = freq[idx_low]
+    f_high = freq[idx_high]
+    
+    # Interpolate to exact half-max crossing
+    if idx_low > 0:
+        # Linear interpolation between idx_low-1 and idx_low
+        z_below = z_mag[idx_low - 1]
+        z_above = z_mag[idx_low]
+        if z_above != z_below:
+            frac = (z_half_max - z_below) / (z_above - z_below)
+            f_low = freq[idx_low - 1] + frac * (freq[idx_low] - freq[idx_low - 1])
+    
+    if idx_high < len(freq) - 1:
+        # Linear interpolation between idx_high and idx_high+1
+        z_below = z_mag[idx_high]
+        z_above = z_mag[idx_high + 1]
+        if z_above != z_below:
+            frac = (z_half_max - z_below) / (z_above - z_below)
+            f_high = freq[idx_high] + frac * (freq[idx_high + 1] - freq[idx_high])
+    
+    fwhm = f_high - f_low
+    
+    if fwhm > 0 and np.isfinite(f_res):
+        q = f_res / fwhm
+        
+        # Classification
+        if q < 1.0:
+            classification = "integrator"
+        elif q < 2.0:
+            classification = "moderate"
+        else:
+            classification = "resonator"
+        
+        out.update({
+            "q_factor": float(q),
+            "f_res_hz": float(f_res),
+            "z_res_kohm_cm2": float(z_res),
+            "fwhm_hz": float(fwhm),
+            "classification": classification,
+        })
+    
+    return out
+
+
 def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
     """
     Compute the complete Neuron Passport from a SimulationResult.
@@ -1826,6 +1982,10 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         detect_refractory_ms=spike_detect_refractory_ms,
         detect_algorithm=spike_detect_algorithm,
     ) if n_spikes > 0 else np.nan
+    if n_spikes > 0 and not np.isfinite(hw):
+        # When half-width is unresolved on coarse sampled traces, use the
+        # minimum resolvable temporal width instead of propagating NaN.
+        hw = float(np.median(np.diff(t))) if len(t) > 1 else 0.0
     V_pk  = float(np.max(V))
     V_ahp = np.nan
     if n_spikes > 0 and len(peak_idx) > 0:
@@ -2144,3 +2304,4 @@ def full_analysis(result, compute_lyapunov: bool | None = None) -> dict:
         'f_res_hz':            np.nan,  # Will be populated if impedance analysis runs
         'dfilter_attenuation': getattr(cfg.stim, 'dfilter_attenuation', 1.0),
     }
+

@@ -394,8 +394,8 @@ def run_native_loop(
     dyn_atp = physics.dyn_atp
 
     # ── Channel counts for Langevin noise (approximate, proportional to conductance) ──
-    N_Na = np.maximum(50.0, 1000.0 * gna_v / max(physics.gna_max, 1e-12))
-    N_K  = np.maximum(50.0, 1000.0 * gk_v / max(physics.gk_max, 1e-12))
+    N_Na = np.maximum(50.0, 1000.0 * gna_v * physics.inv_gna_max)
+    N_K  = np.maximum(50.0, 1000.0 * gk_v * physics.inv_gk_max)
     sqrt_dt = np.sqrt(dt)
 
     # ── Reversal potentials ──
@@ -454,6 +454,33 @@ def run_native_loop(
     off_k_o = int(offsets.off_k_o)
     off_ifilt_primary = int(offsets.off_ifilt_primary)
     off_ifilt_secondary = int(offsets.off_ifilt_secondary)
+
+    # ── Task 3: Event-driven kinetic synapse (Exp2Syn) state offsets + decay tables ──
+    # Gated by off_ampa_a >= 0 — when StateOffsets was built with en_kinetic_synapses=False
+    # (legacy path), all kinetic blocks are skipped at zero cost.
+    off_ampa_a_  = int(offsets.off_ampa_a)
+    off_ampa_b_  = int(offsets.off_ampa_b)
+    off_nmda_a_  = int(offsets.off_nmda_a)
+    off_nmda_b_  = int(offsets.off_nmda_b)
+    off_gabaa_a_ = int(offsets.off_gabaa_a)
+    off_gabaa_b_ = int(offsets.off_gabaa_b)
+    off_gabab_a_ = int(offsets.off_gabab_a)
+    off_gabab_b_ = int(offsets.off_gabab_b)
+    en_kin_syn = (off_ampa_a_ >= 0)
+
+    event_matrix = physics.event_matrix
+    syn_fnorm    = physics.syn_fnorm
+    n_events_kin = event_matrix.shape[0]
+
+    # Pre-compute exact decay factors per syn_type (dt is constant in fixed-step loop).
+    # tau<=0 → factor 1.0 (no decay) so disabled types are zero-cost no-ops.
+    dec_a_arr = np.empty(4, dtype=np.float64)
+    dec_b_arr = np.empty(4, dtype=np.float64)
+    for k in range(4):
+        tr = physics.syn_tau_r[k]
+        td = physics.syn_tau_d[k]
+        dec_a_arr[k] = np.exp(-dt / tr) if tr > 0.0 else 1.0
+        dec_b_arr[k] = np.exp(-dt / td) if td > 0.0 else 1.0
 
     # ── Output sizing ──
     n_steps = int(t_sim / dt) + 1
@@ -531,6 +558,7 @@ def run_native_loop(
     out_idx = 0
     t = 0.0
     diverged = 0  # Initialize divergence flag
+    event_cursor = 0  # Task 3: O(1) event-matrix scan position (monotonic, never rewinds)
 
     # ── Record initial condition (t=0) ──
     # v12.8 FIX: Initial state recorded before any physics
@@ -600,11 +628,51 @@ def run_native_loop(
                 ena_arr_buf[i] = ena
                 ek_arr_buf[i] = ek
 
+        # ── Task 3: Advance event_cursor over events firing in (t, t+dt] ──
+        # Single advance per step (shared across LLE trajectories). Range
+        # [cursor_prev_step, event_cursor) is replayed inside each trajectory.
+        cursor_prev_step = event_cursor
+        if en_kin_syn and n_events_kin > 0:
+            t_next_step = t + dt
+            while event_cursor < n_events_kin and event_matrix[event_cursor, 0] <= t_next_step:
+                event_cursor += 1
+
         # ─────────────────────────────────────────────────────────────
         # DUAL TRAJECTORY LOOP — traj 0 = main, traj 1 = perturbed (LLE)
         # ─────────────────────────────────────────────────────────────
         for traj_idx in range(n_traj):
             y_active = y if traj_idx == 0 else y_pert
+
+            # ── Task 3: Exp2Syn exact decay + event injection (zero-alloc) ──
+            # Convention: decay first (t→t+dt), then inject events that fired in
+            # the interval (event arrives at end-of-step under Backward-Euler).
+            if en_kin_syn:
+                for i in range(n_comp):
+                    y_active[off_ampa_a_  + i] *= dec_a_arr[0]
+                    y_active[off_ampa_b_  + i] *= dec_b_arr[0]
+                    y_active[off_nmda_a_  + i] *= dec_a_arr[1]
+                    y_active[off_nmda_b_  + i] *= dec_b_arr[1]
+                    y_active[off_gabaa_a_ + i] *= dec_a_arr[2]
+                    y_active[off_gabaa_b_ + i] *= dec_b_arr[2]
+                    y_active[off_gabab_a_ + i] *= dec_a_arr[3]
+                    y_active[off_gabab_b_ + i] *= dec_b_arr[3]
+                for k in range(cursor_prev_step, event_cursor):
+                    comp_k = int(event_matrix[k, 1])
+                    syn_k  = int(event_matrix[k, 2])
+                    w_k    = event_matrix[k, 3]
+                    jump   = w_k * syn_fnorm[syn_k]
+                    if syn_k == 0:
+                        y_active[off_ampa_a_  + comp_k] += jump
+                        y_active[off_ampa_b_  + comp_k] += jump
+                    elif syn_k == 1:
+                        y_active[off_nmda_a_  + comp_k] += jump
+                        y_active[off_nmda_b_  + comp_k] += jump
+                    elif syn_k == 2:
+                        y_active[off_gabaa_a_ + comp_k] += jump
+                        y_active[off_gabaa_b_ + comp_k] += jump
+                    else:  # syn_k == 3 → GABAB
+                        y_active[off_gabab_a_ + comp_k] += jump
+                        y_active[off_gabab_b_ + comp_k] += jump
 
             # ── 1. Update gating variables analytically at V_n ──
             update_gates_analytic(
@@ -1132,8 +1200,8 @@ def run_native_loop_adaptive(
     dyn_ca  = physics.dyn_ca
     dyn_atp = physics.dyn_atp
 
-    N_Na = np.maximum(50.0, 1000.0 * gna_v / max(physics.gna_max, 1e-12))
-    N_K  = np.maximum(50.0, 1000.0 * gk_v  / max(physics.gk_max,  1e-12))
+    N_Na = np.maximum(50.0, 1000.0 * gna_v * physics.inv_gna_max)
+    N_K  = np.maximum(50.0, 1000.0 * gk_v * physics.inv_gk_max)
 
     ena = physics.ena
     ek  = physics.ek
@@ -1172,6 +1240,25 @@ def run_native_loop_adaptive(
     off_k_o  = int(offsets.off_k_o)
     off_ifilt_primary   = int(offsets.off_ifilt_primary)
     off_ifilt_secondary = int(offsets.off_ifilt_secondary)
+
+    # ── Task 3: Event-driven kinetic synapse (Exp2Syn) state offsets ──
+    # Decay factors are recomputed per accepted step (dt_try is variable).
+    off_ampa_a_  = int(offsets.off_ampa_a)
+    off_ampa_b_  = int(offsets.off_ampa_b)
+    off_nmda_a_  = int(offsets.off_nmda_a)
+    off_nmda_b_  = int(offsets.off_nmda_b)
+    off_gabaa_a_ = int(offsets.off_gabaa_a)
+    off_gabaa_b_ = int(offsets.off_gabaa_b)
+    off_gabab_a_ = int(offsets.off_gabab_a)
+    off_gabab_b_ = int(offsets.off_gabab_b)
+    en_kin_syn = (off_ampa_a_ >= 0)
+    event_matrix_a = physics.event_matrix
+    syn_fnorm_a    = physics.syn_fnorm
+    syn_tau_r_a    = physics.syn_tau_r
+    syn_tau_d_a    = physics.syn_tau_d
+    n_events_kin   = event_matrix_a.shape[0]
+    dec_a_arr_a = np.empty(4, dtype=np.float64)
+    dec_b_arr_a = np.empty(4, dtype=np.float64)
 
     # Controller constants
     K_SENS = 0.5
@@ -1230,6 +1317,7 @@ def run_native_loop_adaptive(
     dt_try = dt_max_eff
     diverged = 0
     retries_on_this_step = 0
+    event_cursor = 0  # Task 3: monotonic O(1) event-matrix scan position
 
     while t < t_sim:
         # Clamp the final step to t_sim boundary exactly
@@ -1243,9 +1331,48 @@ def run_native_loop_adaptive(
         # Snapshot for rollback (allocation-free copy)
         for s in range(n_state):
             y_backup[s] = y[s]
+        event_cursor_backup = event_cursor  # Task 3: rollback companion to y_backup
 
         v_soma_old = y[off_v]
         v_ais_old  = y[off_v + ais_idx]
+
+        # ── Task 3: Exp2Syn exact decay + event injection (single trajectory) ──
+        # Decay factors recomputed each step because dt_try is variable.
+        if en_kin_syn:
+            for k in range(4):
+                tr_k = syn_tau_r_a[k]
+                td_k = syn_tau_d_a[k]
+                dec_a_arr_a[k] = np.exp(-dt_try / tr_k) if tr_k > 0.0 else 1.0
+                dec_b_arr_a[k] = np.exp(-dt_try / td_k) if td_k > 0.0 else 1.0
+            for i in range(n_comp):
+                y[off_ampa_a_  + i] *= dec_a_arr_a[0]
+                y[off_ampa_b_  + i] *= dec_b_arr_a[0]
+                y[off_nmda_a_  + i] *= dec_a_arr_a[1]
+                y[off_nmda_b_  + i] *= dec_b_arr_a[1]
+                y[off_gabaa_a_ + i] *= dec_a_arr_a[2]
+                y[off_gabaa_b_ + i] *= dec_b_arr_a[2]
+                y[off_gabab_a_ + i] *= dec_a_arr_a[3]
+                y[off_gabab_b_ + i] *= dec_b_arr_a[3]
+            if n_events_kin > 0:
+                t_next_step = t + dt_try
+                while event_cursor < n_events_kin and event_matrix_a[event_cursor, 0] <= t_next_step:
+                    comp_k = int(event_matrix_a[event_cursor, 1])
+                    syn_k  = int(event_matrix_a[event_cursor, 2])
+                    w_k    = event_matrix_a[event_cursor, 3]
+                    jump   = w_k * syn_fnorm_a[syn_k]
+                    if syn_k == 0:
+                        y[off_ampa_a_  + comp_k] += jump
+                        y[off_ampa_b_  + comp_k] += jump
+                    elif syn_k == 1:
+                        y[off_nmda_a_  + comp_k] += jump
+                        y[off_nmda_b_  + comp_k] += jump
+                    elif syn_k == 2:
+                        y[off_gabaa_a_ + comp_k] += jump
+                        y[off_gabaa_b_ + comp_k] += jump
+                    else:  # syn_k == 3 → GABAB
+                        y[off_gabab_a_ + comp_k] += jump
+                        y[off_gabab_b_ + comp_k] += jump
+                    event_cursor += 1
 
         # Precompute Nernst potentials (start-of-step values)
         if dyn_atp:
@@ -1468,6 +1595,7 @@ def run_native_loop_adaptive(
             # Rollback full state
             for s in range(n_state):
                 y[s] = y_backup[s]
+            event_cursor = event_cursor_backup  # Task 3: rewind cursor with state
             if retries_on_this_step == 0:
                 retries_on_this_step = 1
                 dt_try = dt_try * 0.5

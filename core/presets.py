@@ -384,13 +384,13 @@ def _apply_ca1_theta_protocol(cfg: FullModelConfig) -> None:
     cfg.morphology.N_trunk = 6
     cfg.stim_location.location = "dendritic_filtered"
     cfg.dendritic_filter.enabled = True
-    cfg.dendritic_filter.distance_um = 180.0
-    cfg.dendritic_filter.space_constant_um = 180.0
-    cfg.dendritic_filter.tau_dendritic_ms = 12.0
+    cfg.dendritic_filter.distance_um = 220.0
+    cfg.dendritic_filter.space_constant_um = 170.0
+    cfg.dendritic_filter.tau_dendritic_ms = 16.0
 
     # Distal glutamatergic theta drive with a mild high-conductance background.
     cfg.stim.stim_type = 'AMPA'
-    cfg.stim.Iext = 2.0
+    cfg.stim.Iext = 1.0
     cfg.stim.alpha_tau = 2.0
     cfg.stim.pulse_start = 0.0
     cfg.stim.synaptic_train_type = 'regular'
@@ -398,7 +398,7 @@ def _apply_ca1_theta_protocol(cfg: FullModelConfig) -> None:
     cfg.stim.synaptic_train_duration_ms = 5000.0
     cfg.stim.t_sim = 5000.0
     cfg.stim.dt_eval = 0.5
-    cfg.stim.noise_sigma = 0.25
+    cfg.stim.noise_sigma = 0.0
     cfg.stim.jacobian_mode = 'native_hines'
 
     # Phase-shifted fast inhibition at the soma keeps the rhythm honest.
@@ -406,7 +406,7 @@ def _apply_ca1_theta_protocol(cfg: FullModelConfig) -> None:
         enabled=True,
         secondary_location="soma",
         secondary_stim_type="GABAA",
-        secondary_Iext=0.8,
+        secondary_Iext=1.2,
         secondary_start=35.0,
         secondary_train_type="regular",
         secondary_train_freq_hz=7.0,
@@ -742,7 +742,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.morphology.single_comp = True
         cfg.stim_location.location = "soma"
         cfg.dendritic_filter.enabled = False
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 56.0, 8.0, 0.05
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 40.0, 12.0, 0.07
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -85.0, -60.0
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
         # Ih: provides subthreshold resonance in theta band (Magee 1998)
@@ -834,7 +834,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.dendritic_filter.enabled = True
         cfg.dendritic_filter.distance_um = 180.0
         cfg.dendritic_filter.tau_dendritic_ms = 10.0
-        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 80.0, 8.0, 0.04
+        cfg.channels.gNa_max, cfg.channels.gK_max, cfg.channels.gL = 70.0, 8.0, 0.04
         cfg.channels.ENa, cfg.channels.EK, cfg.channels.EL = 50.0, -90.0, -80.0  # Very hyperpolarized rest
         cfg.env.T_celsius, cfg.env.T_ref, cfg.env.Q10 = 37.0, 23.0, 2.3
         # Strong I_A: key feature — delays spike onset by hundreds of ms
@@ -851,7 +851,7 @@ def apply_preset(cfg: FullModelConfig, name: str):
         cfg.stim.jacobian_mode = 'native_hines'
         # Tonic depolarization acts as an up-state proxy while I_A delays recruitment.
         cfg.stim.stim_type = 'const'
-        cfg.stim.Iext = 22.0
+        cfg.stim.Iext = 10.0
 
     # --- 18. ХОЛИНЕРГИЧЕСКАЯ НЕЙРОМОДУЛЯЦИЯ (ACh: Бодрствование vs Сон) ---
     elif code == "R":
@@ -970,6 +970,9 @@ def apply_preset(cfg: FullModelConfig, name: str):
         _apply_anesthesia_mode(cfg)
     if code == "S":
         _apply_dravet_mode(cfg)
+
+    # Machine-readable preset marker for diagnostics/profile selection.
+    cfg.notes = f"preset_code={code}"
 
 
 

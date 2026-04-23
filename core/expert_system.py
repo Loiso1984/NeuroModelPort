@@ -11,6 +11,7 @@ Use set_language() to switch output language globally.
 """
 
 from typing import Callable, Dict, List, Any, Optional
+import numpy as np
 
 # ── PHYSICAL CONSTANTS (must be defined BEFORE use in lambda rules) ──
 ATP_ISCHEMIC_THRESHOLD = 0.5  # mM - K_ATP opens below this threshold
@@ -40,6 +41,34 @@ def get_language() -> str:
         Current language code: "EN" or "RU"
     """
     return _CURRENT_LANGUAGE
+
+
+def _spike_amplitude_degradation(stats: Dict[str, Any]) -> bool:
+    """Return True when late spikes drop below 70% of early spike amplitude."""
+    if int(stats.get("n_spikes", 0) or 0) < 3:
+        return False
+
+    first_amp = stats.get("first_spike_amplitude_mV", None)
+    last_amp = stats.get("last_spike_amplitude_mV", None)
+    if first_amp is not None and last_amp is not None:
+        try:
+            first_f = float(first_amp)
+            last_f = float(last_amp)
+            if first_f > 0.0:
+                return last_f < 0.7 * first_f
+        except (TypeError, ValueError):
+            pass
+
+    amps = stats.get("spike_amps", None)
+    if amps is None:
+        return False
+    try:
+        amp_seq = [float(a) for a in amps]
+    except (TypeError, ValueError):
+        return False
+    if len(amp_seq) < 3 or amp_seq[0] <= 0.0:
+        return False
+    return amp_seq[-1] < 0.7 * amp_seq[0]
 
 
 # Expert rule type definition with bilingual support
@@ -517,29 +546,242 @@ DEFAULT_EXPERT_RULES: List[ExpertRule] = [
         "severity": "warning",
         "format_args": lambda s: [1.0 - s.get('dfilter_attenuation', 1.0)]
     },
-    # ── PHASE 1 NEW RULES: Spike Pattern & Dynamics ──
+    # ── v14.0 NEW RULES: Information Theory & Efficiency ──
     {
-        "id": "bursting_detected",
+        "id": "high_pattern_complexity",
         "condition": lambda s: (
-            s.get('burst_spike_ratio', 0) > 0.3 and
+            s.get('permutation_entropy_norm', 0) > 0.85 and
             s.get('n_spikes', 0) > 10
         ),
         "message_en": (
-            "💥 **Bursting Detected**: {:.0%} of spikes occur in bursts. "
-            "Intraburst frequency {:.1f} Hz suggests intrinsic bursting mechanism "
-            "(IT or Ca2+-dependent). Check enable_ICa and gT settings."
+            "🧠 **High Pattern Complexity**: Permutation entropy {:.2f} indicates diverse spike patterns. "
+            "Neuron operates in high-information regime. "
+            "Reference: High entropy suggests rich temporal coding (Victor & Purpura, 1996)."
         ),
         "message_ru": (
-            "💥 **Обнаружено пакетное поведение**: {:.0%} спайков в пакетах. "
-            "Внутрипакетная частота {:.1f} Гц указывает на механизм пакетной генерации "
-            "(IT или Ca2+-зависимый). Проверьте enable_ICa и gT."
+            "🧠 **Высокая сложность паттерна**: Пермутационная энтропия {:.2f} указывает на разнообразие паттернов спайков. "
+            "Нейрон работает в режиме высокой информационной насыщенности. "
+            "Ссылка: высокая энтропия указывает на богатое временное кодирование (Victor & Purpura, 1996)."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('permutation_entropy_norm', 0)]
+    },
+    {
+        "id": "low_metabolic_efficiency",
+        "condition": lambda s: (
+            np.isfinite(s.get('bits_per_nj', np.nan)) and
+            s.get('bits_per_nj', np.nan) < 0.1 and
+            s.get('n_spikes', 0) > 5 and
+            s.get('atp_nmol_cm2', 0) > 100
+        ),
+        "message_en": (
+            "⚡ **Low Metabolic Efficiency**: {:.3f} bits/nJ — neuron consumes ATP disproportionately to information output. "
+            "Brain typically achieves 10⁶–10⁷ bits/J. "
+            "Consider reducing gNa or increasing gK for better energy-information trade-off."
+        ),
+        "message_ru": (
+            "⚡ **Низкая метаболическая эффективность**: {:.3f} бит/нДж — нейрон потребляет АТФ несоразмерно информационному выходу. "
+            "Мозг обычно достигает 10⁶–10⁷ бит/Дж. "
+            "Рассмотрите снижение gNa или повышение gK для лучшего компромисса энергия-информация."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [s.get('bits_per_nj', 0)]
+    },
+    {
+        "id": "efficient_encoding",
+        "condition": lambda s: (
+            np.isfinite(s.get('bits_per_nj', np.nan)) and
+            s.get('bits_per_nj', np.nan) > 1.0 and
+            s.get('n_spikes', 0) > 10
+        ),
+        "message_en": (
+            "🎯 **Efficient Information Encoding**: {:.3f} bits/nJ exceeds typical neural efficiency. "
+            "Optimal balance between spike rate and metabolic cost. "
+            "Reference: Laughlin et al. (1998) — efficient coding hypothesis."
+        ),
+        "message_ru": (
+            "🎯 **Эффективное кодирование информации**: {:.3f} бит/нДж превышает типичную нейронную эффективность. "
+            "Оптимальный баланс между частотой спайков и метаболической стоимостью. "
+            "Ссылка: Laughlin et al. (1998) — гипотеза эффективного кодирования."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('bits_per_nj', 0)]
+    },
+    # ── v14.0 NEW RULES: Firing Reliability & Latency ──
+    {
+        "id": "unstable_firing",
+        "condition": lambda s: (
+            s.get('firing_reliability', 1.0) < 0.5 and
+            s.get('n_spikes', 0) > 10
+        ),
+        "message_en": (
+            "⚠️ **Unstable Firing Pattern**: Reliability={:.1%}. "
+            "ISI variance exceeds expected from steady-state frequency. "
+            "Possible factors: near-threshold noise, slow oscillations, or approaching bifurcation."
+        ),
+        "message_ru": (
+            "⚠️ **Нестабильный паттерн разрядки**: Надёжность={:.1%}. "
+            "Дисперсия МСИ превышает ожидаемую от стационарной частоты. "
+            "Возможные факторы: пороговый шум, медленные осцилляции или приближение к бифуркации."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [s.get('firing_reliability', 0)]
+    },
+    {
+        "id": "abnormal_latency",
+        "condition": lambda s: (
+            s.get('first_spike_latency_ms', 0) > 100 and
+            s.get('n_spikes', 0) > 0
+        ),
+        "message_en": (
+            "⏱️ **Delayed Response**: First spike latency={:.1f} ms. "
+            "Slow activation — check Ih (hyperpolarization-activated) current or low gNa density. "
+            "May indicate 'sleepy' or deeply hyperpolarized initial state."
+        ),
+        "message_ru": (
+            "⏱️ **Задержанный ответ**: Латентность первого спайка={:.1f} мс. "
+            "Медленная активация — проверьте ток Ih (гиперполяризация-активируемый) или низкую плотность gNa. "
+            "Может указывать на 'сонное' или глубоко гиперполяризованное начальное состояние."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('first_spike_latency_ms', 0)]
+    },
+    {
+        "id": "rapid_activation",
+        "condition": lambda s: (
+            s.get('first_spike_latency_ms', np.inf) < 2 and
+            s.get('stim_amplitude_pA', 0) < 200 and
+            s.get('n_spikes', 0) > 0
+        ),
+        "message_en": (
+            "⚡ **Rapid Activation**: Latency={:.1f} ms at only {:.0f} pA. "
+            "Neuron near rheobase with fast kinetics. "
+            "Typical of cortical fast-spiking interneurons or AIS-targeted stimulation."
+        ),
+        "message_ru": (
+            "⚡ **Быстрая активация**: Латентность={:.1f} мс при всего {:.0f} пА. "
+            "Нейрон близок к реобазу с быстрой кинетикой. "
+            "Типично для быстро-разряжающихся интернейронов корты или стимуляции AIS."
         ),
         "severity": "info",
         "format_args": lambda s: [
-            s.get('burst_spike_ratio', 0),
-            s.get('intra_burst_freq_hz', 0)
+            s.get('first_spike_latency_ms', 0),
+            s.get('stim_amplitude_pA', 0)
         ]
     },
+    # ── v14.0 NEW RULES: Lyapunov & Transient Dynamics ──
+    {
+        "id": "long_transient",
+        "condition": lambda s: (
+            s.get('lyapunov_transient_ms', 0) > 300 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "⏳ **Long Transient Dynamics**: {:.0f} ms to attractor. "
+            "Simulation may not reflect steady-state behavior. "
+            "Consider extending duration or discarding initial period from analysis."
+        ),
+        "message_ru": (
+            "⏳ **Долгие переходные процессы**: {:.0f} мс до аттрактора. "
+            "Симуляция может не отражать стационарное поведение. "
+            "Рассмотрите увеличение длительности или исключение начального периода из анализа."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [s.get('lyapunov_transient_ms', 0)]
+    },
+    {
+        "id": "lle_approaching_zero",
+        "condition": lambda s: (
+            np.isfinite(s.get('lle_per_ms', np.nan)) and
+            abs(s.get('lle_per_ms', 0)) < 0.002 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "⚠️ **Approaching Bifurcation**: |λ| = {:.4f} 1/ms (near zero). "
+            "System losing stability — small perturbations may switch firing regime. "
+            "Reference: λ → 0 signals critical transition (Strogatz, Nonlinear Dynamics)."
+        ),
+        "message_ru": (
+            "⚠️ **Приближение к бифуркации**: |λ| = {:.4f} 1/мс (близко к нулю). "
+            "Система теряет устойчивость — малые возмущения могут переключить режим. "
+            "Ссылка: λ → 0 сигнализирует о критическом переходе (Strogatz)."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [abs(s.get('lle_per_ms', 0))]
+    },
+    {
+        "id": "critical_slowing_down",
+        "condition": lambda s: (
+            np.isfinite(s.get('lyapunov_transient_ms', np.nan)) and
+            s.get('lyapunov_transient_ms', 0) > 500 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "⏳ **Critical Slowing Down**: Transient time {:.0f} ms > 500 ms. "
+            "System approaching bifurcation — recovery from perturbations slows. "
+            "Consider shorter simulation or expect long transients."
+        ),
+        "message_ru": (
+            "⏳ **Критическое замедление**: Время переходного процесса {:.0f} мс > 500 мс. "
+            "Система приближается к бифуркации — восстановление замедляется. "
+            "Рассмотрите более короткую симуляцию или ожидайте длинных транзиентов."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [s.get('lyapunov_transient_ms', 0)]
+    },
+    # ── v14.0 NEW RULES: Modulation & Phase Analysis ──
+    {
+        "id": "strong_phase_locking",
+        "condition": lambda s: (
+            s.get('modulation_valid', False) and
+            np.isfinite(s.get('modulation_plv', np.nan)) and
+            s.get('modulation_plv', 0) > 0.7 and
+            np.isfinite(s.get('modulation_p_value', np.nan)) and
+            s.get('modulation_p_value', 1) < 0.05 and
+            s.get('n_spikes', 0) > 5
+        ),
+        "message_en": (
+            "🎵 **Strong Phase Locking**: PLV={:.2f} (p={:.3f}). "
+            "Spikes preferentially occur at {:.0f}° phase of modulatory rhythm ({:.1f}-{:.1f} Hz). "
+            "Neuron acts as phase detector for rhythmic inputs."
+        ),
+        "message_ru": (
+            "🎵 **Сильная фазовая привязка**: PLV={:.2f} (p={:.3f}). "
+            "Спайки предпочтительно возникают на фазе {:.0f}° модуляторного ритма ({:.1f}-{:.1f} Гц). "
+            "Нейрон работает как фазовый детектор для ритмических входов."
+        ),
+        "severity": "info",
+        "format_args": lambda s: [
+            s.get('modulation_plv', 0),
+            s.get('modulation_p_value', 1),
+            np.degrees(s.get('modulation_preferred_phase_rad', 0)),
+            s.get('modulation_band_low_hz', 0),
+            s.get('modulation_band_high_hz', 0)
+        ]
+    },
+    {
+        "id": "low_modulation_power",
+        "condition": lambda s: (
+            s.get('modulation_valid', False) and
+            s.get('modulation_low_statistical_power', False)
+        ),
+        "message_en": (
+            "📊 **Low Statistical Power**: Simulation duration insufficient for reliable modulation analysis. "
+            "Need >{:.0f} ms for {:.1f} Hz lower cutoff. "
+            "Increase simulation time or raise modulation_low_hz."
+        ),
+        "message_ru": (
+            "📊 **Низкая статистическая мощность**: Длительность симуляции недостаточна для надёжного анализа модуляции. "
+            "Требуется >{:.0f} мс для нижней частоты {:.1f} Гц. "
+            "Увеличьте время симуляции или повысьте modulation_low_hz."
+        ),
+        "severity": "warning",
+        "format_args": lambda s: [
+            3000.0 / max(s.get('modulation_band_low_hz', 4.0), 0.01),  # 3 periods estimate
+            s.get('modulation_band_low_hz', 4.0)
+        ]
+    },
+    # ── PHASE 1 NEW RULES: Spike Pattern & Dynamics ──
     {
         "id": "strong_adaptation",
         "condition": lambda s: (
@@ -580,6 +822,20 @@ DEFAULT_EXPERT_RULES: List[ExpertRule] = [
             s.get('refractory_period_ms', 2),
             s.get('halfwidth_ms', 1)
         ]
+    },
+    {
+        "id": "spike_amplitude_degradation",
+        "condition": _spike_amplitude_degradation,
+        "message_en": (
+            "⚠️ Spike accommodation/failure detected. Na+ channels fail to recover from "
+            "inactivation. Check tau_h or Ca2+ accumulation."
+        ),
+        "message_ru": (
+            "⚠️ Обнаружена деградация амплитуды спайков (аккомодация/срыв). "
+            "Na+ каналы не успевают восстановиться из инактивации. Проверьте tau_h "
+            "или накопление Ca2+."
+        ),
+        "severity": "warning",
     },
 ]
 
